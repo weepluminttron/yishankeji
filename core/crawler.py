@@ -1,0 +1,114 @@
+# -*- coding: utf-8 -*-
+"""网页采集：抓取黄页/目录页，提取公司名与电话。"""
+import re
+import urllib.request
+from urllib.parse import urlparse
+
+from lxml import html as lh
+
+UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+)
+
+MOBILE_RE = re.compile(r"(?<!\d)1[3-9]\d{9}(?!\d)")
+LANDLINE_RE = re.compile(r"(?<!\d)0\d{2,3}-?\d{7,8}(?!\d)")
+CJK_RE = re.compile(r"[\u4e00-\u9fff]")
+
+
+def fetch_page(url, timeout=15):
+    req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept-Language": "zh-CN,zh;q=0.9"})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        raw = resp.read()
+    # 尝试按编码解码
+    for enc in ("utf-8", "gb18030", "gbk"):
+        try:
+            return raw.decode(enc), resp.geturl() or url
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("utf-8", errors="replace"), resp.geturl() or url
+
+
+def _clean_text(t):
+    if not t:
+        return ""
+    return re.sub(r"\s+", " ", t).strip()
+
+
+def _guess_name(el, doc_title):
+    """从电话所在元素附近猜公司名。"""
+    # 1) 元素自身及祖先里的强文本（短且含中文，像公司名）
+    for node in [el, el.getparent()]:
+        if node is None:
+            continue
+        text = _clean_text(node.text_content())
+        if 4 <= len(text) <= 60 and CJK_RE.search(text):
+            return text
+    # 2) 同列表/同行的链接文本
+    parent = el.getparent()
+    if parent is not None:
+        for a in parent.cssselect("a"):
+            t = _clean_text(a.text_content())
+            if 4 <= len(t) <= 60 and CJK_RE.search(t):
+                return t
+    # 3) 页面标题去掉常见后缀
+    title = doc_title or ""
+    for suffix in ("-手机版", "-企业名录", "-黄页", "-首页", "_官网", " - 百度百科"):
+        title = re.sub(re.escape(suffix) + r"\s*$", "", title)
+    if 2 <= len(title.strip()) <= 60:
+        return title.strip()
+    return ""
+
+
+def extract_candidates(html_text, source_url=""):
+    doc = lh.fromstring(html_text)
+    title = _clean_text(doc.findtext(".//title"))
+    seen = {}
+    for el in doc.iter():
+        if el.tag not in ("div", "td", "li", "tr", "p", "span", "a"):
+            continue
+        text = el.text_content()
+        phones = []
+        for pat in (MOBILE_RE, LANDLINE_RE):
+            phones += [m.group().replace("-", "") for m in pat.finditer(text)]
+        if not phones:
+            continue
+        block = _clean_text(text)
+        name = _guess_name(el, title)
+        address = ""
+        am = re.search(r"([\u4e00-\u9fff]{2,}(?:省|市|区|县|镇|乡)[\u4e00-\u9fff、·]{0,30})", block)
+        if am:
+            address = am.group(1)
+        for p in phones:
+            if p in seen:
+                continue
+            seen[p] = {
+                "name": name or f"未命名-{p[-4:]}",
+                "phone": p,
+                "address": address,
+                "source": source_url,
+                "contact": "",
+            }
+    return list(seen.values())
+
+
+def crawl(url=None, html_text=None):
+    """返回 (candidates, error)。"""
+    try:
+        if html_text and html_text.strip():
+            src = ""
+            return extract_candidates(html_text, src), None
+        if not url or not url.strip():
+            return [], "请填写要采集的网页地址"
+        if not re.match(r"^https?://", url.strip()):
+            url = "http://" + url.strip()
+        parsed = urlparse(url)
+        if not parsed.hostname:
+            return [], "网址格式不正确"
+        page_html, final_url = fetch_page(url.strip())
+        candidates = extract_candidates(page_html, final_url)
+        if not candidates:
+            return [], "页面里没有提取到电话号码。可能页面需要登录、有验证码，或电话以图片形式展示。"
+        return candidates, None
+    except Exception as e:
+        return [], f"采集失败：{e}"

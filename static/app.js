@@ -1,0 +1,974 @@
+/* 光纤获客助手 - 前端逻辑 */
+"use strict";
+
+/* ---------- 工具 ---------- */
+const $ = (sel, root) => (root || document).querySelector(sel);
+const $$ = (sel, root) => Array.from((root || document).querySelectorAll(sel));
+
+function esc(s) {
+  return String(s == null ? "" : s)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
+async function api(path, opts = {}) {
+  const init = { method: opts.method || "GET", headers: {} };
+  if (opts.body !== undefined) {
+    init.headers["Content-Type"] = "application/json";
+    init.body = JSON.stringify(opts.body);
+  }
+  const resp = await fetch(path, init);
+  let data;
+  try { data = await resp.json(); } catch (e) { data = { ok: false, msg: "响应解析失败" }; }
+  if (!resp.ok && !data.ok) throw new Error(data.msg || "请求失败");
+  return data;
+}
+
+function toast(msg, type = "") {
+  const box = document.createElement("div");
+  box.className = "toast " + type;
+  box.textContent = msg;
+  $("#toast-root").appendChild(box);
+  setTimeout(() => box.remove(), 3200);
+}
+
+function openModal(html, cls = "") {
+  $("#modal-root").innerHTML = `<div class="modal-mask" data-close="1"><div class="modal ${cls}" data-stop="1">${html}</div></div>`;
+  const mask = $(".modal-mask");
+  mask.addEventListener("click", (e) => {
+    if (e.target.closest("[data-stop]")) return;
+    closeModal();
+  });
+  return closeModal;
+}
+function closeModal() { $("#modal-root").innerHTML = ""; }
+
+function confirmBox(msg, onOk) {
+  openModal(`
+    <div class="modal-head"><h2>确认操作</h2><button class="close-x" onclick="closeModal()">×</button></div>
+    <p style="color:#44566e">${esc(msg)}</p>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeModal()">取消</button>
+      <button class="btn primary" id="ok-btn">确定</button>
+    </div>`);
+  $("#ok-btn").onclick = () => { closeModal(); onOk(); };
+}
+
+function badge(status) {
+  return `<span class="badge st-${esc(status)}">${esc(status)}</span>`;
+}
+
+function fmtDate(s) {
+  if (!s) return "—";
+  return s.slice(5, 10).replace("-", "/");
+}
+
+/* ---------- 状态 ---------- */
+const state = {
+  page: "dashboard",
+  meta: { statuses: [], types: [], tags: [] },
+  leads: {
+    page: 1, size: 15, total: 0,
+    filters: { q: "", status: "", type: "", region: "", tag: "", source: "" },
+    selected: new Set(),
+  },
+  recipients: [], // 主动触达选择的收件人
+};
+
+/* ---------- 导航 ---------- */
+function go(page) {
+  state.page = page;
+  $$(".nav-item").forEach((b) => b.classList.toggle("active", b.dataset.page === page));
+  $$(".page").forEach((p) => p.classList.toggle("active", p.id === "page-" + page));
+  const renderer = { dashboard: renderDashboard, leads: renderLeads, collect: renderCollect, outreach: renderOutreach, logs: renderLogs, settings: renderSettings }[page];
+  if (renderer) renderer();
+}
+$$(".nav-item").forEach((b) => b.addEventListener("click", () => go(b.dataset.page)));
+
+/* ---------- 工作台 ---------- */
+async function renderDashboard() {
+  const el = $("#page-dashboard");
+  el.innerHTML = `<div class="page-title">工作台</div><div class="page-sub">今天看一眼进度，客户和线索都在掌握中</div><div class="empty"><div class="ico">⏳</div>加载中…</div>`;
+  const s = await api("/api/summary");
+  const sc = s.status_counts;
+  const pipe = state.meta.statuses.map((st) => `
+    <div class="pipe-item" onclick="go('leads');setFilter('status','${esc(st)}')">
+      <div class="n">${sc[st] || 0}</div><div class="t">${esc(st)}</div>
+    </div>`).join("");
+  const due = s.due_reminders.map((r) => `
+    <div class="mini-row">
+      <div><span class="who">${esc(r.name)}</span> <span class="tag-chip">${esc(r.type)}</span></div>
+      <div class="when">${badge(r.status)}</div>
+    </div>`).join("") || `<div class="empty">今天没有到期跟进，保持领先 🎉</div>`;
+  const recent = s.recent.map((r) => `
+    <div class="mini-row clickable" onclick="openLeadDetail(${r.id})">
+      <div><span class="who">${esc(r.name)}</span><div class="when">${esc(r.phone || r.email || "无联系方式")}</div></div>
+      <div class="when">${fmtDate(r.created_at)}</div>
+    </div>`).join("") || `<div class="empty">还没有线索，去“线索采集”添加第一批客户吧</div>`;
+  const types = s.top_types.map((t) => `${esc(t.type)} ${t.count}`).join(" · ") || "—";
+  el.innerHTML = `
+    <div class="page-title">工作台</div>
+    <div class="page-sub">数据截至 ${esc(s.today)}</div>
+    <div class="stat-grid">
+      <div class="stat-card"><div class="label">全部线索</div><div class="num accent">${s.total}</div></div>
+      <div class="stat-card"><div class="label">本周新增</div><div class="num accent green">${s.new_week}</div></div>
+      <div class="stat-card"><div class="label">已成交</div><div class="num accent green">${sc["已成交"] || 0}</div></div>
+      <div class="stat-card"><div class="label">今日需跟进</div><div class="num accent orange">${s.due_reminders.length}</div></div>
+    </div>
+    <div class="card"><h3>客户阶段分布</h3><div class="pipeline">${pipe}</div></div>
+    <div class="two-col">
+      <div class="card"><h3>今日到期跟进</h3><div class="mini-list">${due}</div></div>
+      <div class="card"><h3>最新线索</h3><div class="mini-list">${recent}</div></div>
+    </div>
+    <div class="card"><h3>客户类型占比</h3><div>${types}</div>
+      <div style="margin-top:12px"><button class="btn primary" onclick="go('collect')">＋ 去添加线索</button>
+      <button class="btn" onclick="go('outreach')">📣 去触达客户</button></div>
+    </div>`;
+}
+
+function setFilter(key, value) {
+  state.leads.filters[key] = value;
+  state.leads.page = 1;
+  go("leads");
+}
+
+/* ---------- 客户线索 ---------- */
+async function renderLeads() {
+  const el = $("#page-leads");
+  const f = state.leads.filters;
+  el.innerHTML = `
+    <div class="page-title">客户线索</div>
+    <div class="page-sub">搜索、筛选、跟进你的光纤行业客户</div>
+    <div class="toolbar">
+      <input class="input grow" id="lead-q" placeholder="搜索公司 / 联系人 / 电话 / 邮箱" value="${esc(f.q)}">
+      <select class="select" id="lead-status">
+        <option value="">全部状态</option>
+        ${state.meta.statuses.map((s) => `<option ${f.status === s ? "selected" : ""}>${esc(s)}</option>`).join("")}
+      </select>
+      <select class="select" id="lead-type">
+        <option value="">全部类型</option>
+        ${state.meta.types.map((t) => `<option ${f.type === t ? "selected" : ""}>${esc(t)}</option>`).join("")}
+      </select>
+      <input class="input" id="lead-region" placeholder="地区" value="${esc(f.region)}" style="width:110px">
+      <button class="btn primary" id="btn-search">筛选</button>
+      <button class="btn" id="btn-reset">重置</button>
+    </div>
+    <div class="toolbar">
+      <button class="btn primary" id="btn-add-lead">＋ 新增线索</button>
+      <button class="btn" id="btn-import">📥 批量导入</button>
+      <button class="btn" id="btn-export-x">⬇ 导出 Excel</button>
+      <button class="btn" id="btn-export-c">⬇ 导出 CSV</button>
+      <span style="flex:1"></span>
+      <button class="btn" id="btn-mail-sel" disabled>📧 邮件触达选中</button>
+      <button class="btn" id="btn-del-sel" disabled>删除选中</button>
+    </div>
+    <div class="card"><div class="table-wrap" id="lead-table"></div><div class="pager" id="lead-pager"></div></div>`;
+
+  const qInput = $("#lead-q");
+  let timer;
+  qInput.addEventListener("input", () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => { f.q = qInput.value.trim(); f.page = 1; loadLeadList(); }, 350);
+  });
+  $("#btn-search").onclick = () => {
+    f.status = $("#lead-status").value;
+    f.type = $("#lead-type").value;
+    f.region = $("#lead-region").value.trim();
+    f.page = 1;
+    loadLeadList();
+  };
+  $("#btn-reset").onclick = () => {
+    Object.assign(f, { q: "", status: "", type: "", region: "", tag: "", source: "" });
+    state.leads.selected.clear();
+    renderLeads();
+  };
+  $("#btn-add-lead").onclick = openLeadForm;
+  $("#btn-import").onclick = () => { go("collect"); activateSubTab("collect", "import"); };
+  $("#btn-export-x").onclick = () => exportLeads("xlsx");
+  $("#btn-export-c").onclick = () => exportLeads("csv");
+  $("#btn-mail-sel").onclick = () => {
+    const ids = [...state.leads.selected];
+    state.recipients = state.recipients.filter((r) => ids.includes(r.id));
+    go("outreach");
+  };
+  $("#btn-del-sel").onclick = () => {
+    const ids = [...state.leads.selected];
+    if (!ids.length) return;
+    confirmBox(`确定删除选中的 ${ids.length} 条线索？此操作不可恢复。`, async () => {
+      for (const id of ids) await api("/api/leads/" + id, { method: "DELETE" });
+      state.leads.selected.clear();
+      toast(`已删除 ${ids.length} 条线索`, "ok");
+      loadLeadList();
+    });
+  };
+  loadLeadList();
+}
+
+async function loadLeadList() {
+  const f = state.leads.filters;
+  const params = new URLSearchParams({ page: state.leads.page, size: state.leads.size, q: f.q, status: f.status, type: f.type, region: f.region, tag: f.tag, source: f.source });
+  const data = await api("/api/leads?" + params.toString());
+  state.leads.total = data.total;
+  const sel = state.leads.selected;
+  const rows = data.items.map((r) => `
+    <tr>
+      <td><input type="checkbox" class="row-check" data-id="${r.id}" ${sel.has(r.id) ? "checked" : ""}></td>
+      <td class="name-cell clickable" onclick="openLeadDetail(${r.id})">${esc(r.name)}</td>
+      <td>${esc(r.contact || "—")}</td>
+      <td>${r.phone ? `<a href="tel:${esc(r.phone)}">${esc(r.phone)}</a>` : "—"}<div class="sub">${r.email ? `<a href="mailto:${esc(r.email)}">${esc(r.email)}</a>` : ""}</div></td>
+      <td>${esc(r.region || "—")}</td>
+      <td><span class="type-chip">${esc(r.type)}</span></td>
+      <td>${badge(r.status)}</td>
+      <td>${(r.tags || "").split(",").filter(Boolean).map((t) => `<span class="tag-chip">${esc(t)}</span>`).join("")}</td>
+      <td>${fmtDate(r.updated_at)}</td>
+      <td><div class="row-actions">
+        <button class="btn sm" onclick="openLeadDetail(${r.id})">查看</button>
+        <button class="btn sm" onclick="openLeadForm(${r.id})">编辑</button>
+        <button class="btn sm danger" onclick="deleteLead(${r.id})">删除</button>
+      </div></td>
+    </tr>`).join("");
+  $("#lead-table").innerHTML = rows
+    ? `<table><thead><tr>
+        <th style="width:30px"></th><th>公司名称</th><th>联系人</th><th>联系方式</th><th>地区</th>
+        <th>类型</th><th>状态</th><th>标签</th><th>更新时间</th><th>操作</th>
+      </tr></thead><tbody>${rows}</tbody></table>`
+    : `<div class="empty"><div class="ico">🗂️</div>没有找到线索，试试调整筛选条件，或去“线索采集”添加</div>`;
+  const totalPages = Math.max(1, Math.ceil(data.total / state.leads.size));
+  $("#lead-pager").innerHTML = `
+    <span class="info">共 ${data.total} 条 · 第 ${data.page}/${totalPages} 页</span>
+    <button class="btn sm" id="pg-prev" ${data.page <= 1 ? "disabled" : ""}>上一页</button>
+    <button class="btn sm" id="pg-next" ${data.page >= totalPages ? "disabled" : ""}>下一页</button>`;
+  $("#pg-prev").onclick = () => { state.leads.page--; loadLeadList(); };
+  $("#pg-next").onclick = () => { state.leads.page++; loadLeadList(); };
+  $$(".row-check", $("#lead-table")).forEach((c) => {
+    c.onchange = () => {
+      const id = +c.dataset.id;
+      if (c.checked) sel.add(id); else sel.delete(id);
+      $("#btn-mail-sel").disabled = sel.size === 0;
+      $("#btn-del-sel").disabled = sel.size === 0;
+    };
+  });
+}
+
+function exportLeads(fmt) {
+  const f = state.leads.filters;
+  const params = new URLSearchParams({ fmt, q: f.q, status: f.status, type: f.type, region: f.region, tag: f.tag, source: f.source });
+  window.location.href = "/api/leads/export?" + params.toString();
+}
+
+function deleteLead(id) {
+  confirmBox("确定删除这条线索？", async () => {
+    await api("/api/leads/" + id, { method: "DELETE" });
+    toast("已删除", "ok");
+    loadLeadList();
+  });
+}
+
+/* ---------- 线索表单 / 详情 ---------- */
+function leadFormHtml(lead = {}) {
+  const l = lead.id ? lead : {};
+  return `
+    <div class="modal-head"><h2>${lead.id ? "编辑线索" : "新增线索"}</h2><button class="close-x" onclick="closeModal()">×</button></div>
+    <div class="form-grid">
+      <div class="field"><label>公司名称 *</label><input class="input full" id="f-name" value="${esc(l.name || "")}"></div>
+      <div class="field"><label>联系人</label><input class="input full" id="f-contact" value="${esc(l.contact || "")}"></div>
+      <div class="field"><label>电话</label><input class="input full" id="f-phone" value="${esc(l.phone || "")}"></div>
+      <div class="field"><label>邮箱</label><input class="input full" id="f-email" value="${esc(l.email || "")}"></div>
+      <div class="field"><label>地区</label><input class="input full" id="f-region" placeholder="如：广东深圳" value="${esc(l.region || "")}"></div>
+      <div class="field"><label>客户类型</label><select class="select full" id="f-type">
+        ${state.meta.types.map((t) => `<option ${(l.type || "其他") === t ? "selected" : ""}>${esc(t)}</option>`).join("")}
+      </select></div>
+      <div class="field"><label>状态</label><select class="select full" id="f-status">
+        ${state.meta.statuses.map((s) => `<option ${(l.status || "新线索") === s ? "selected" : ""}>${esc(s)}</option>`).join("")}
+      </select></div>
+      <div class="field"><label>线索来源</label><select class="select full" id="f-source">
+        ${["手动录入", "网页采集", "Excel导入", "老客户转介绍", "展会/活动", "其他"].map((s) => `<option ${(l.source || "手动录入") === s ? "selected" : ""}>${esc(s)}</option>`).join("")}
+      </select></div>
+      <div class="field"><label>标签（逗号分隔）</label><input class="input full" id="f-tags" placeholder="光缆,FTTH" value="${esc(l.tags || "")}"></div>
+      <div class="field"><label>下次跟进日期</label><input class="input full" type="date" id="f-reminder" value="${esc(l.reminder_date || "")}"></div>
+      <div class="field" style="grid-column:1/-1"><label>公司地址</label><input class="input full" id="f-address" value="${esc(l.address || "")}"></div>
+      <div class="field" style="grid-column:1/-1"><label>备注</label><textarea class="textarea full" id="f-note">${esc(l.note || "")}</textarea></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeModal()">取消</button>
+      <button class="btn primary" id="save-lead">保存</button>
+    </div>`;
+}
+
+function openLeadForm(id) {
+  if (id) {
+    api("/api/leads/" + id).then((lead) => {
+      openModal(leadFormHtml(lead));
+      $("#save-lead").onclick = () => saveLead(id);
+    });
+  } else {
+    openModal(leadFormHtml());
+    $("#save-lead").onclick = () => saveLead();
+  }
+}
+
+async function saveLead(id) {
+  const data = {
+    name: $("#f-name").value.trim(),
+    contact: $("#f-contact").value.trim(),
+    phone: $("#f-phone").value.trim(),
+    email: $("#f-email").value.trim(),
+    region: $("#f-region").value.trim(),
+    type: $("#f-type").value,
+    status: $("#f-status").value,
+    source: $("#f-source").value,
+    tags: $("#f-tags").value.trim(),
+    address: $("#f-address").value.trim(),
+    reminder_date: $("#f-reminder").value,
+    note: $("#f-note").value.trim(),
+  };
+  if (!data.name) return toast("公司名称不能为空", "err");
+  try {
+    await api(id ? "/api/leads/" + id : "/api/leads", { method: id ? "PUT" : "POST", body: data });
+    closeModal();
+    toast("已保存", "ok");
+    loadLeadList();
+  } catch (e) { toast(e.message, "err"); }
+}
+
+async function openLeadDetail(id) {
+  const lead = await api("/api/leads/" + id);
+  const hist = await api(`/api/leads/${id}/history`);
+  const timeline = [...hist.events.map((e) => ({ ...e, isEvent: true })), ...hist.notes.map((n) => ({ ...n, isNote: true }))]
+    .sort((a, b) => b.created_at.localeCompare(a.created_at))
+    .map((x) => x.isNote
+      ? `<div class="tl-item"><div class="act">📝 备注</div><div class="dt">${esc(x.created_at)}</div><div class="det">${esc(x.content)}</div></div>`
+      : `<div class="tl-item"><div class="act">${esc(x.action)}</div><div class="dt">${esc(x.created_at)}</div><div class="det">${esc(x.detail || "")}</div></div>`)
+    .join("") || `<div class="empty">暂无记录</div>`;
+  const notesHtml = hist.notes.map((n) => `
+    <div class="mini-row"><div>${esc(n.content)}</div><div class="when">${esc(n.created_at)}</div></div>`).join("");
+  openModal(`
+    <div class="modal-head">
+      <h2>${esc(lead.name)} ${badge(lead.status)}</h2>
+      <button class="close-x" onclick="closeModal()">×</button>
+    </div>
+    <div class="detail-grid">
+      <div class="item"><div class="k">联系人</div><div class="v">${esc(lead.contact || "—")}</div></div>
+      <div class="item"><div class="k">电话</div><div class="v">${esc(lead.phone || "—")}</div></div>
+      <div class="item"><div class="k">邮箱</div><div class="v">${esc(lead.email || "—")}</div></div>
+      <div class="item"><div class="k">地区</div><div class="v">${esc(lead.region || "—")}</div></div>
+      <div class="item"><div class="k">客户类型</div><div class="v">${esc(lead.type)}</div></div>
+      <div class="item"><div class="k">线索来源</div><div class="v">${esc(lead.source)}</div></div>
+      <div class="item"><div class="k">标签</div><div class="v">${(lead.tags || "").split(",").filter(Boolean).map((t) => `<span class="tag-chip">${esc(t)}</span>`).join("") || "—"}</div></div>
+      <div class="item"><div class="k">下次跟进</div><div class="v">${esc(lead.reminder_date || "—")}</div></div>
+      <div class="item"><div class="k">最近联系</div><div class="v">${esc(lead.last_contacted || "—")}（${lead.contact_count || 0} 次）</div></div>
+      <div class="item" style="grid-column:1/-1"><div class="k">地址</div><div class="v">${esc(lead.address || "—")}</div></div>
+      <div class="item" style="grid-column:1/-1"><div class="k">备注</div><div class="v">${esc(lead.note || "—")}</div></div>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
+      <button class="btn primary sm" id="d-contact">✅ 记录联系</button>
+      <button class="btn sm" id="d-edit">编辑</button>
+      <button class="btn sm" id="d-mail">发邮件</button>
+      <button class="btn sm danger" id="d-del">删除</button>
+    </div>
+    <h3 style="margin-bottom:8px">添加跟进备注</h3>
+    <div style="display:flex;gap:8px;margin-bottom:14px">
+      <input class="input grow" id="d-note-input" placeholder="记录这次沟通的内容…">
+      <button class="btn" id="d-note-btn">添加</button>
+    </div>
+    <h3 style="margin-bottom:8px">跟进时间线</h3>
+    <div class="timeline">${timeline}</div>
+  `, "wide");
+  $("#d-contact").onclick = async () => {
+    await api("/api/leads/contacted", { method: "POST", body: { id } });
+    toast("已记录一次联系", "ok");
+    closeModal(); openLeadDetail(id);
+  };
+  $("#d-edit").onclick = () => { closeModal(); openLeadForm(id); };
+  $("#d-mail").onclick = () => {
+    if (lead.email) state.recipients = state.recipients.filter((r) => r.id !== id).concat({ id, name: lead.name, email: lead.email, phone: lead.phone });
+    closeModal(); go("outreach");
+  };
+  $("#d-del").onclick = () => { closeModal(); deleteLead(id); };
+  $("#d-note-btn").onclick = async () => {
+    const v = $("#d-note-input").value.trim();
+    if (!v) return;
+    await api(`/api/leads/${id}/notes`, { method: "POST", body: { content: v } });
+    closeModal(); openLeadDetail(id);
+  };
+}
+
+/* ---------- 线索采集 ---------- */
+function activateSubTab(group, name) {
+  $$(`.sub-tab[data-group="${group}"]`).forEach((t) => t.classList.toggle("active", t.dataset.name === name));
+  $$(`.sub-panel[data-group="${group}"]`).forEach((p) => p.style.display = p.dataset.name === name ? "" : "none");
+}
+
+async function renderCollect() {
+  const el = $("#page-collect");
+  el.innerHTML = `
+    <div class="page-title">线索采集</div>
+    <div class="page-sub">三种方式把客户信息装进你的线索库：Excel 导入、网页采集、手动录入</div>
+    <div class="sub-tabs">
+      <button class="sub-tab active" data-group="collect" data-name="import">📥 批量导入</button>
+      <button class="sub-tab" data-group="collect" data-name="crawl">🕸️ 网页采集</button>
+      <button class="sub-tab" data-group="collect" data-name="manual">✍️ 手动录入</button>
+    </div>
+    <div class="sub-panel" data-group="collect" data-name="import">
+      <div class="card">
+        <h3>从 Excel / CSV 批量导入</h3>
+        <div class="drop-zone" id="drop-zone">
+          <div class="big">点击选择文件，或拖拽到这里</div>
+          <div>支持 .xlsx / .csv，自动识别公司名称、联系人、电话等列</div>
+          <div style="margin-top:10px"><a href="/api/leads/template" class="btn primary">⬇ 下载导入模板</a></div>
+        </div>
+        <input type="file" id="file-input" accept=".xlsx,.csv" style="display:none">
+        <div class="field" style="margin-top:14px"><label>提示</label>
+          <div class="hint">表头请使用：公司名称、联系人、电话、邮箱、地区、客户类型、状态、来源、标签、备注、地址。导入时会自动按“电话/公司名”去重，重复的不再入库。</div>
+        </div>
+      </div>
+      <div class="card" id="import-result"></div>
+    </div>
+    <div class="sub-panel" data-group="collect" data-name="crawl" style="display:none">
+      <div class="card">
+        <h3>网页采集客户信息</h3>
+        <div class="field"><label>网页地址</label>
+          <input class="input full" id="crawl-url" placeholder="粘贴企业黄页 / 行业目录 / 公司列表页的网址，例如 https://example.com/company-list">
+        </div>
+        <div class="field"><label>或者直接粘贴网页源代码（高级用法）</label>
+          <textarea class="textarea full" id="crawl-html" placeholder="如果网页无法直接打开，可复制页面源码粘贴到这里"></textarea>
+        </div>
+        <button class="btn primary" id="crawl-btn">🕸️ 开始采集</button>
+        <div class="hint" style="margin-top:8px">采集器会从页面里提取电话号码，并自动匹配附近的公司名称。部分网站有验证码、登录墙或反爬措施，采集不到时请换一个页面，或改用 Excel 导入。</div>
+      </div>
+      <div class="card" id="crawl-result"><div class="empty"><div class="ico">🕸️</div>还没有采集结果</div></div>
+    </div>
+    <div class="sub-panel" data-group="collect" data-name="manual" style="display:none">
+      <div class="card"><div id="manual-form"></div></div>
+    </div>`;
+  $$(".sub-tab", el).forEach((t) => t.onclick = () => activateSubTab("collect", t.dataset.name));
+
+  // 手动录入
+  $("#manual-form").innerHTML = leadFormHtml();
+  $("#save-lead").onclick = async () => {
+    await saveLead();
+    renderCollect();
+  };
+
+  // 文件导入
+  const dz = $("#drop-zone");
+  const fileInput = $("#file-input");
+  dz.onclick = () => fileInput.click();
+  dz.ondragover = (e) => { e.preventDefault(); dz.classList.add("over"); };
+  dz.ondragleave = () => dz.classList.remove("over");
+  dz.ondrop = (e) => { e.preventDefault(); dz.classList.remove("over"); if (e.dataTransfer.files[0]) uploadFile(e.dataTransfer.files[0]); };
+  fileInput.onchange = () => { if (fileInput.files[0]) uploadFile(fileInput.files[0]); };
+
+  // 网页采集
+  $("#crawl-btn").onclick = async () => {
+    const btn = $("#crawl-btn");
+    btn.disabled = true; btn.textContent = "采集中…";
+    try {
+      const data = await api("/api/crawl", { method: "POST", body: { url: $("#crawl-url").value.trim(), html: $("#crawl-html").value.trim() } });
+      if (!data.ok) {
+        $("#crawl-result").innerHTML = `<div class="empty"><div class="ico">⚠️</div>${esc(data.error || "采集失败")}</div>`;
+        return;
+      }
+      state.candidates = data.candidates || [];
+      renderCandidates();
+    } catch (e) {
+      $("#crawl-result").innerHTML = `<div class="empty"><div class="ico">⚠️</div>${esc(e.message)}</div>`;
+    } finally {
+      btn.disabled = false; btn.textContent = "🕸️ 开始采集";
+    }
+  };
+}
+
+function renderCandidates() {
+  const list = state.candidates || [];
+  const box = $("#crawl-result");
+  if (!list.length) return;
+  box.innerHTML = `
+    <h3>采集到 ${list.length} 条线索</h3>
+    <div style="margin:10px 0;display:flex;gap:8px;align-items:center">
+      <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="cand-all"> 全选</label>
+      <button class="btn primary sm" id="cand-add">＋ 添加选中（自动去重）</button>
+      <span class="hint" id="cand-hint"></span>
+    </div>
+    <div class="table-wrap"><table>
+      <thead><tr><th style="width:30px"></th><th>公司名称</th><th>电话</th><th>地址</th><th>来源</th></tr></thead>
+      <tbody>${list.map((c, i) => `
+        <tr>
+          <td><input type="checkbox" class="cand-check" data-i="${i}" checked></td>
+          <td><input class="input" data-i="${i}" data-k="name" value="${esc(c.name)}" style="width:100%"></td>
+          <td><input class="input" data-i="${i}" data-k="phone" value="${esc(c.phone)}" style="width:130px"></td>
+          <td><input class="input" data-i="${i}" data-k="address" value="${esc(c.address || "")}" style="width:100%"></td>
+          <td class="sub">网页采集</td>
+        </tr>`).join("")}
+      </tbody></table></div>`;
+  $("#cand-all").onchange = (e) => $$(".cand-check").forEach((c) => c.checked = e.target.checked);
+  $$(".cand-check").forEach((c) => c.onchange = updateCandHint);
+  $$(".cand-input").forEach(() => {});
+  $$("input[data-k]", box).forEach((inp) => inp.onchange = () => {
+    list[+inp.dataset.i][inp.dataset.k] = inp.value.trim();
+  });
+  updateCandHint();
+  $("#cand-add").onclick = async () => {
+    const picks = list.filter((_, i) => $$(".cand-check")[i] && $$(".cand-check")[i].checked);
+    if (!picks.length) return toast("请先勾选要添加的线索", "err");
+    const res = await api("/api/leads/bulk", { method: "POST", body: { leads: picks, source: "网页采集" } });
+    const kept = picks.filter((p) => !res.duplicates.some((d) => d.name === p.name));
+    state.candidates = state.candidates.filter((c) => !kept.includes(c));
+    toast(`已添加 ${res.added.length} 条，跳过重复 ${res.duplicates.length} 条`, "ok");
+    if (state.candidates.length) renderCandidates();
+    else $("#crawl-result").innerHTML = `<div class="empty"><div class="ico">✅</div>全部处理完成，去“客户线索”查看吧</div>`;
+  };
+}
+
+function updateCandHint() {
+  const n = $$(".cand-check").filter((c) => c.checked).length;
+  $("#cand-hint").textContent = `已选 ${n} 条`;
+}
+
+function uploadFile(file) {
+  const fd = new FormData();
+  fd.append("file", file);
+  $("#import-result").innerHTML = `<div class="empty"><div class="ico">⏳</div>正在导入 ${esc(file.name)}…</div>`;
+  fetch("/api/import", { method: "POST", body: fd })
+    .then((r) => r.json())
+    .then((d) => {
+      if (!d.ok) throw new Error(d.msg);
+      const dupRows = d.duplicates.map((x) => `<li>第 ${x.row} 行：${esc(x.name)}（${esc(x.msg)}）</li>`).join("");
+      const errRows = d.errors.map((x) => `<li>第 ${x.row} 行：${esc(x.name || "")} ${esc(x.msg)}</li>`).join("");
+      $("#import-result").innerHTML = `
+        <h3>导入结果</h3>
+        <p style="margin-top:8px">共读取 <b>${d.total}</b> 行，成功添加 <b style="color:var(--green)">${d.added.length}</b> 条，重复跳过 <b>${d.duplicates.length}</b> 条，出错 <b style="color:var(--red)">${d.errors.length}</b> 条。</p>
+        ${dupRows ? `<div style="margin-top:8px"><b>重复明细：</b><ul style="margin:6px 0 0 18px;color:var(--muted)">${dupRows}</ul></div>` : ""}
+        ${errRows ? `<div style="margin-top:8px"><b>错误明细：</b><ul style="margin:6px 0 0 18px;color:var(--red)">${errRows}</ul></div>` : ""}
+        <div style="margin-top:12px"><button class="btn" onclick="go('leads')">去客户线索查看</button></div>`;
+    })
+    .catch((e) => { $("#import-result").innerHTML = `<div class="empty"><div class="ico">⚠️</div>${esc(e.message)}</div>`; });
+}
+
+/* ---------- 主动触达 ---------- */
+const EMAIL_TPLS = [
+  {
+    name: "光缆产品供应",
+    desc: "向工程商/集成商推广光缆产品",
+    subject: "关于{{产品}}的合作咨询",
+    body: "{{联系人}}您好：\n\n我是{{我方公司}}的{{自己}}，我们专业供应{{产品}}，长期服务运营商、工程商和集成商客户，质量稳定、价格有竞争力，可提供样品、检测报告和批量供货支持。\n\n贵公司在{{地区}}的业务近期如有相关采购或配套需求，欢迎随时联系，我可以尽快发送详细资料和报价。\n\n期待与贵公司合作！\n{{我方公司}} {{自己}}",
+  },
+  {
+    name: "熔接 / 施工服务",
+    desc: "向有施工需求的项目方推广服务",
+    subject: "光纤熔接与施工服务合作",
+    body: "{{联系人}}您好：\n\n我是{{我方公司}}的{{自己}}，我们提供光纤熔接、线路铺设、机房改造等专业施工服务，团队经验丰富，工期有保障，价格透明，已完成多个FTTH和弱电项目。\n\n如贵公司近期在{{地区}}有相关项目或分包需求，欢迎随时联系，我可以先发送服务方案和案例供参考。\n\n祝项目顺利！\n{{我方公司}} {{自己}}",
+  },
+  {
+    name: "FTTH / 机房改造",
+    desc: "面向运营商与集成商的成套方案",
+    subject: "FTTH / 机房改造配套方案",
+    body: "{{联系人}}您好：\n\n我是{{我方公司}}的{{自己}}，我们专注{{产品}}及FTTH、机房改造成套配套，可提供从设备选型、方案设计到现场支持的一站式服务，帮助项目降本增效。\n\n如果贵公司正在推进相关项目，欢迎随时联系，我可以根据项目情况提供定制方案和报价。\n\n期待交流！\n{{我方公司}} {{自己}}",
+  },
+  {
+    name: "弱电工程配套",
+    desc: "面向弱电工程商的全线配套",
+    subject: "弱电工程光纤配套合作",
+    body: "{{联系人}}您好：\n\n我是{{我方公司}}的{{自己}}，我们为弱电工程商提供光纤光缆、收发器、熔接设备及配件的一站式配套，库存充足、发货快，支持月结和长期合作。\n\n贵公司如果方便，我可以发送一份常备型号和价格表，后续项目询价也欢迎直接找我。\n\n祝生意兴隆！\n{{我方公司}} {{自己}}",
+  },
+  {
+    name: "通用开发信",
+    desc: "简洁通用的第一封开发信",
+    subject: "您好，{{我方公司}}向您问好",
+    body: "{{联系人}}您好：\n\n我是{{我方公司}}的{{自己}}，我们主营{{产品}}。了解到贵公司从事{{地区}}相关业务，想看看有没有合作机会。\n\n如果方便，可以加个微信或留个电话，我发一份资料给您，不耽误您时间。\n\n祝好！\n{{我方公司}} {{自己}}",
+  },
+];
+
+const SMS_TPLS = [
+  { name: "光缆推广短信", body: "【{{我方公司}}】{{联系人}}您好，我司长期供应光纤光缆及配套，价格优惠、现货充足，可提供样品。方便时回电或加微信详聊。电话：13800000000" },
+  { name: "施工服务短信", body: "【{{我方公司}}】{{联系人}}您好，我司提供光纤熔接、机房改造施工服务，团队专业、价格透明，欢迎洽谈合作。电话：13800000000" },
+  { name: "展会跟进短信", body: "【{{我方公司}}】{{联系人}}您好，上次展会咱们聊过{{产品}}合作，现有一批优惠价格政策，欢迎来电了解。电话：13800000000" },
+];
+
+async function renderOutreach() {
+  const el = $("#page-outreach");
+  el.innerHTML = `
+    <div class="page-title">主动触达</div>
+    <div class="page-sub">写文案、群发邮件、整理短信名单，三步触达客户</div>
+    <div class="sub-tabs">
+      <button class="sub-tab active" data-group="outreach" data-name="email">📧 邮件群发</button>
+      <button class="sub-tab" data-group="outreach" data-name="copy">✍️ 文案生成</button>
+      <button class="sub-tab" data-group="outreach" data-name="sms">📱 短信</button>
+    </div>
+    <div class="sub-panel" data-group="outreach" data-name="email">
+      <div class="card">
+        <h3>收件人（${state.recipients.length} 人）</h3>
+        <div style="display:flex;gap:8px;margin-bottom:10px">
+          <button class="btn" id="pick-recipients">👥 选择收件人</button>
+          <button class="btn" id="clear-recipients">清空</button>
+          <button class="btn" id="use-filter">使用“客户线索”当前筛选</button>
+        </div>
+        <div id="recipient-list"></div>
+      </div>
+      <div class="editor-row">
+        <div class="editor-main">
+          <div class="card">
+            <h3>邮件内容</h3>
+            <div class="field"><label>主题</label><input class="input full" id="mail-subject" value="关于{{产品}}的合作咨询"></div>
+            <div class="field"><label>正文</label><textarea class="textarea full" id="mail-body" style="min-height:240px"></textarea></div>
+            <div class="placeholder-hint">可用占位符：<code>{{公司}}</code> <code>{{联系人}}</code> <code>{{称呼}}</code> <code>{{地区}}</code> <code>{{产品}}</code> <code>{{我方公司}}</code> <code>{{自己}}</code></div>
+          </div>
+        </div>
+        <div class="editor-side">
+          <div class="card">
+            <h3>行业模板</h3>
+            <div id="mail-tpls">${EMAIL_TPLS.map((t, i) => `
+              <div class="tpl-item" data-i="${i}"><div class="t">${esc(t.name)}</div><div class="d">${esc(t.desc)}</div></div>`).join("")}
+            </div>
+            <button class="btn sm" id="btn-preview">👁 预览第一封</button>
+            <button class="btn primary" id="btn-send-mail" style="margin-top:8px">🚀 发送给选中客户</button>
+          </div>
+        </div>
+      </div>
+      <div class="card" id="mail-result"></div>
+    </div>
+    <div class="sub-panel" data-group="outreach" data-name="copy" style="display:none">
+      <div class="card">
+        <h3>营销文案生成</h3>
+        <div class="form-grid">
+          <div class="field"><label>文案场景</label><select class="select full" id="ai-scene">
+            <option>开发信（邮件）</option><option>短信</option><option>微信/朋友圈</option><option>报价跟进</option>
+          </select></div>
+          <div class="field"><label>目标客户</label><select class="select full" id="ai-audience">
+            <option>运营商</option><option>工程商</option><option>集成商</option><option>分销商</option><option>代工厂</option><option>终端客户</option>
+          </select></div>
+          <div class="field"><label>主营产品</label><input class="input full" id="ai-product" value="光纤光缆及配套产品"></div>
+          <div class="field"><label>语气风格</label><select class="select full" id="ai-tone">
+            <option>正式专业</option><option>亲切友好</option><option>简洁直接</option><option>突出优惠</option>
+          </select></div>
+        </div>
+        <div class="toolbar" style="margin-top:4px">
+          <button class="btn primary" id="ai-gen">✨ AI 生成</button>
+          <button class="btn" id="ai-to-mail">📥 填入邮件编辑器</button>
+          <button class="btn" id="ai-copy">📋 复制结果</button>
+        </div>
+        <div class="hint" id="ai-hint">AI 生成需要先在“设置”里配置 OpenAI API Key；未配置时可先用下方行业模板。</div>
+        <div class="field" style="margin-top:10px"><label>生成结果</label><div class="result-box" id="ai-result">（点击“AI 生成”后显示）</div></div>
+      </div>
+    </div>
+    <div class="sub-panel" data-group="outreach" data-name="sms" style="display:none">
+      <div class="card">
+        <h3>短信触达</h3>
+        <div class="field"><label>短信内容（模板选择或自行填写）</label>
+          <div id="sms-tpls" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+            ${SMS_TPLS.map((t, i) => `<button class="btn sm tpl-item" data-i="${i}" style="border-radius:8px">${esc(t.name)}</button>`).join("")}
+          </div>
+          <textarea class="textarea full" id="sms-body"></textarea>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn" id="sms-pick">👥 选择收件人（当前 ${state.recipients.length} 人）</button>
+          <button class="btn" id="sms-copy-num">📋 复制号码列表</button>
+          <button class="btn" id="sms-copy-body">📋 复制短信内容</button>
+          <button class="btn" id="sms-export">⬇ 导出号码文本</button>
+        </div>
+        <div class="hint" style="margin-top:10px">发送短信需要运营商短信网关（如阿里云短信）。当前版本先把“号码+短信内容”整理好：复制到手机短信 App 或导入第三方群发平台即可。在“设置”里可以填写你的短信服务商备注。</div>
+      </div>
+    </div>`;
+  $$(".sub-tab", el).forEach((t) => t.onclick = () => activateSubTab("outreach", t.dataset.name));
+  renderRecipients();
+
+  $("#pick-recipients").onclick = openRecipientPicker;
+  $("#sms-pick").onclick = openRecipientPicker;
+  $("#clear-recipients").onclick = () => { state.recipients = []; renderRecipients(); };
+  $("#use-filter").onclick = async () => {
+    const f = state.leads.filters;
+    const params = new URLSearchParams({ q: f.q, status: f.status, type: f.type, region: f.region, tag: f.tag, source: f.source });
+    const data = await api("/api/leads?" + params.toString() + "&size=200");
+    state.recipients = data.items.filter((r) => r.email).map((r) => ({ id: r.id, name: r.name, email: r.email, phone: r.phone }));
+    renderRecipients();
+    toast(`已加入 ${state.recipients.length} 个有邮箱的客户`, "ok");
+  };
+
+  const bodyBox = $("#mail-body");
+  const tplItems = $$("#mail-tpls .tpl-item");
+  tplItems.forEach((item) => item.onclick = () => {
+    tplItems.forEach((x) => x.classList.remove("sel"));
+    item.classList.add("sel");
+    const t = EMAIL_TPLS[+item.dataset.i];
+    $("#mail-subject").value = t.subject;
+    bodyBox.value = t.body;
+  });
+  tplItems[0].click();
+
+  $("#btn-preview").onclick = async () => {
+    const lead = state.recipients[0] || (await api("/api/leads?size=1")).items[0];
+    if (!lead) return toast("没有可预览的收件人", "err");
+    const settings = (await api("/api/settings")).settings;
+    const subj = personalize($("#mail-subject").value, lead, settings);
+    const body = personalize(bodyBox.value, lead, settings);
+    openModal(`<div class="modal-head"><h2>邮件预览（给 ${esc(lead.name)}）</h2><button class="close-x" onclick="closeModal()">×</button></div>
+      <div class="field"><label>主题</label><div class="result-box">${esc(subj)}</div></div>
+      <div class="field"><label>正文</label><div class="result-box">${esc(body)}</div></div>
+      <div class="modal-foot"><button class="btn primary" onclick="closeModal()">好的</button></div>`, "wide");
+  };
+
+  $("#btn-send-mail").onclick = async () => {
+    const picks = state.recipients.filter((r) => r.email);
+    if (!picks.length) return toast("请先选择有邮箱的收件人", "err");
+    if (!bodyBox.value.trim()) return toast("请填写邮件正文", "err");
+    confirmBox(`确定向 ${picks.length} 位客户发送邮件？发送后不可撤回。`, async () => {
+      const btn = $("#btn-send-mail");
+      btn.disabled = true; btn.textContent = "发送中…";
+      try {
+        const res = await api("/api/mail", { method: "POST", body: { lead_ids: picks.map((p) => p.id), subject: $("#mail-subject").value, body: bodyBox.value } });
+        const errs = res.errors.map((e) => `<li>${esc(e.name)}：${esc(e.msg)}</li>`).join("");
+        $("#mail-result").innerHTML = `<h3>发送结果</h3><p style="margin-top:8px">成功 <b style="color:var(--green)">${res.sent}</b> 封，失败 <b style="color:var(--red)">${res.failed}</b> 封。</p>${errs ? `<ul style="margin:8px 0 0 18px;color:var(--red)">${errs}</ul>` : ""}`;
+        toast(`已发送 ${res.sent} 封`, res.sent ? "ok" : "err");
+      } catch (e) { toast(e.message, "err"); }
+      finally { btn.disabled = false; btn.textContent = "🚀 发送给选中客户"; }
+    });
+  };
+
+  // AI 文案
+  $("#ai-gen").onclick = async () => {
+    const btn = $("#ai-gen");
+    btn.disabled = true;
+    try {
+      const scene = $("#ai-scene").value, audience = $("#ai-audience").value,
+        product = $("#ai-product").value, tone = $("#ai-tone").value;
+      const res = await api("/api/ai", { method: "POST", body: {
+        system: "你是一名资深的光纤通信行业销售顾问，擅长写简洁、得体、有转化力的中文营销文案。",
+        user: `场景：${scene}\n主营产品：${product}\n目标客户：${audience}\n语气：${tone}\n\n请生成一份可直接使用的文案。如果是邮件/开发信，请包含“主题：”和正文两部分；如果是短信，控制在70字以内；如果是朋友圈，控制在150字以内。用“{{公司}}”“{{联系人}}”“{{称呼}}”“{{地区}}”“{{产品}}”“{{我方公司}}”“{{自己}}”作为占位符，不要虚构具体电话。`,
+      }});
+      state.aiText = res.text;
+      $("#ai-result").textContent = res.text;
+      toast("生成完成", "ok");
+    } catch (e) { toast(e.message, "err"); }
+    finally { btn.disabled = false; }
+  };
+  $("#ai-to-mail").onclick = () => {
+    if (!state.aiText) return toast("先生成文案", "err");
+    const m = state.aiText.match(/主题[：:]\s*(.+)/);
+    if (m) $("#mail-subject").value = m[1].trim();
+    bodyBox.value = state.aiText.replace(/^主题[：:].*\n?/, "");
+    activateSubTab("outreach", "email");
+  };
+  $("#ai-copy").onclick = () => {
+    if (!state.aiText) return toast("先生成文案", "err");
+    copyText(state.aiText);
+  };
+
+  // 短信
+  $$("#sms-tpls .tpl-item").forEach((b) => b.onclick = () => { $("#sms-body").value = SMS_TPLS[+b.dataset.i].body; });
+  $("#sms-copy-num").onclick = () => {
+    const nums = state.recipients.map((r) => r.phone).filter(Boolean);
+    if (!nums.length) return toast("收件人里没有电话号码", "err");
+    copyText(nums.join("\n"));
+  };
+  $("#sms-copy-body").onclick = () => {
+    if (!$("#sms-body").value.trim()) return toast("请先填写短信内容", "err");
+    copyText($("#sms-body").value);
+  };
+  $("#sms-export").onclick = () => {
+    const nums = state.recipients.map((r) => (r.name ? r.name + "\t" : "") + (r.phone || "")).filter((x) => x);
+    if (!nums.length) return toast("收件人里没有电话号码", "err");
+    downloadText(nums.join("\n"), "短信名单.txt");
+  };
+}
+
+function personalize(tpl, lead, settings) {
+  const vals = {
+    "公司": lead.name || "", "公司名": lead.name || "",
+    "联系人": lead.contact || "客户", "称呼": (lead.contact || "").split(/先生|女士/)[0] || "客户",
+    "地区": lead.region || "", "产品": settings.product_name || "光纤产品",
+    "自己": settings.sender_name || settings.company_name || "", "我方公司": settings.company_name || "",
+  };
+  return Object.entries(vals).reduce((s, [k, v]) => s.split("{{" + k + "}}").join(v), tpl);
+}
+
+function renderRecipients() {
+  const box = $("#recipient-list");
+  if (!box) return;
+  box.innerHTML = state.recipients.length
+    ? `<div class="chk-list">${state.recipients.map((r) => `
+        <div class="chk-row">
+          <span style="flex:1"><b>${esc(r.name)}</b> <span class="em">${esc(r.email || "无邮箱")}</span></span>
+          <button class="btn sm danger" data-rid="${r.id}">移除</button>
+        </div>`).join("")}</div>`
+    : `<div class="empty"><div class="ico">👥</div>还没有收件人，点击“选择收件人”或“使用客户线索当前筛选”</div>`;
+  $$("#recipient-list [data-rid]").forEach((b) => b.onclick = () => {
+    state.recipients = state.recipients.filter((r) => r.id !== +b.dataset.rid);
+    renderRecipients();
+  });
+}
+
+async function openRecipientPicker() {
+  let rows = [];
+  let keyword = "";
+  const render = async () => {
+    const params = new URLSearchParams({ size: "100", q: keyword });
+    const data = await api("/api/leads?" + params.toString());
+    rows = data.items;
+    $("#picker-list").innerHTML = rows.length
+      ? `<div class="chk-list">${rows.map((r) => `
+          <div class="chk-row">
+            <label><input type="checkbox" class="pick-check" data-id="${r.id}" data-name="${esc(r.name)}" data-email="${esc(r.email || "")}" data-phone="${esc(r.phone || "")}">
+              <span><b>${esc(r.name)}</b> <span class="em">${esc(r.email || "无邮箱")} · ${esc(r.phone || "无电话")}</span></span>
+            </label>
+          </div>`).join("")}</div>`
+      : `<div class="empty">没有更多线索了</div>`;
+    $$(".pick-check", $("#picker-list")).forEach((c) => {
+      const hit = state.recipients.some((r) => r.id === +c.dataset.id);
+      c.checked = hit;
+    });
+  };
+  openModal(`
+    <div class="modal-head"><h2>选择收件人</h2><button class="close-x" onclick="closeModal()">×</button></div>
+    <div class="toolbar"><input class="input grow" id="pick-q" placeholder="搜索公司 / 联系人 / 电话"><span class="hint" id="pick-count"></span></div>
+    <div id="picker-list"><div class="empty">加载中…</div></div>
+    <div class="modal-foot">
+      <button class="btn" id="pick-all">全选当前页</button>
+      <button class="btn primary" id="pick-ok">确定</button>
+    </div>`, "wide");
+  await render();
+  let timer;
+  $("#pick-q").oninput = () => {
+    clearTimeout(timer);
+    timer = setTimeout(async () => { keyword = $("#pick-q").value.trim(); await render(); }, 300);
+  };
+  $("#pick-all").onclick = () => $$(".pick-check").forEach((c) => c.checked = true);
+  $("#pick-ok").onclick = () => {
+    const picked = $$(".pick-check").filter((c) => c.checked).map((c) => ({
+      id: +c.dataset.id, name: c.dataset.name, email: c.dataset.email, phone: c.dataset.phone,
+    }));
+    state.recipients = state.recipients.filter((r) => !picked.some((p) => p.id === r.id)).concat(picked);
+    closeModal();
+    renderRecipients();
+    toast(`已选择 ${picked.length} 位收件人`, "ok");
+  };
+}
+
+function copyText(text) {
+  navigator.clipboard.writeText(text).then(() => toast("已复制到剪贴板", "ok")).catch(() => toast("复制失败，请手动复制", "err"));
+}
+function downloadText(text, name) {
+  const blob = new Blob(["\ufeff" + text], { type: "text/plain;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+/* ---------- 发送记录 ---------- */
+async function renderLogs() {
+  const el = $("#page-logs");
+  const d = await api("/api/mail");
+  const rows = d.logs.map((l) => `
+    <tr>
+      <td>${esc(l.sent_at)}</td>
+      <td>${esc(l.name)}</td>
+      <td>${esc(l.email)}</td>
+      <td>${esc(l.subject)}</td>
+      <td>${l.status === "成功" ? badge("已成交").replace("已成交", "成功") : `<span style="color:var(--red);font-weight:600">失败</span>`}</td>
+      <td class="sub">${esc(l.error || "")}</td>
+    </tr>`).join("");
+  el.innerHTML = `
+    <div class="page-title">发送记录</div>
+    <div class="page-sub">最近发送的邮件与结果</div>
+    <div class="card"><div class="toolbar"><button class="btn" id="log-refresh">🔄 刷新</button></div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>时间</th><th>公司</th><th>邮箱</th><th>主题</th><th>状态</th><th>说明</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="6"><div class="empty">还没有发送记录</div></td></tr>`}</tbody>
+      </table></div>
+    </div>`;
+  $("#log-refresh").onclick = renderLogs;
+}
+
+/* ---------- 设置 ---------- */
+async function renderSettings() {
+  const el = $("#page-settings");
+  const d = await api("/api/settings");
+  const s = d.settings;
+  el.innerHTML = `
+    <div class="page-title">设置</div>
+    <div class="page-sub">公司信息、发信邮箱和 AI 密钥都配置在这里</div>
+    <div class="card">
+      <h3>🏢 公司信息</h3>
+      <div class="form-grid">
+        <div class="field"><label>公司名称</label><input class="input full" id="s-company" value="${esc(s.company_name)}"></div>
+        <div class="field"><label>主营产品</label><input class="input full" id="s-product" value="${esc(s.product_name)}"></div>
+        <div class="field"><label>发件人姓名（显示名）</label><input class="input full" id="s-sender" placeholder="如：张三（销售经理）" value="${esc(s.sender_name)}"></div>
+      </div>
+    </div>
+    <div class="card">
+      <h3>📧 发信邮箱（SMTP）</h3>
+      <div class="form-grid">
+        <div class="field"><label>SMTP 服务器</label><input class="input full" id="s-host" placeholder="如 smtp.qq.com / smtp.163.com" value="${esc(s.smtp_host)}"></div>
+        <div class="field"><label>端口 / 加密方式</label><select class="select full" id="s-port">
+          <option value="465:1" ${s.smtp_ssl === "1" ? "selected" : ""}>465（SSL）</option>
+          <option value="587:0" ${s.smtp_ssl === "0" ? "selected" : ""}>587（STARTTLS）</option>
+        </select></div>
+        <div class="field"><label>发信邮箱</label><input class="input full" id="s-user" placeholder="your@example.com" value="${esc(s.smtp_user)}"></div>
+        <div class="field"><label>邮箱授权码 / 密码</label><input class="input full" type="password" id="s-pass" placeholder="授权码，不是登录密码" value="${esc(s.smtp_password)}"></div>
+      </div>
+      <div class="hint">使用 QQ/163/企业邮等，需要在邮箱设置里开启 SMTP 并生成“授权码”。测试前请先保存。</div>
+    </div>
+    <div class="card">
+      <h3>✨ AI 文案（可选）</h3>
+      <div class="form-grid">
+        <div class="field"><label>OpenAI API Key</label><input class="input full" type="password" id="s-key" placeholder="sk-..." value="${esc(s.openai_api_key)}"></div>
+        <div class="field"><label>模型</label><input class="input full" id="s-model" value="${esc(s.openai_model)}"></div>
+      </div>
+      <div class="hint">不填也能正常使用工具，只是“AI 生成文案”不可用，可以改用内置行业模板。</div>
+    </div>
+    <div class="card">
+      <h3>📱 短信服务商备注</h3>
+      <div class="field"><input class="input full" id="s-sms" placeholder="如：阿里云短信，群发平台：xxx" value="${esc(s.sms_notice)}"></div>
+    </div>
+    <div style="display:flex;gap:10px">
+      <button class="btn primary" id="save-settings">💾 保存设置</button>
+      <button class="btn" id="test-smtp">🧪 发送测试邮件</button>
+    </div>`;
+  $("#save-settings").onclick = async () => {
+    const [port, ssl] = $("#s-port").value.split(":");
+    try {
+      await api("/api/settings", { method: "POST", body: { settings: {
+        company_name: $("#s-company").value.trim(),
+        product_name: $("#s-product").value.trim(),
+        sender_name: $("#s-sender").value.trim(),
+        smtp_host: $("#s-host").value.trim(),
+        smtp_port: port,
+        smtp_ssl: ssl,
+        smtp_user: $("#s-user").value.trim(),
+        smtp_password: $("#s-pass").value,
+        openai_api_key: $("#s-key").value.trim(),
+        openai_model: $("#s-model").value.trim() || "gpt-4o-mini",
+        sms_notice: $("#s-sms").value.trim(),
+      } } });
+      toast("设置已保存", "ok");
+    } catch (e) { toast(e.message, "err"); }
+  };
+  $("#test-smtp").onclick = async () => {
+    const btn = $("#test-smtp");
+    btn.disabled = true;
+    try {
+      const [port, ssl] = $("#s-port").value.split(":");
+      await api("/api/settings", { method: "POST", body: { settings: {
+        company_name: $("#s-company").value.trim(), product_name: $("#s-product").value.trim(),
+        sender_name: $("#s-sender").value.trim(), smtp_host: $("#s-host").value.trim(),
+        smtp_port: port, smtp_ssl: ssl, smtp_user: $("#s-user").value.trim(),
+        smtp_password: $("#s-pass").value, openai_api_key: $("#s-key").value.trim(),
+        openai_model: $("#s-model").value.trim() || "gpt-4o-mini", sms_notice: $("#s-sms").value.trim(),
+      } } });
+      await api("/api/mail/test", { method: "POST", body: {} });
+      toast("测试邮件发送成功，请检查收件箱", "ok");
+    } catch (e) { toast(e.message, "err"); }
+    finally { btn.disabled = false; }
+  };
+}
+
+/* ---------- 启动 ---------- */
+(async function init() {
+  try {
+    state.meta = await api("/api/meta");
+  } catch (e) {
+    toast("无法连接本地服务：" + e.message, "err");
+  }
+  go("dashboard");
+})();

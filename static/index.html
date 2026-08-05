@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>光纤行业获客助手</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">🛰️ 光纤获客助手<small>本地线索管理 · 采集 · 触达</small></div>
+      <nav>
+        <button class="nav-item active" data-page="dashboard">📊 工作台</button>
+        <button class="nav-item" data-page="leads">📇 客户线索</button>
+        <button class="nav-item" data-page="collect">🔍 线索采集</button>
+        <button class="nav-item" data-page="outreach">📣 主动触达</button>
+        <button class="nav-item" data-page="logs">✉️ 发送记录</button>
+        <button class="nav-item" data-page="settings">⚙️ 设置</button>
+      </nav>
+      <div class="sidebar-footer">数据保存在本机<br>无需联网也能使用</div>
+    </aside>
+    <main class="main">
+      <div id="page-dashboard" class="page"></div>
+      <div id="page-leads" class="page"></div>
+      <div id="page-collect" class="page"></div>
+      <div id="page-outreach" class="page"></div>
+      <div id="page-logs" class="page"></div>
+      <div id="page-settings" class="page"></div>
+    </main>
+  </div>
+  <div id="modal-root"></div>
+  <div id="toast-root"></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

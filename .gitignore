@@ -1,0 +1,14 @@
+# 本地数据（线索库、设置）
+data/
+
+# Python 缓存
+__pycache__/
+*.pyc
+
+# 测试/日志文件
+server_test*.log
+*.log
+
+# 系统文件
+.DS_Store
+Thumbs.db
