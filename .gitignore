@@ -1,5 +1,6 @@
 # 本地数据（线索库、设置）
 data/
+server.env
 
 # Python 缓存
 __pycache__/

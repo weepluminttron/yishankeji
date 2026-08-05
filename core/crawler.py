@@ -37,21 +37,23 @@ def _clean_text(t):
 
 def _guess_name(el, doc_title):
     """从电话所在元素附近猜公司名。"""
-    # 1) 元素自身及祖先里的强文本（短且含中文，像公司名）
-    for node in [el, el.getparent()]:
-        if node is None:
-            continue
-        text = _clean_text(node.text_content())
-        if 4 <= len(text) <= 60 and CJK_RE.search(text):
-            return text
-    # 2) 同列表/同行的链接文本
+    # 1) 元素自身的纯净文本（不含电话/联系人等噪音词）
+    own = _clean_text(el.text_content())
+    if 4 <= len(own) <= 40 and CJK_RE.search(own) and not re.search(r"电话|手机|联系人|地址|邮编|：|:", own):
+        return own
+    # 2) 同列表/同行的链接文本（公司名通常在 <a> 里）
     parent = el.getparent()
     if parent is not None:
-        for a in parent.cssselect("a"):
+        for a in parent.findall(".//a"):
             t = _clean_text(a.text_content())
             if 4 <= len(t) <= 60 and CJK_RE.search(t):
                 return t
-    # 3) 页面标题去掉常见后缀
+        # 3) 父容器文本：截取到“电话/联系人/地址”之前的公司部分
+        t = _clean_text(parent.text_content())
+        cut = re.split(r"电话|手机|联系人|地址|邮编", t)[0].strip(" ：:，,、|/")
+        if 2 <= len(cut) <= 60 and CJK_RE.search(cut):
+            return cut
+    # 4) 页面标题去掉常见后缀
     title = doc_title or ""
     for suffix in ("-手机版", "-企业名录", "-黄页", "-首页", "_官网", " - 百度百科"):
         title = re.sub(re.escape(suffix) + r"\s*$", "", title)
@@ -80,15 +82,17 @@ def extract_candidates(html_text, source_url=""):
         if am:
             address = am.group(1)
         for p in phones:
-            if p in seen:
-                continue
-            seen[p] = {
+            cand = {
                 "name": name or f"未命名-{p[-4:]}",
                 "phone": p,
                 "address": address,
                 "source": source_url,
                 "contact": "",
             }
+            old = seen.get(p)
+            # 更短的公司名通常更准确（避免整行文本）
+            if not old or len(cand["name"]) < len(old["name"]):
+                seen[p] = cand
     return list(seen.values())
 
 

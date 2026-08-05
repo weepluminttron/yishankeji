@@ -20,6 +20,10 @@ async function api(path, opts = {}) {
   const resp = await fetch(path, init);
   let data;
   try { data = await resp.json(); } catch (e) { data = { ok: false, msg: "响应解析失败" }; }
+  if (data.need_login) {
+    showLogin();
+    throw new Error("请先登录");
+  }
   if (!resp.ok && !data.ok) throw new Error(data.msg || "请求失败");
   return data;
 }
@@ -42,6 +46,36 @@ function openModal(html, cls = "") {
   return closeModal;
 }
 function closeModal() { $("#modal-root").innerHTML = ""; }
+
+function showLogin(msg) {
+  $("#login-root").innerHTML = `
+    <div class="login-mask">
+      <div class="login-box">
+        <div class="login-logo">🛰️</div>
+        <div class="login-title">光纤行业获客助手</div>
+        <div class="login-sub">请输入访问密码</div>
+        ${msg ? `<div class="login-err">${esc(msg)}</div>` : ""}
+        <input class="input full" type="password" id="login-pw" placeholder="访问密码" autocomplete="current-password">
+        <button class="btn primary" id="login-btn">进入系统</button>
+      </div>
+    </div>`;
+  const doLogin = async () => {
+    const pw = $("#login-pw").value;
+    if (!pw) return;
+    try {
+      await api("/api/login", { method: "POST", body: { password: pw } });
+      $("#login-root").innerHTML = "";
+      $("#nav-logout").style.display = "block";
+      go("dashboard");
+    } catch (e) {
+      showLogin("密码不正确，请重试");
+      $("#login-pw").focus();
+    }
+  };
+  $("#login-btn").onclick = doLogin;
+  $("#login-pw").onkeydown = (e) => { if (e.key === "Enter") doLogin(); };
+  $("#login-pw").focus();
+}
 
 function confirmBox(msg, onOk) {
   openModal(`
@@ -407,6 +441,7 @@ async function renderCollect() {
     <div class="sub-tabs">
       <button class="sub-tab active" data-group="collect" data-name="import">📥 批量导入</button>
       <button class="sub-tab" data-group="collect" data-name="crawl">🕸️ 网页采集</button>
+      <button class="sub-tab" data-group="collect" data-name="auto">⏰ 定时自动采集</button>
       <button class="sub-tab" data-group="collect" data-name="manual">✍️ 手动录入</button>
     </div>
     <div class="sub-panel" data-group="collect" data-name="import">
@@ -437,6 +472,30 @@ async function renderCollect() {
         <div class="hint" style="margin-top:8px">采集器会从页面里提取电话号码，并自动匹配附近的公司名称。部分网站有验证码、登录墙或反爬措施，采集不到时请换一个页面，或改用 Excel 导入。</div>
       </div>
       <div class="card" id="crawl-result"><div class="empty"><div class="ico">🕸️</div>还没有采集结果</div></div>
+    </div>
+    <div class="sub-panel" data-group="collect" data-name="auto" style="display:none">
+      <div class="card">
+        <h3>⏰ 定时自动采集</h3>
+        <div class="field"><label>采集网址列表（每行一个，支持企业黄页 / 目录 / 列表页）</label>
+          <textarea class="textarea full" id="auto-urls" placeholder="https://example.com/company-list-1&#10;https://example.com/company-list-2"></textarea>
+        </div>
+        <div class="field"><label>采集间隔</label>
+          <select class="select" id="auto-interval">
+            <option value="0">关闭定时采集</option>
+            <option value="1">每 1 小时</option>
+            <option value="6">每 6 小时</option>
+            <option value="12">每 12 小时</option>
+            <option value="24">每天 1 次</option>
+            <option value="72">每 3 天</option>
+          </select>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn primary" id="auto-save">💾 保存配置</button>
+          <button class="btn" id="auto-run">▶ 立即采集一次</button>
+        </div>
+        <div class="hint" style="margin-top:10px" id="auto-status">设置间隔并保存后，工具会在后台定时采集、自动去重入库，你只需定期到“客户线索”里跟进新线索。</div>
+      </div>
+      <div class="card"><h3>采集记录</h3><div id="auto-logs"><div class="empty">暂无记录</div></div></div>
     </div>
     <div class="sub-panel" data-group="collect" data-name="manual" style="display:none">
       <div class="card"><div id="manual-form"></div></div>
@@ -477,6 +536,48 @@ async function renderCollect() {
       btn.disabled = false; btn.textContent = "🕸️ 开始采集";
     }
   };
+
+  // 定时自动采集
+  const loadAuto = async () => {
+    const s = (await api("/api/settings")).settings;
+    $("#auto-urls").value = s.auto_crawl_urls || "";
+    $("#auto-interval").value = s.auto_crawl_interval || "0";
+    $("#auto-status").textContent = s.auto_crawl_interval && s.auto_crawl_interval !== "0"
+      ? `定时采集已开启：每 ${s.auto_crawl_interval} 小时执行一次${s.last_auto_crawl ? "（上次执行：" + s.last_auto_crawl + "）" : ""}`
+      : "定时采集已关闭。设置间隔并保存后自动开启。";
+    const d = await api("/api/crawl/auto");
+    const rows = d.logs.map((l) => `
+      <tr>
+        <td>${esc(l.run_at)}</td>
+        <td style="max-width:280px;word-break:break-all">${esc(l.url)}</td>
+        <td>${l.found}</td>
+        <td style="color:var(--green);font-weight:600">+${l.added}</td>
+        <td>${l.skipped}</td>
+        <td class="sub">${esc(l.error || "—")}</td>
+      </tr>`).join("");
+    $("#auto-logs").innerHTML = rows
+      ? `<div class="table-wrap"><table><thead><tr><th>时间</th><th>网址</th><th>发现</th><th>新增</th><th>跳过</th><th>说明</th></tr></thead><tbody>${rows}</tbody></table></div>`
+      : `<div class="empty">暂无采集记录</div>`;
+  };
+  $("#auto-save").onclick = async () => {
+    await api("/api/settings", { method: "POST", body: { settings: {
+      auto_crawl_urls: $("#auto-urls").value.trim(),
+      auto_crawl_interval: $("#auto-interval").value,
+    } } });
+    toast("配置已保存", "ok");
+    loadAuto();
+  };
+  $("#auto-run").onclick = async () => {
+    const btn = $("#auto-run");
+    btn.disabled = true; btn.textContent = "采集中…";
+    try {
+      const res = await api("/api/crawl/auto", { method: "POST", body: { urls: $("#auto-urls").value.trim() } });
+      toast(`采集完成：新增 ${res.added} 条线索`, "ok");
+      loadAuto();
+    } catch (e) { toast(e.message, "err"); }
+    finally { btn.disabled = false; btn.textContent = "▶ 立即采集一次"; }
+  };
+  loadAuto();
 }
 
 function renderCandidates() {
@@ -894,6 +995,26 @@ async function renderSettings() {
         <div class="field"><label>公司名称</label><input class="input full" id="s-company" value="${esc(s.company_name)}"></div>
         <div class="field"><label>主营产品</label><input class="input full" id="s-product" value="${esc(s.product_name)}"></div>
         <div class="field"><label>发件人姓名（显示名）</label><input class="input full" id="s-sender" placeholder="如：张三（销售经理）" value="${esc(s.sender_name)}"></div>
+        <div class="field"><label>访问密码（部署到公网后必填）</label><input class="input full" type="password" id="s-accesspw" placeholder="留空表示不修改" autocomplete="new-password"></div>
+      </div>
+      <div class="hint">工具部署到云服务器后会暴露在公网，请务必设置访问密码，防止客户数据被他人看到。</div>
+    </div>
+    <div class="card">
+      <h3>🌐 获客落地页 / 表单</h3>
+      <div class="form-grid">
+        <div class="field"><label>落地页状态</label><select class="select full" id="s-lp-enabled">
+          <option value="1" ${s.lp_enabled === "1" ? "selected" : ""}>开启（访客可提交）</option>
+          <option value="0" ${s.lp_enabled !== "1" ? "selected" : ""}>关闭</option>
+        </select></div>
+        <div class="field"><label>咨询电话（选填）</label><input class="input full" id="s-lp-phone" placeholder="13800000000" value="${esc(s.lp_phone)}"></div>
+        <div class="field" style="grid-column:1/-1"><label>页面主标题</label><input class="input full" id="s-lp-title" value="${esc(s.lp_title)}"></div>
+        <div class="field" style="grid-column:1/-1"><label>副标题</label><input class="input full" id="s-lp-subtitle" value="${esc(s.lp_subtitle)}"></div>
+        <div class="field"><label>按钮文字</label><input class="input full" id="s-lp-cta" value="${esc(s.lp_cta)}"></div>
+        <div class="field"><label>提交成功提示</label><input class="input full" id="s-lp-thanks" value="${esc(s.lp_thanks)}"></div>
+      </div>
+      <div class="toolbar" style="margin-bottom:0">
+        <button class="btn" id="s-lp-open">🔗 打开落地页查看</button>
+        <span class="hint">访客提交的信息会自动成为“客户线索”（来源：落地页表单），还可以分享给客户微信/朋友圈获取留资。</span>
       </div>
     </div>
     <div class="card">
@@ -937,6 +1058,13 @@ async function renderSettings() {
         smtp_ssl: ssl,
         smtp_user: $("#s-user").value.trim(),
         smtp_password: $("#s-pass").value,
+        access_password: $("#s-accesspw").value,
+        lp_enabled: $("#s-lp-enabled").value,
+        lp_title: $("#s-lp-title").value.trim(),
+        lp_subtitle: $("#s-lp-subtitle").value.trim(),
+        lp_cta: $("#s-lp-cta").value.trim(),
+        lp_phone: $("#s-lp-phone").value.trim(),
+        lp_thanks: $("#s-lp-thanks").value.trim(),
         openai_api_key: $("#s-key").value.trim(),
         openai_model: $("#s-model").value.trim() || "gpt-4o-mini",
         sms_notice: $("#s-sms").value.trim(),
@@ -944,6 +1072,7 @@ async function renderSettings() {
       toast("设置已保存", "ok");
     } catch (e) { toast(e.message, "err"); }
   };
+  $("#s-lp-open").onclick = () => window.open("/lp", "_blank");
   $("#test-smtp").onclick = async () => {
     const btn = $("#test-smtp");
     btn.disabled = true;

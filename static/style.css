@@ -357,6 +357,30 @@ td .sub { color: var(--muted); font-size: 12px; }
 .empty { text-align: center; color: var(--muted); padding: 30px 10px; }
 .empty .ico { font-size: 34px; margin-bottom: 8px; }
 
+/* ---------- 登录 ---------- */
+.login-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: linear-gradient(160deg, #0b1a2e, #123a63);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.login-box {
+  background: #fff;
+  border-radius: 16px;
+  padding: 34px 38px;
+  width: 340px;
+  text-align: center;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
+}
+.login-logo { font-size: 42px; }
+.login-title { font-size: 18px; font-weight: 800; margin: 10px 0 4px; }
+.login-sub { color: var(--muted); font-size: 13px; margin-bottom: 16px; }
+.login-err { color: var(--red); font-size: 13px; margin-bottom: 10px; }
+.login-box .btn { width: 100%; margin-top: 12px; justify-content: center; }
+
 @media (max-width: 1000px) {
   .stat-grid { grid-template-columns: repeat(2, 1fr); }
   .two-col, .editor-row { grid-template-columns: 1fr; display: block; }

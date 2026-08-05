@@ -18,7 +18,9 @@
         <button class="nav-item" data-page="logs">✉️ 发送记录</button>
         <button class="nav-item" data-page="settings">⚙️ 设置</button>
       </nav>
-      <div class="sidebar-footer">数据保存在本机<br>无需联网也能使用</div>
+      <div class="sidebar-footer">数据保存在本机<br>无需联网也能使用
+        <button class="btn sm" id="nav-logout" style="display:none;width:100%;margin-top:10px">退出登录</button>
+      </div>
     </aside>
     <main class="main">
       <div id="page-dashboard" class="page"></div>
@@ -31,6 +33,7 @@
   </div>
   <div id="modal-root"></div>
   <div id="toast-root"></div>
+  <div id="login-root"></div>
   <script src="/static/app.js"></script>
 </body>
 </html>

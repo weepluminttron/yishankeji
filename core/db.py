@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """SQLite 数据层：线索、备注、事件、发送记录、设置。"""
+import hashlib
 import os
 import re
 import sqlite3
@@ -73,6 +74,15 @@ def init_db():
                 status TEXT DEFAULT '成功',
                 error TEXT DEFAULT '',
                 sent_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS auto_crawl_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_at TEXT NOT NULL,
+                url TEXT DEFAULT '',
+                found INTEGER DEFAULT 0,
+                added INTEGER DEFAULT 0,
+                skipped INTEGER DEFAULT 0,
+                error TEXT DEFAULT ''
             );
             CREATE TABLE IF NOT EXISTS settings (
                 key TEXT PRIMARY KEY,
@@ -175,10 +185,10 @@ def create_lead(data):
             ),
         )
         lead_id = cur.lastrowid
+        conn.commit()
         add_event(lead_id, "创建线索", f"来源：{fields['source']}")
         if fields["note"]:
             add_note(lead_id, fields["note"])
-        conn.commit()
         return get_lead(lead_id), None
     finally:
         conn.close()
@@ -213,11 +223,11 @@ def update_lead(lead_id, data):
     conn = get_conn()
     try:
         conn.execute(f"UPDATE leads SET {sets} WHERE id = ?", params)
+        conn.commit()
         if "status" in fields and fields["status"] != old_status:
             add_event(lead_id, "状态变更", f"{old_status} → {fields['status']}")
         if "reminder_date" in fields and fields["reminder_date"] != old_reminder:
             add_event(lead_id, "设置提醒", f"跟进日期：{fields['reminder_date'] or '无'}")
-        conn.commit()
         return get_lead(lead_id), None
     finally:
         conn.close()
@@ -282,7 +292,7 @@ def all_leads(filters=None):
     return list_leads(
         page=1, size=10 ** 9,
         q=filters.get("q", ""), status=filters.get("status", ""),
-        type_=filters.get("type", ""), region=filters.get("region", ""),
+        type_=filters.get("type_", ""), region=filters.get("region", ""),
         tag=filters.get("tag", ""), source=filters.get("source", ""),
     )[0]
 
@@ -315,8 +325,12 @@ def bulk_status(ids, status):
             if not lead or lead["status"] == status:
                 continue
             conn.execute("UPDATE leads SET status = ?, updated_at = ? WHERE id = ?", (status, ts, lid))
-            add_event(lid, "状态变更", f"{lead['status']} → {status}")
         conn.commit()
+        for lid in ids:
+            lead = get_lead(lid)
+            if not lead:
+                continue
+            add_event(lid, "状态变更", f"{lead['status']} → {status}")
         return {"ok": True}
     finally:
         conn.close()
@@ -332,8 +346,8 @@ def mark_contacted(lead_id):
             "UPDATE leads SET last_contacted = ?, contact_count = contact_count + 1, updated_at = ? WHERE id = ?",
             (today_str(), now(), lead_id),
         )
-        add_event(lead_id, "完成联系", "记录一次触达")
         conn.commit()
+        add_event(lead_id, "完成联系", "记录一次触达")
     finally:
         conn.close()
 
@@ -437,6 +451,15 @@ def get_settings():
         "openai_api_key": "",
         "openai_model": "gpt-4o-mini",
         "sms_notice": "",
+        "lp_enabled": "1",
+        "lp_title": "光纤光缆及配套产品 专业供应",
+        "lp_subtitle": "免费获取样品与报价，1 个工作日内专人对接",
+        "lp_cta": "立即获取报价",
+        "lp_phone": "",
+        "lp_thanks": "提交成功！我们会尽快联系您，请保持电话畅通。",
+        "auto_crawl_urls": "",
+        "auto_crawl_interval": "0",
+        "last_auto_crawl": "",
     }
     merged = dict(defaults)
     merged.update(saved)
@@ -447,11 +470,22 @@ def save_settings(values):
     allowed = [
         "company_name", "product_name", "sender_name", "smtp_host", "smtp_port", "smtp_ssl",
         "smtp_user", "smtp_password", "openai_api_key", "openai_model", "sms_notice",
+        "access_password", "lp_enabled", "lp_title", "lp_subtitle", "lp_cta",
+        "lp_phone", "lp_thanks", "auto_crawl_urls", "auto_crawl_interval",
+        "last_auto_crawl",
     ]
     conn = get_conn()
     try:
         for k in allowed:
             if k in values:
+                if k == "access_password":
+                    if str(values[k]):
+                        conn.execute(
+                            "INSERT INTO settings (key, value) VALUES (?,?) "
+                            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                            ("access_password_hash", hashlib.sha256(str(values[k]).encode("utf-8")).hexdigest()),
+                        )
+                    continue
                 conn.execute(
                     "INSERT INTO settings (key, value) VALUES (?,?) "
                     "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -481,6 +515,30 @@ def list_mail_logs(limit=100):
     try:
         rows = conn.execute(
             "SELECT * FROM mail_logs ORDER BY id DESC LIMIT ?", (limit,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def add_auto_crawl_log(url, found, added, skipped, error=""):
+    conn = get_conn()
+    try:
+        conn.execute(
+            """INSERT INTO auto_crawl_logs (run_at, url, found, added, skipped, error)
+               VALUES (?,?,?,?,?,?)""",
+            (now(), url, found, added, skipped, error),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def list_auto_crawl_logs(limit=50):
+    conn = get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM auto_crawl_logs ORDER BY id DESC LIMIT ?", (limit,)
         ).fetchall()
         return [dict(r) for r in rows]
     finally:

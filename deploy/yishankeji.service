@@ -1,0 +1,17 @@
+[Unit]
+Description=Yishan Fiber Lead Tool
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/yishankeji
+ExecStart=/opt/yishankeji/venv/bin/python server.py
+Restart=always
+RestartSec=3
+Environment=HOST=0.0.0.0
+Environment=PORT=8017
+# 访问密码：请改成你自己的强密码（或去掉下面这行，改用 server.env 配置）
+Environment=ACCESS_PASSWORD=CHANGE_ME_TO_A_STRONG_PASSWORD
+
+[Install]
+WantedBy=multi-user.target
