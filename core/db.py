@@ -89,6 +89,20 @@ def init_db():
                 result TEXT,
                 ts INTEGER
             );
+            CREATE TABLE IF NOT EXISTS trusted_ips (
+                ip TEXT PRIMARY KEY,
+                ua TEXT DEFAULT '',
+                last_seen TEXT DEFAULT '',
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS login_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ip TEXT DEFAULT '',
+                ua TEXT DEFAULT '',
+                action TEXT DEFAULT '',
+                status TEXT DEFAULT '',
+                created_at TEXT NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS settings (
                 key TEXT PRIMARY KEY,
                 value TEXT
@@ -478,6 +492,7 @@ def get_settings():
         "openai_api_base": "https://api.openai.com/v1",
         "sms_notice": "",
         "notify_webhook": "",
+        "auto_login_trusted": "1",
         "lp_enabled": "1",
         "lp_title": "光纤光缆及配套产品 专业供应",
         "lp_subtitle": "免费获取样品与报价，1 个工作日内专人对接",
@@ -498,6 +513,7 @@ def save_settings(values):
         "company_name", "product_name", "sender_name", "smtp_host", "smtp_port", "smtp_ssl",
         "smtp_user", "smtp_password", "openai_api_key", "openai_model", "openai_api_base", "sms_notice",
         "notify_webhook",
+        "auto_login_trusted",
         "access_password", "lp_enabled", "lp_title", "lp_subtitle", "lp_cta",
         "lp_phone", "lp_thanks", "auto_crawl_urls", "auto_crawl_interval",
         "last_auto_crawl",
@@ -569,5 +585,71 @@ def list_auto_crawl_logs(limit=50):
             "SELECT * FROM auto_crawl_logs ORDER BY id DESC LIMIT ?", (limit,)
         ).fetchall()
         return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def add_login_log(ip, ua, action, status):
+    conn = get_conn()
+    try:
+        conn.execute(
+            "INSERT INTO login_logs (ip, ua, action, status, created_at) VALUES (?,?,?,?,?)",
+            (ip or "", ua or "", action, status, now()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def list_login_logs(limit=30):
+    conn = get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM login_logs ORDER BY id DESC LIMIT ?", (limit,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def trust_ip(ip, ua=""):
+    conn = get_conn()
+    try:
+        conn.execute(
+            "INSERT INTO trusted_ips (ip, ua, last_seen, created_at) VALUES (?,?,?,?) "
+            "ON CONFLICT(ip) DO UPDATE SET ua = excluded.ua, last_seen = excluded.last_seen",
+            (ip or "", (ua or "")[:200], now(), now()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def is_trusted_ip(ip):
+    conn = get_conn()
+    try:
+        return conn.execute(
+            "SELECT 1 FROM trusted_ips WHERE ip = ?", (ip or "",)
+        ).fetchone() is not None
+    finally:
+        conn.close()
+
+
+def list_trusted_ips():
+    conn = get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM trusted_ips ORDER BY last_seen DESC"
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def untrust_ip(ip):
+    conn = get_conn()
+    try:
+        conn.execute("DELETE FROM trusted_ips WHERE ip = ?", (ip or "",))
+        conn.commit()
     finally:
         conn.close()

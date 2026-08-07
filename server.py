@@ -268,6 +268,17 @@ class Handler(BaseHTTPRequestHandler):
         m = re.search(r"yskt_session=([0-9a-f]+)", self.headers.get("Cookie", ""))
         return m.group(1) if m else ""
 
+    def _client_ip(self):
+        return self.client_address[0] if self.client_address else ""
+
+    def _ua(self):
+        return self.headers.get("User-Agent", "")[:200]
+
+    def _issue_session(self):
+        tok = secrets.token_hex(24)
+        _sessions[tok] = time.time() + SESSION_TTL
+        return f"yskt_session={tok}; Path=/; HttpOnly; SameSite=Lax; Max-Age={SESSION_TTL}"
+
     def _check_auth(self):
         if not auth_enabled():
             return True
@@ -358,11 +369,19 @@ class Handler(BaseHTTPRequestHandler):
         if api == "summary":
             return send_json(self, db.summary())
         if api == "session":
+            authed = self._check_auth()
+            headers = None
+            if not authed and auth_enabled():
+                s = db.get_settings()
+                if s.get("auto_login_trusted", "1") == "1" and db.is_trusted_ip(self._client_ip()):
+                    headers = {"Set-Cookie": self._issue_session()}
+                    authed = True
+                    db.add_login_log(self._client_ip(), self._ua(), "自动登录（信任IP）", "成功")
             return send_json(self, {
                 "ok": True,
-                "authed": self._check_auth(),
+                "authed": authed,
                 "password_set": auth_enabled(),
-            })
+            }, headers=headers)
         if api == "health":
             return send_json(self, {"ok": True, "status": "up"})
         if api == "lp":
@@ -420,6 +439,13 @@ class Handler(BaseHTTPRequestHandler):
             })
         if api == "copy" and len(parts) > 2 and parts[2] == "social":
             return send_json(self, {"ok": True, "list": SOCIAL_COPY})
+        if api == "trusted":
+            return send_json(self, {
+                "ok": True,
+                "trusted": db.list_trusted_ips(),
+                "logs": db.list_login_logs(),
+                "auto_login_trusted": db.get_settings().get("auto_login_trusted", "1"),
+            })
         if api == "meta":
             return send_json(self, {
                 "statuses": db.STATUSES,
@@ -442,13 +468,12 @@ class Handler(BaseHTTPRequestHandler):
             if not auth_enabled():
                 return send_json(self, {"ok": True, "msg": "未启用密码保护"})
             if check_password(data.get("password", "")):
-                tok = secrets.token_hex(24)
-                _sessions[tok] = time.time() + SESSION_TTL
+                db.add_login_log(self._client_ip(), self._ua(), "密码登录", "成功")
+                db.trust_ip(self._client_ip(), self._ua())
                 return send_json(
-                    self, {"ok": True}, headers={
-                        "Set-Cookie": f"yskt_session={tok}; Path=/; HttpOnly; SameSite=Lax; Max-Age={SESSION_TTL}",
-                    },
+                    self, {"ok": True}, headers={"Set-Cookie": self._issue_session()},
                 )
+            db.add_login_log(self._client_ip(), self._ua(), "密码错误", "失败")
             return send_json(self, {"ok": False, "msg": "密码不正确"}, 401)
         if api == "logout":
             tok = self._cookie_token()
@@ -626,6 +651,9 @@ class Handler(BaseHTTPRequestHandler):
         denied = self._require_auth(parts)
         if denied:
             return denied
+        if len(parts) >= 3 and parts[0] == "api" and parts[1] == "trusted":
+            db.untrust_ip(urllib.parse.unquote(parts[2]))
+            return send_json(self, {"ok": True})
         if len(parts) >= 3 and parts[0] == "api" and parts[1] == "leads":
             db.delete_lead(int(parts[2]))
             return send_json(self, {"ok": True})

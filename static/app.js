@@ -1267,6 +1267,20 @@ async function renderSettings() {
       <div class="hint">在飞书/企业微信群添加“自定义机器人”即可获得地址。配置后，落地页收到新客户留资、定时采集到新线索时，会自动推送到群里提醒销售跟进。</div>
       <div style="margin-top:10px"><button class="btn" id="test-webhook">🧪 发送测试通知</button></div>
     </div>
+    <div class="card">
+      <h3>🔐 自动登录与登录记录</h3>
+      <div class="form-grid">
+        <div class="field"><label>记住本机 IP，下次自动进入</label>
+          <select class="select full" id="s-auto-login">
+            <option value="1" ${s.auto_login_trusted === "1" ? "selected" : ""}>开启（推荐）</option>
+            <option value="0" ${s.auto_login_trusted !== "1" ? "selected" : ""}>关闭（每次输密码）</option>
+          </select>
+        </div>
+      </div>
+      <div class="hint" style="margin-bottom:10px">开启后，登录成功会记录这台设备的 IP；下次从同一网络访问时自动进入后台，不用再输密码。办公网同事共用同一公网 IP 也会自动进入。担心安全可随时关闭或删除某个 IP。</div>
+      <div class="field"><label>信任的设备（IP）</label><div id="trusted-list" style="margin-top:6px"><div class="empty">加载中…</div></div></div>
+      <div class="field"><label>最近登录记录</label><div id="login-log-list" style="margin-top:6px"><div class="empty">加载中…</div></div></div>
+    </div>
     <div style="display:flex;gap:10px">
       <button class="btn primary" id="save-settings">💾 保存设置</button>
       <button class="btn" id="test-smtp">🧪 发送测试邮件</button>
@@ -1295,6 +1309,7 @@ async function renderSettings() {
         openai_api_base: $("#s-api-base").value.trim() || "https://api.openai.com/v1",
         sms_notice: $("#s-sms").value.trim(),
         notify_webhook: $("#s-webhook").value.trim(),
+        auto_login_trusted: $("#s-auto-login").value,
       } } });
       toast("设置已保存", "ok");
     } catch (e) { toast(e.message, "err"); }
@@ -1307,6 +1322,29 @@ async function renderSettings() {
       toast("测试通知已发送，请查看群消息", "ok");
     } catch (e) { toast(e.message, "err"); }
   };
+  const loadTrusted = async () => {
+    const d = await api("/api/trusted");
+    const trusted = d.trusted || [];
+    $("#trusted-list").innerHTML = trusted.length
+      ? `<div class="chk-list">${trusted.map((t) => `
+          <div class="chk-row">
+            <span style="flex:1"><b>${esc(t.ip)}</b> <span class="em">${esc(t.ua.slice(0, 40) || "")} · 最近 ${esc(t.last_seen)}</span></span>
+            <button class="btn sm danger" data-ip="${esc(t.ip)}">删除</button>
+          </div>`).join("")}</div>`
+      : `<div class="empty">还没有信任设备：登录一次后会自动记录</div>`;
+    $$("#trusted-list [data-ip]").forEach((b) => b.onclick = async () => {
+      await api("/api/trusted/" + encodeURIComponent(b.dataset.ip), { method: "DELETE" });
+      toast("已移除该设备的自动登录", "ok");
+      loadTrusted();
+    });
+    const logs = d.logs || [];
+    $("#login-log-list").innerHTML = logs.length
+      ? `<div class="table-wrap"><table><thead><tr><th>时间</th><th>IP</th><th>方式</th><th>结果</th></tr></thead><tbody>${logs.map((l) => `
+          <tr><td>${esc(l.created_at)}</td><td>${esc(l.ip)}</td><td>${esc(l.action)}</td>
+          <td>${l.status === "成功" ? `<span style="color:var(--green)">成功</span>` : `<span style="color:var(--red)">${esc(l.status)}</span>`}</td></tr>`).join("")}</tbody></table></div>`
+      : `<div class="empty">暂无登录记录</div>`;
+  };
+  loadTrusted();
   $("#test-smtp").onclick = async () => {
     const btn = $("#test-smtp");
     btn.disabled = true;
