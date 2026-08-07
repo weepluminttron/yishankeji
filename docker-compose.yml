@@ -1,0 +1,11 @@
+services:
+  yishankeji:
+    build: .
+    container_name: yishankeji
+    restart: always
+    ports:
+      - "8017:8017"
+    volumes:
+      - ./data:/app/data
+    env_file:
+      - server.env

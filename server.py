@@ -12,6 +12,7 @@ import os
 import random
 import re
 import secrets
+import signal
 import sys
 import tempfile
 import threading
@@ -22,7 +23,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from core import ai, buyer, crawler, db, importer, mailer, scorer
+from core import ai, buyer, crawler, db, importer, llm_cache, mailer, notify, scorer
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
@@ -102,6 +103,14 @@ def run_auto_crawl_once(urls):
         db.add_auto_crawl_log(url, len(candidates), added, skipped, "")
         logs.append({"url": url, "found": len(candidates), "added": added, "skipped": skipped, "error": ""})
     db.save_settings({"last_auto_crawl": db.now()})
+    if total_added > 0:
+        settings = db.get_settings()
+        if settings.get("notify_webhook"):
+            notify.send_webhook(
+                settings.get("notify_webhook"),
+                "🔔 定时采集发现新客户",
+                f"本次自动采集新增 {total_added} 条线索，记得去跟进哦～",
+            )
     return {
         "urls": len(urls),
         "found": sum(l["found"] for l in logs),
@@ -329,6 +338,18 @@ class Handler(BaseHTTPRequestHandler):
             return self._serve_static("index.html")
         if parts[0] == "static":
             return self._serve_static("/".join(parts[1:]))
+        if parts[0] == "manifest.json":
+            return self._serve_static("manifest.json")
+        if parts[0] == "sw.js":
+            self.send_response(200)
+            self.send_header("Service-Worker-Allowed", "/")
+            self.send_header("Content-Type", "application/javascript; charset=utf-8")
+            with open(os.path.join(STATIC_DIR, "sw.js"), "r", encoding="utf-8") as f:
+                body = f.read().encode("utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if parts[0] != "api":
             if parts[0] == "lp":
                 return self._serve_landing()
@@ -538,6 +559,15 @@ class Handler(BaseHTTPRequestHandler):
             settings = db.get_settings()
             if not settings.get("openai_api_key"):
                 return send_json(self, {"ok": False, "msg": "还没有配置 AI 密钥（在“设置”里填写 OpenAI API Key）"}, 400)
+            cache_key = llm_cache.make_key(
+                settings.get("openai_model"),
+                settings.get("openai_api_base"),
+                data.get("system", ""),
+                data.get("user", ""),
+            )
+            cached = llm_cache.cache_get(cache_key)
+            if cached:
+                return send_json(self, {"ok": True, "text": cached, "from_cache": True})
             text, err = ai.generate_copy(
                 settings.get("openai_api_key"),
                 settings.get("openai_model"),
@@ -547,7 +577,18 @@ class Handler(BaseHTTPRequestHandler):
             )
             if err:
                 return send_json(self, {"ok": False, "msg": err}, 400)
+            llm_cache.cache_set(cache_key, text)
             return send_json(self, {"ok": True, "text": text})
+        if api == "notify" and len(parts) > 2 and parts[2] == "test":
+            settings = db.get_settings()
+            ok, err = notify.send_webhook(
+                settings.get("notify_webhook", ""),
+                "🔔 获客助手通知测试",
+                "如果收到这条消息，说明通知配置正常 ✅",
+            )
+            if not ok:
+                return send_json(self, {"ok": False, "msg": "发送失败：" + err}, 400)
+            return send_json(self, {"ok": True})
         if api == "mail" and len(parts) > 2 and parts[2] == "test":
             settings = db.get_settings()
             missing = mailer.validate_settings(settings)
@@ -776,6 +817,13 @@ class Handler(BaseHTTPRequestHandler):
             if "重复" in err:
                 return send_json(self, {"ok": True})
             return send_json(self, {"ok": False, "msg": err}, 400)
+        s = db.get_settings()
+        if s.get("notify_webhook"):
+            notify.send_webhook(
+                s.get("notify_webhook"),
+                "🎉 官网收到新客户留资",
+                notify.lead_notice_text(lead),
+            )
         return send_json(self, {"ok": True, "thanks": s.get("lp_thanks", "")})
 
 
@@ -786,6 +834,13 @@ def main():
     port = int(os.environ.get("PORT", DEFAULT_PORT))
     server = ThreadingHTTPServer((host, port), Handler)
     threading.Thread(target=_auto_crawl_loop, daemon=True).start()
+
+    def _handle_stop(sig, frame):
+        print("\n收到停止信号，正在安全关闭...")
+        threading.Thread(target=server.shutdown, daemon=True).start()
+
+    signal.signal(signal.SIGTERM, _handle_stop)
+    signal.signal(signal.SIGINT, _handle_stop)
     print("=" * 56)
     print("  光纤行业获客工具已启动")
     print(f"  管理后台： http://{host}:{port}")

@@ -33,6 +33,28 @@
 | DeepSeek | `https://api.deepseek.com/v1` | `deepseek-chat` |
 | FastGPT 等自建 | 服务商提供的地址 | 按服务商文档 |
 
+### 群机器人通知（飞书 / 企业微信）
+
+在“设置 → 群机器人通知”里填入群里自定义机器人的 Webhook 地址，然后点“发送测试通知”验证。配置后：
+
+- 落地页收到新客户留资 → 群内即时提醒（含公司、联系人、电话、需求）；
+- 定时自动采集到新线索 → 群内汇总提醒。
+
+### 手机安装（PWA）
+
+工具支持 PWA：用手机浏览器打开后台地址，选“添加到主屏幕”，就会像 App 一样安装到手机桌面，方便销售团队随时跟进客户。落地页同样适用。
+
+### Docker 部署（备选）
+
+不想用 systemd 的话，也可以用 Docker：
+
+```bash
+cp server.env.example server.env   # 先设置好 ACCESS_PASSWORD
+docker compose up -d --build
+```
+
+数据保存在 `./data`（已挂载持久化），更新代码后 `docker compose up -d --build` 即可。
+
 ## 本机运行
 
 双击 **`启动工具.bat`**，浏览器打开 `http://127.0.0.1:8017`。

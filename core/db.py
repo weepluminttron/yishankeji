@@ -84,6 +84,11 @@ def init_db():
                 skipped INTEGER DEFAULT 0,
                 error TEXT DEFAULT ''
             );
+            CREATE TABLE IF NOT EXISTS ai_cache (
+                key TEXT PRIMARY KEY,
+                result TEXT,
+                ts INTEGER
+            );
             CREATE TABLE IF NOT EXISTS settings (
                 key TEXT PRIMARY KEY,
                 value TEXT
@@ -472,6 +477,7 @@ def get_settings():
         "openai_model": "gpt-4o-mini",
         "openai_api_base": "https://api.openai.com/v1",
         "sms_notice": "",
+        "notify_webhook": "",
         "lp_enabled": "1",
         "lp_title": "光纤光缆及配套产品 专业供应",
         "lp_subtitle": "免费获取样品与报价，1 个工作日内专人对接",
@@ -491,6 +497,7 @@ def save_settings(values):
     allowed = [
         "company_name", "product_name", "sender_name", "smtp_host", "smtp_port", "smtp_ssl",
         "smtp_user", "smtp_password", "openai_api_key", "openai_model", "openai_api_base", "sms_notice",
+        "notify_webhook",
         "access_password", "lp_enabled", "lp_title", "lp_subtitle", "lp_cta",
         "lp_phone", "lp_thanks", "auto_crawl_urls", "auto_crawl_interval",
         "last_auto_crawl",

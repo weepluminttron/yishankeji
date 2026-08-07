@@ -1259,6 +1259,14 @@ async function renderSettings() {
       <h3>📱 短信服务商备注</h3>
       <div class="field"><input class="input full" id="s-sms" placeholder="如：阿里云短信，群发平台：xxx" value="${esc(s.sms_notice)}"></div>
     </div>
+    <div class="card">
+      <h3>🔔 群机器人通知（飞书 / 企业微信）</h3>
+      <div class="field"><label>机器人 Webhook 地址</label>
+        <input class="input full" id="s-webhook" placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/xxx 或 https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx" value="${esc(s.notify_webhook)}">
+      </div>
+      <div class="hint">在飞书/企业微信群添加“自定义机器人”即可获得地址。配置后，落地页收到新客户留资、定时采集到新线索时，会自动推送到群里提醒销售跟进。</div>
+      <div style="margin-top:10px"><button class="btn" id="test-webhook">🧪 发送测试通知</button></div>
+    </div>
     <div style="display:flex;gap:10px">
       <button class="btn primary" id="save-settings">💾 保存设置</button>
       <button class="btn" id="test-smtp">🧪 发送测试邮件</button>
@@ -1286,11 +1294,19 @@ async function renderSettings() {
         openai_model: $("#s-model").value.trim() || "gpt-4o-mini",
         openai_api_base: $("#s-api-base").value.trim() || "https://api.openai.com/v1",
         sms_notice: $("#s-sms").value.trim(),
+        notify_webhook: $("#s-webhook").value.trim(),
       } } });
       toast("设置已保存", "ok");
     } catch (e) { toast(e.message, "err"); }
   };
   $("#s-lp-open").onclick = () => window.open("/lp", "_blank");
+  $("#test-webhook").onclick = async () => {
+    try {
+      await api("/api/settings", { method: "POST", body: { settings: { notify_webhook: $("#s-webhook").value.trim() } } });
+      await api("/api/notify/test", { method: "POST", body: {} });
+      toast("测试通知已发送，请查看群消息", "ok");
+    } catch (e) { toast(e.message, "err"); }
+  };
   $("#test-smtp").onclick = async () => {
     const btn = $("#test-smtp");
     btn.disabled = true;
@@ -1314,8 +1330,27 @@ async function renderSettings() {
 (async function init() {
   try {
     state.meta = await api("/api/meta");
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("/sw.js").catch(() => {});
+    }
+    const sess = await api("/api/session");
+    if (sess.password_set && !sess.authed) {
+      showLogin();
+      return;
+    }
+    if (sess.password_set) {
+      $("#nav-logout").style.display = "block";
+    }
   } catch (e) {
     toast("无法连接本地服务：" + e.message, "err");
   }
   go("dashboard");
 })();
+
+$("#nav-logout").onclick = async () => {
+  try {
+    await api("/api/logout", { method: "POST", body: {} });
+    $("#nav-logout").style.display = "none";
+    showLogin();
+  } catch (e) { toast(e.message, "err"); }
+};
