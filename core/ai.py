@@ -3,10 +3,15 @@
 import json
 import urllib.request
 
-API_URL = "https://api.openai.com/v1/chat/completions"
+DEFAULT_API_BASE = "https://api.openai.com/v1"
 
 
-def generate_copy(api_key, model, system, user):
+def generate_copy(api_key, model, system, user, api_base=None):
+    base = (api_base or DEFAULT_API_BASE).rstrip("/")
+    if base.endswith("/chat/completions"):
+        url = base
+    else:
+        url = base + "/chat/completions"
     payload = {
         "model": model or "gpt-4o-mini",
         "messages": [
@@ -16,7 +21,7 @@ def generate_copy(api_key, model, system, user):
         "temperature": 0.8,
     }
     req = urllib.request.Request(
-        API_URL,
+        url,
         data=json.dumps(payload).encode("utf-8"),
         headers={
             "Content-Type": "application/json",

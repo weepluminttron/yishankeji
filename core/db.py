@@ -94,6 +94,13 @@ def init_db():
             """
         )
         conn.commit()
+        # 兼容旧数据库：补充新增字段
+        cols = [r["name"] for r in conn.execute("PRAGMA table_info(leads)")]
+        if "score" not in cols:
+            conn.execute("ALTER TABLE leads ADD COLUMN score INTEGER DEFAULT 0")
+        if "score_reason" not in cols:
+            conn.execute("ALTER TABLE leads ADD COLUMN score_reason TEXT DEFAULT ''")
+        conn.commit()
     finally:
         conn.close()
 
@@ -352,6 +359,19 @@ def mark_contacted(lead_id):
         conn.close()
 
 
+def set_lead_score(lead_id, score, reason=""):
+    conn = get_conn()
+    try:
+        conn.execute(
+            "UPDATE leads SET score = ?, score_reason = ?, updated_at = ? WHERE id = ?",
+            (score, reason, now(), lead_id),
+        )
+        conn.commit()
+        add_event(lead_id, "线索评分", f"{score}分 - {reason}")
+    finally:
+        conn.close()
+
+
 def add_note(lead_id, content):
     if not content:
         return
@@ -450,6 +470,7 @@ def get_settings():
         "smtp_password": "",
         "openai_api_key": "",
         "openai_model": "gpt-4o-mini",
+        "openai_api_base": "https://api.openai.com/v1",
         "sms_notice": "",
         "lp_enabled": "1",
         "lp_title": "光纤光缆及配套产品 专业供应",
@@ -469,7 +490,7 @@ def get_settings():
 def save_settings(values):
     allowed = [
         "company_name", "product_name", "sender_name", "smtp_host", "smtp_port", "smtp_ssl",
-        "smtp_user", "smtp_password", "openai_api_key", "openai_model", "sms_notice",
+        "smtp_user", "smtp_password", "openai_api_key", "openai_model", "openai_api_base", "sms_notice",
         "access_password", "lp_enabled", "lp_title", "lp_subtitle", "lp_cta",
         "lp_phone", "lp_thanks", "auto_crawl_urls", "auto_crawl_interval",
         "last_auto_crawl",

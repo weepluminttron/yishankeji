@@ -3,6 +3,7 @@
 import csv
 import io
 import os
+import re
 
 from openpyxl import Workbook, load_workbook
 
@@ -20,6 +21,163 @@ HEADER_MAP = {
     "备注": "note", "备注说明": "note",
     "地址": "address", "公司地址": "address",
 }
+
+SOCIAL_HEADERS = ["平台", "作品/笔记标题", "作品链接", "评论人昵称", "评论内容", "评论时间", "备注"]
+
+
+def build_social_template_xlsx():
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "社媒评论导入模板"
+    ws.append(SOCIAL_HEADERS)
+    ws.append(["抖音", "光缆熔接工艺讲解", "https://v.douyin.com/xxxx", "光纤小王", "这个熔接机多少钱？想了解", "2026-08-01 10:00", ""])
+    ws.append(["小红书", "光纤收发器选购指南", "https://www.xiaohongshu.com/explore/xxxx", "弱电老张", "求报价，机房改造用", "2026-08-01 11:00", ""])
+    for i, w in enumerate([10, 28, 34, 16, 42, 20, 20], start=1):
+        ws.column_dimensions[chr(64 + i)].width = w
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf
+
+
+def build_wechat_template_txt():
+    return (
+        "# 微信聊天记录导入模板（.txt / .csv）\n"
+        "# 每段记录格式：联系人 + 日期时间 + 换行 + 消息内容，支持以下两种格式：\n"
+        "# 格式一（推荐，来自微信导出工具）：\n"
+        "张三 2026-08-01 10:00:00\n"
+        "你好，我们公司需要采购一批光缆，请问有报价吗？\n"
+        "张三 2026-08-01 10:05:00\n"
+        "另外光纤收发器也发一份价格表\n"
+        "# 格式二：\n"
+        "# 2026-08-01 10:00 李四: 消息内容\n"
+    ).encode("utf-8-sig")
+
+
+def parse_social(path):
+    """解析社媒评论 CSV/XLSX → 线索列表。"""
+    ext = os.path.splitext(path)[1].lower()
+    if ext == ".xlsx":
+        wb = load_workbook(path, read_only=True, data_only=True)
+        rows = list(wb.active.iter_rows(values_only=True))
+        wb.close()
+    else:
+        raw = open(path, "rb").read()
+        text = None
+        for enc in ("utf-8-sig", "utf-8", "gb18030"):
+            try:
+                text = raw.decode(enc)
+                break
+            except UnicodeDecodeError:
+                continue
+        if text is None:
+            return [], "无法识别文件编码"
+        rows = [r for r in csv.reader(io.StringIO(text))]
+    if not rows:
+        return [], "文件为空"
+    header = [str(c or "").strip() for c in rows[0]]
+    idx = {h: i for i, h in enumerate(header) if h in SOCIAL_HEADERS}
+    if "评论人昵称" not in idx:
+        return [], "表头缺少“评论人昵称”（请使用：平台、作品/笔记标题、作品链接、评论人昵称、评论内容、评论时间）"
+
+    def val(row, h):
+        i = idx.get(h)
+        if i is None or i >= len(row):
+            return ""
+        v = row[i].value if hasattr(row[i], "value") else row[i]
+        return str(v or "").strip()
+
+    leads = []
+    for n, row in enumerate(rows[1:], start=2):
+        nick = val(row, "评论人昵称")
+        if not nick:
+            continue
+        platform = val(row, "平台")
+        title = val(row, "作品/笔记标题")
+        link = val(row, "作品链接")
+        content = val(row, "评论内容")
+        ctime = val(row, "评论时间")
+        remark = val(row, "备注")
+        note = f"评论：{content}"
+        if title:
+            note += f"\n作品：{title}"
+        if link:
+            note += f"\n链接：{link}"
+        if remark:
+            note += f"\n备注：{remark}"
+        leads.append({
+            "name": f"{nick}（{platform or '社媒'}）",
+            "contact": nick,
+            "region": "",
+            "type": "终端客户",
+            "status": "新线索",
+            "source": "社媒评论",
+            "tags": platform or "社媒",
+            "note": note[:500],
+            "reminder_date": ctime[:10] if ctime else "",
+        })
+    return leads, None
+
+
+WX_HEADER_1 = re.compile(r"^\[?(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(?::\d{2})?)\]?\s*(.+?)[:：]\s*(.*)$")
+WX_HEADER_2 = re.compile(r"^(.+?)\s+(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(?::\d{2})?)$")
+
+
+def parse_wechat(path):
+    """解析微信聊天记录文本 → 线索列表（按联系人分组）。"""
+    raw = open(path, "rb").read()
+    text = None
+    for enc in ("utf-8-sig", "utf-8", "gb18030"):
+        try:
+            text = raw.decode(enc)
+            break
+        except UnicodeDecodeError:
+            continue
+    if text is None:
+        return [], "无法识别文件编码"
+    chats = {}  # sender -> list of (time, content)
+    current = None
+    current_time = ""
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "聊天记录" in line and len(line) < 20:
+            continue
+        m1 = WX_HEADER_1.match(line)
+        if m1:
+            current = m1.group(2).strip()
+            current_time = m1.group(1).replace("T", " ")
+            content = m1.group(3).strip()
+            if current:
+                chats.setdefault(current, []).append((current_time, content or "（表情/图片）"))
+            continue
+        m2 = WX_HEADER_2.match(line)
+        if m2:
+            current = m2.group(1).strip()
+            current_time = m2.group(2).replace("T", " ")
+            continue
+        if current:
+            chats.setdefault(current, []).append((current_time, line))
+    if not chats:
+        return [], "没有解析到聊天记录。请使用模板格式：联系人+时间换行+消息内容，或“时间 联系人: 内容”"
+    leads = []
+    for sender, msgs in chats.items():
+        if len(sender) > 40:
+            continue
+        lines = []
+        for t, c in msgs[-30:]:
+            lines.append((f"[{t}] " if t else "") + c)
+        first_time = next((t for t, _ in msgs if t), "")
+        leads.append({
+            "name": sender,
+            "contact": sender,
+            "source": "微信记录",
+            "tags": "微信客户",
+            "type": "其他",
+            "status": "待联系",
+            "note": ("\n".join(lines))[:1000],
+            "reminder_date": first_time[:10] if first_time else "",
+        })
+    return leads, None
 
 
 def _row_to_lead(row, header_index):

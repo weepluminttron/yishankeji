@@ -9,6 +9,7 @@ import hmac
 import json
 import mimetypes
 import os
+import random
 import re
 import secrets
 import sys
@@ -21,7 +22,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from core import ai, crawler, db, importer, mailer
+from core import ai, buyer, crawler, db, importer, mailer, scorer
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
@@ -29,6 +30,32 @@ DEFAULT_PORT = 8017
 SESSION_TTL = 12 * 3600
 _sessions = {}
 _lp_requests = {}
+
+SOCIAL_COPY = {
+    "抖音评论引流": [
+        "请问这款光缆支持室外直埋吗？我们最近正好有项目在找供应商，方便聊聊吗？",
+        "熔接工艺讲得很清楚！我们做弱电工程的，能私信发一份产品资料吗？",
+        "光纤收发器这个型号性价比确实不错，我们是集成商，想了解一下代理政策。",
+        "博主您好，我们公司主营{{产品}}，想和您交流一下合作，方便留个联系方式吗？",
+        "讲得太实用了，已关注。我们正在找靠谱的光纤配套供应商，可以认识一下吗？",
+    ],
+    "小红书评论": [
+        "收藏了！请问这个方案在旧小区改造里也适用吗？我们做FTTH项目的～",
+        "同款需求！正在对比供应商，求一份报价单参考下🙏",
+        "写得真好，我们是工程商，经常用到这类产品，能私信交流下合作吗？",
+        "求问：这种收发器支持长距离传输吗？我们有个监控项目想用。",
+    ],
+    "私信开场白": [
+        "您好，看到您最近在了解{{产品}}，我这边是厂家直供，可以发一份样品和报价给您参考，不耽误您时间～",
+        "您好，我是{{我方公司}}的销售，主营{{产品}}，支持样品和批量供货，方便的话加个微信，资料马上发给您。",
+        "您好，刚看到您的需求，我们正好有现货和优惠价格，您方便的话我详细介绍一下？",
+    ],
+    "追粉话术": [
+        "上次聊的{{产品}}资料已经整理好了，今天发您？",
+        "您好，上次您问的报价我这边申请到了更优惠的政策，方便再聊两句吗？",
+        "跟您同步下：那批货下周就到，到时第一时间通知您～",
+    ],
+}
 
 
 def log_error(msg):
@@ -321,6 +348,22 @@ class Handler(BaseHTTPRequestHandler):
         if api == "leads" and len(parts) > 2 and parts[2] == "export":
             return self._export(qs)
         if api == "leads" and len(parts) > 2 and parts[2] == "template":
+            kind = qs.get("kind", [""])[0]
+            if kind == "social":
+                buf = importer.build_social_template_xlsx()
+                self._send_bytes(
+                    buf.getvalue(),
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    "社媒评论导入模板.xlsx",
+                )
+                return
+            if kind == "wechat":
+                self._send_bytes(
+                    importer.build_wechat_template_txt(),
+                    "text/plain; charset=utf-8",
+                    "微信记录导入模板.txt",
+                )
+                return
             buf = importer.build_template_xlsx()
             self._send_bytes(
                 buf.getvalue(),
@@ -353,6 +396,8 @@ class Handler(BaseHTTPRequestHandler):
                 "logs": db.list_auto_crawl_logs(),
                 "last_run": settings.get("last_auto_crawl", ""),
             })
+        if api == "copy" and len(parts) > 2 and parts[2] == "social":
+            return send_json(self, {"ok": True, "list": SOCIAL_COPY})
         if api == "meta":
             return send_json(self, {
                 "statuses": db.STATUSES,
@@ -394,6 +439,18 @@ class Handler(BaseHTTPRequestHandler):
             )
         if api == "lp" and len(parts) > 2 and parts[2] == "submit":
             return self._lp_submit()
+        if api == "buyer":
+            data = read_json_body(self)
+            result = buyer.run(
+                keywords=data.get("keywords", ""),
+                markets=data.get("markets", ""),
+                max_results=int(data.get("max_results", 6) or 6),
+                urls=data.get("urls", ""),
+            )
+            return send_json(self, {"ok": True, **result})
+        if api == "copy" and len(parts) > 2 and parts[2] == "social":
+            data = read_json_body(self)
+            return self._social_copy(data)
         if api == "leads" and len(parts) == 2:
             data = read_json_body(self)
             lead, err = db.create_lead(data)
@@ -411,6 +468,25 @@ class Handler(BaseHTTPRequestHandler):
             data = read_json_body(self)
             db.mark_contacted(int(data.get("id", 0)))
             return send_json(self, {"ok": True})
+        if api == "leads" and len(parts) > 2 and parts[2] == "score":
+            data = read_json_body(self)
+            lead_id = int(data.get("id", 0))
+            lead = db.get_lead(lead_id)
+            if not lead:
+                return send_json(self, {"ok": False, "msg": "线索不存在"}, 404)
+            use_ai = bool(data.get("use_ai"))
+            score, reason = scorer.rule_score(lead)
+            if use_ai:
+                settings = db.get_settings()
+                ai_score, ai_reason = scorer.ai_score(settings, lead)
+                if ai_score is not None:
+                    score, reason = ai_score, ai_reason
+                elif data.get("fallback", True):
+                    reason = reason + "（AI：" + ai_reason + "）"
+                else:
+                    return send_json(self, {"ok": False, "msg": ai_reason}, 400)
+            db.set_lead_score(lead_id, score, reason)
+            return send_json(self, {"ok": True, "score": score, "reason": reason})
         if api == "leads" and len(parts) > 2:
             lead_id = int(parts[2])
             if len(parts) > 3 and parts[3] == "notes":
@@ -423,10 +499,17 @@ class Handler(BaseHTTPRequestHandler):
             if not tmp_path:
                 return send_json(self, {"ok": False, "msg": "没有收到文件"}, 400)
             try:
-                leads, err = importer.parse_file(tmp_path, filename)
+                kind = fields.get("kind", "")
+                if kind == "social":
+                    leads, err = importer.parse_social(tmp_path)
+                elif kind == "wechat":
+                    leads, err = importer.parse_wechat(tmp_path)
+                else:
+                    leads, err = importer.parse_file(tmp_path, filename)
                 if err:
                     return send_json(self, {"ok": False, "msg": err}, 400)
-                result = db.bulk_add(leads, source="Excel导入")
+                source = {"social": "社媒评论", "wechat": "微信记录"}.get(kind, "Excel导入")
+                result = db.bulk_add(leads, source=source)
                 return send_json(self, {"ok": True, "total": len(leads), **result})
             finally:
                 if tmp_path and os.path.exists(tmp_path):
@@ -459,6 +542,7 @@ class Handler(BaseHTTPRequestHandler):
                 settings.get("openai_model"),
                 data.get("system", ""),
                 data.get("user", ""),
+                settings.get("openai_api_base", ""),
             )
             if err:
                 return send_json(self, {"ok": False, "msg": err}, 400)
@@ -506,6 +590,36 @@ class Handler(BaseHTTPRequestHandler):
         return send_json(self, {"ok": False, "msg": "接口不存在"}, 404)
 
     # ---------- 业务辅助 ----------
+    def _social_copy(self, data):
+        scenario = data.get("scenario", "抖音评论引流")
+        count = max(1, min(5, int(data.get("count", 3) or 3)))
+        if scenario not in SOCIAL_COPY:
+            return send_json(self, {"ok": False, "msg": "话术场景不存在"}, 400)
+        if data.get("use_ai"):
+            settings = db.get_settings()
+            if not settings.get("openai_api_key"):
+                return send_json(self, {"ok": False, "msg": "未配置 AI 密钥，请先到“设置”填写"}, 400)
+            system = (
+                "你是一名光纤通信行业的资深运营，擅长写自然、不硬广的社媒引流话术。"
+                "话术要简短口语化，符合平台语境，不要虚构电话和微信号。"
+            )
+            user = f"场景：{scenario}\n主营产品：{settings.get('product_name','')}\n公司：{settings.get('company_name','')}\n请生成 {count} 条不同的话术，每行一条。"
+            text, err = ai.generate_copy(
+                settings.get("openai_api_key"),
+                settings.get("openai_model"),
+                system,
+                user,
+                settings.get("openai_api_base", ""),
+            )
+            if err:
+                return send_json(self, {"ok": False, "msg": err}, 400)
+            texts = [t.strip() for t in text.splitlines() if t.strip()]
+            return send_json(self, {"ok": True, "texts": texts, "ai": True})
+        s = db.get_settings()
+        pool = [c.replace("{{产品}}", s.get("product_name", "")).replace("{{我方公司}}", s.get("company_name", "")) for c in SOCIAL_COPY[scenario]]
+        random.shuffle(pool)
+        return send_json(self, {"ok": True, "texts": pool[:count], "ai": False})
+
     def _export(self, qs):
         filters = lead_filters(qs)
         rows = db.all_leads(filters)

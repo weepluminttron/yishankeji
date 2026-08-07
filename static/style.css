@@ -203,6 +203,9 @@ td .sub { color: var(--muted); font-size: 12px; }
 .st-跟进中 { background: #ede7f6; color: #6a1b9a; }
 .st-已成交 { background: #e8f5e9; color: #2e7d32; }
 .st-无效 { background: #eceff1; color: #607d8b; }
+.sc-high { background: #e8f5e9; color: #2e7d32; }
+.sc-mid { background: #fff8e1; color: #b26a00; }
+.sc-low { background: #eceff1; color: #607d8b; }
 .tag-chip {
   display: inline-block;
   background: #eef4fb;

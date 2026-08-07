@@ -114,7 +114,7 @@ function go(page) {
   state.page = page;
   $$(".nav-item").forEach((b) => b.classList.toggle("active", b.dataset.page === page));
   $$(".page").forEach((p) => p.classList.toggle("active", p.id === "page-" + page));
-  const renderer = { dashboard: renderDashboard, leads: renderLeads, collect: renderCollect, outreach: renderOutreach, logs: renderLogs, settings: renderSettings }[page];
+  const renderer = { dashboard: renderDashboard, leads: renderLeads, collect: renderCollect, buyer: renderBuyer, outreach: renderOutreach, logs: renderLogs, settings: renderSettings }[page];
   if (renderer) renderer();
 }
 $$(".nav-item").forEach((b) => b.addEventListener("click", () => go(b.dataset.page)));
@@ -254,6 +254,7 @@ async function loadLeadList() {
       <td><span class="type-chip">${esc(r.type)}</span></td>
       <td>${badge(r.status)}</td>
       <td>${(r.tags || "").split(",").filter(Boolean).map((t) => `<span class="tag-chip">${esc(t)}</span>`).join("")}</td>
+      <td>${scoreBadge(r.score)}</td>
       <td>${fmtDate(r.updated_at)}</td>
       <td><div class="row-actions">
         <button class="btn sm" onclick="openLeadDetail(${r.id})">查看</button>
@@ -264,7 +265,7 @@ async function loadLeadList() {
   $("#lead-table").innerHTML = rows
     ? `<table><thead><tr>
         <th style="width:30px"></th><th>公司名称</th><th>联系人</th><th>联系方式</th><th>地区</th>
-        <th>类型</th><th>状态</th><th>标签</th><th>更新时间</th><th>操作</th>
+        <th>类型</th><th>状态</th><th>标签</th><th>评分</th><th>更新时间</th><th>操作</th>
       </tr></thead><tbody>${rows}</tbody></table>`
     : `<div class="empty"><div class="ico">🗂️</div>没有找到线索，试试调整筛选条件，或去“线索采集”添加</div>`;
   const totalPages = Math.max(1, Math.ceil(data.total / state.leads.size));
@@ -391,6 +392,7 @@ async function openLeadDetail(id) {
       <div class="item"><div class="k">标签</div><div class="v">${(lead.tags || "").split(",").filter(Boolean).map((t) => `<span class="tag-chip">${esc(t)}</span>`).join("") || "—"}</div></div>
       <div class="item"><div class="k">下次跟进</div><div class="v">${esc(lead.reminder_date || "—")}</div></div>
       <div class="item"><div class="k">最近联系</div><div class="v">${esc(lead.last_contacted || "—")}（${lead.contact_count || 0} 次）</div></div>
+      <div class="item"><div class="k">线索评分</div><div class="v">${scoreBadge(lead.score)} <span class="sub">${esc(lead.score_reason || "")}</span></div></div>
       <div class="item" style="grid-column:1/-1"><div class="k">地址</div><div class="v">${esc(lead.address || "—")}</div></div>
       <div class="item" style="grid-column:1/-1"><div class="k">备注</div><div class="v">${esc(lead.note || "—")}</div></div>
     </div>
@@ -398,6 +400,7 @@ async function openLeadDetail(id) {
       <button class="btn primary sm" id="d-contact">✅ 记录联系</button>
       <button class="btn sm" id="d-edit">编辑</button>
       <button class="btn sm" id="d-mail">发邮件</button>
+      <button class="btn sm" id="d-score">🎯 AI 评分</button>
       <button class="btn sm danger" id="d-del">删除</button>
     </div>
     <h3 style="margin-bottom:8px">添加跟进备注</h3>
@@ -417,6 +420,16 @@ async function openLeadDetail(id) {
   $("#d-mail").onclick = () => {
     if (lead.email) state.recipients = state.recipients.filter((r) => r.id !== id).concat({ id, name: lead.name, email: lead.email, phone: lead.phone });
     closeModal(); go("outreach");
+  };
+  $("#d-score").onclick = async () => {
+    const btn = $("#d-score");
+    btn.disabled = true; btn.textContent = "评分中…";
+    try {
+      await api("/api/leads/score", { method: "POST", body: { id, use_ai: true, fallback: true } });
+      toast("评分完成", "ok");
+      closeModal(); openLeadDetail(id);
+    } catch (e) { toast(e.message, "err"); }
+    finally { btn.disabled = false; btn.textContent = "🎯 AI 评分"; }
   };
   $("#d-del").onclick = () => { closeModal(); deleteLead(id); };
   $("#d-note-btn").onclick = async () => {
@@ -442,6 +455,8 @@ async function renderCollect() {
       <button class="sub-tab active" data-group="collect" data-name="import">📥 批量导入</button>
       <button class="sub-tab" data-group="collect" data-name="crawl">🕸️ 网页采集</button>
       <button class="sub-tab" data-group="collect" data-name="auto">⏰ 定时自动采集</button>
+      <button class="sub-tab" data-group="collect" data-name="social">📱 社媒评论导入</button>
+      <button class="sub-tab" data-group="collect" data-name="wechat">💬 微信记录导入</button>
       <button class="sub-tab" data-group="collect" data-name="manual">✍️ 手动录入</button>
     </div>
     <div class="sub-panel" data-group="collect" data-name="import">
@@ -497,6 +512,32 @@ async function renderCollect() {
       </div>
       <div class="card"><h3>采集记录</h3><div id="auto-logs"><div class="empty">暂无记录</div></div></div>
     </div>
+    <div class="sub-panel" data-group="collect" data-name="social" style="display:none">
+      <div class="card">
+        <h3>📱 抖音 / 小红书 评论线索导入</h3>
+        <div class="drop-zone" id="social-zone">
+          <div class="big">上传评论导出文件</div>
+          <div>支持 .xlsx / .csv，自动按“评论人昵称”创建线索，评论内容写入跟进备注</div>
+          <div style="margin-top:10px"><a href="/api/leads/template?kind=social" class="btn primary">⬇ 下载社媒评论模板</a></div>
+        </div>
+        <input type="file" id="social-file" accept=".xlsx,.csv" style="display:none">
+        <div class="hint" style="margin-top:10px">可用抖音评论采集工具（如 douyin_one_spider）或小红书评论导出后，把“评论人昵称、评论内容、作品链接”整理成模板格式导入。</div>
+      </div>
+      <div class="card" id="social-result"></div>
+    </div>
+    <div class="sub-panel" data-group="collect" data-name="wechat" style="display:none">
+      <div class="card">
+        <h3>💬 微信聊天记录导入</h3>
+        <div class="drop-zone" id="wechat-zone">
+          <div class="big">上传聊天记录文本</div>
+          <div>支持 .txt / .csv，按联系人自动创建/匹配线索，聊天内容写入跟进记录</div>
+          <div style="margin-top:10px"><a href="/api/leads/template?kind=wechat" class="btn primary">⬇ 下载微信记录格式说明</a></div>
+        </div>
+        <input type="file" id="wechat-file" accept=".txt,.csv" style="display:none">
+        <div class="hint" style="margin-top:10px">可用微信导出工具（如 WeChatMsgDump / WeChatMsg）导出聊天记录文本后导入；也支持“时间 联系人: 内容”格式。请确保你有权处理这些聊天数据。</div>
+      </div>
+      <div class="card" id="wechat-result"></div>
+    </div>
     <div class="sub-panel" data-group="collect" data-name="manual" style="display:none">
       <div class="card"><div id="manual-form"></div></div>
     </div>`;
@@ -515,8 +556,24 @@ async function renderCollect() {
   dz.onclick = () => fileInput.click();
   dz.ondragover = (e) => { e.preventDefault(); dz.classList.add("over"); };
   dz.ondragleave = () => dz.classList.remove("over");
-  dz.ondrop = (e) => { e.preventDefault(); dz.classList.remove("over"); if (e.dataTransfer.files[0]) uploadFile(e.dataTransfer.files[0]); };
-  fileInput.onchange = () => { if (fileInput.files[0]) uploadFile(fileInput.files[0]); };
+  dz.ondrop = (e) => { e.preventDefault(); dz.classList.remove("over"); if (e.dataTransfer.files[0]) uploadFile(e.dataTransfer.files[0], "", "#import-result"); };
+  fileInput.onchange = () => { if (fileInput.files[0]) uploadFile(fileInput.files[0], "", "#import-result"); };
+
+  // 社媒评论导入
+  const sZone = $("#social-zone"), sInput = $("#social-file");
+  sZone.onclick = () => sInput.click();
+  sZone.ondragover = (e) => { e.preventDefault(); sZone.classList.add("over"); };
+  sZone.ondragleave = () => sZone.classList.remove("over");
+  sZone.ondrop = (e) => { e.preventDefault(); sZone.classList.remove("over"); if (e.dataTransfer.files[0]) uploadFile(e.dataTransfer.files[0], "social", "#social-result"); };
+  sInput.onchange = () => { if (sInput.files[0]) uploadFile(sInput.files[0], "social", "#social-result"); };
+
+  // 微信记录导入
+  const wZone = $("#wechat-zone"), wInput = $("#wechat-file");
+  wZone.onclick = () => wInput.click();
+  wZone.ondragover = (e) => { e.preventDefault(); wZone.classList.add("over"); };
+  wZone.ondragleave = () => wZone.classList.remove("over");
+  wZone.ondrop = (e) => { e.preventDefault(); wZone.classList.remove("over"); if (e.dataTransfer.files[0]) uploadFile(e.dataTransfer.files[0], "wechat", "#wechat-result"); };
+  wInput.onchange = () => { if (wInput.files[0]) uploadFile(wInput.files[0], "wechat", "#wechat-result"); };
 
   // 网页采集
   $("#crawl-btn").onclick = async () => {
@@ -626,24 +683,115 @@ function updateCandHint() {
   $("#cand-hint").textContent = `已选 ${n} 条`;
 }
 
-function uploadFile(file) {
+function uploadFile(file, kind, resultSel) {
   const fd = new FormData();
   fd.append("file", file);
-  $("#import-result").innerHTML = `<div class="empty"><div class="ico">⏳</div>正在导入 ${esc(file.name)}…</div>`;
+  if (kind) fd.append("kind", kind);
+  const resultBox = $(resultSel || "#import-result");
+  resultBox.innerHTML = `<div class="empty"><div class="ico">⏳</div>正在导入 ${esc(file.name)}…</div>`;
   fetch("/api/import", { method: "POST", body: fd })
     .then((r) => r.json())
     .then((d) => {
       if (!d.ok) throw new Error(d.msg);
       const dupRows = d.duplicates.map((x) => `<li>第 ${x.row} 行：${esc(x.name)}（${esc(x.msg)}）</li>`).join("");
       const errRows = d.errors.map((x) => `<li>第 ${x.row} 行：${esc(x.name || "")} ${esc(x.msg)}</li>`).join("");
-      $("#import-result").innerHTML = `
+      resultBox.innerHTML = `
         <h3>导入结果</h3>
         <p style="margin-top:8px">共读取 <b>${d.total}</b> 行，成功添加 <b style="color:var(--green)">${d.added.length}</b> 条，重复跳过 <b>${d.duplicates.length}</b> 条，出错 <b style="color:var(--red)">${d.errors.length}</b> 条。</p>
         ${dupRows ? `<div style="margin-top:8px"><b>重复明细：</b><ul style="margin:6px 0 0 18px;color:var(--muted)">${dupRows}</ul></div>` : ""}
         ${errRows ? `<div style="margin-top:8px"><b>错误明细：</b><ul style="margin:6px 0 0 18px;color:var(--red)">${errRows}</ul></div>` : ""}
         <div style="margin-top:12px"><button class="btn" onclick="go('leads')">去客户线索查看</button></div>`;
     })
-    .catch((e) => { $("#import-result").innerHTML = `<div class="empty"><div class="ico">⚠️</div>${esc(e.message)}</div>`; });
+    .catch((e) => { resultBox.innerHTML = `<div class="empty"><div class="ico">⚠️</div>${esc(e.message)}</div>`; });
+}
+
+/* ---------- 买家发现 ---------- */
+async function renderBuyer() {
+  const el = $("#page-buyer");
+  el.innerHTML = `
+    <div class="page-title">买家发现</div>
+    <div class="page-sub">输入行业关键词和目标地区，自动搜索潜在买家并提取联系方式（参考 B2B 买家发现流程）</div>
+    <div class="card">
+      <div class="form-grid">
+        <div class="field" style="grid-column:1/-1"><label>搜索关键词（每行一个，建议 1-3 个）</label>
+          <textarea class="textarea full" id="buyer-kws" placeholder="光纤光缆采购&#10;光纤收发器工程商&#10;FTTH 项目招标"></textarea>
+        </div>
+        <div class="field"><label>目标地区/市场（每行一个，可留空）</label>
+          <textarea class="textarea full" id="buyer-markets" style="min-height:80px" placeholder="广东&#10;浙江&#10;海外：Peru"></textarea>
+        </div>
+        <div class="field"><label>每个关键词抓取数量</label>
+          <select class="select full" id="buyer-max">
+            <option value="3">3 条</option>
+            <option value="5" selected>5 条</option>
+            <option value="8">8 条</option>
+          </select>
+        </div>
+      </div>
+      <div class="field"><label>或直接指定网址抓取（每行一个，优先于关键词搜索）</label>
+        <textarea class="textarea full" id="buyer-urls" style="min-height:60px" placeholder="https://example.com/company-a&#10;https://example.com/company-b"></textarea>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <button class="btn primary" id="buyer-run">🔍 开始发现买家</button>
+        <span class="hint">自动过滤黄页/电商平台等噪音站点，规则评分 0-10 分（有邮箱、电话、独立网站得分更高）</span>
+      </div>
+    </div>
+    <div class="card" id="buyer-result"><div class="empty"><div class="ico">🎯</div>搜索结果显示在这里</div></div>`;
+
+  $("#buyer-run").onclick = async () => {
+    const btn = $("#buyer-run");
+    btn.disabled = true; btn.textContent = "搜索中…（每个页面约需几秒）";
+    try {
+      const res = await api("/api/buyer", { method: "POST", body: {
+        keywords: $("#buyer-kws").value.trim(),
+        markets: $("#buyer-markets").value.trim(),
+        max_results: $("#buyer-max").value,
+        urls: $("#buyer-urls").value.trim(),
+      } });
+      state.buyerCandidates = res.candidates || [];
+      const errs = (res.errors || []).map((e) => `<li>${esc(e)}</li>`).join("");
+      if (!state.buyerCandidates.length) {
+        $("#buyer-result").innerHTML = `<div class="empty"><div class="ico">😕</div>没有发现线索${errs ? `<ul style="margin-top:8px;color:var(--red);text-align:left">${errs}</ul>` : ""}</div>`;
+        return;
+      }
+      $("#buyer-result").innerHTML = `
+        <h3>发现 ${state.buyerCandidates.length} 条潜在买家</h3>
+        <div style="margin:10px 0;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="buyer-all" checked> 全选</label>
+          <button class="btn primary sm" id="buyer-add">＋ 添加选中到客户线索（自动去重）</button>
+          <span class="hint">规则评分 ≥ 6 分优先跟进</span>
+        </div>
+        <div class="table-wrap"><table>
+          <thead><tr><th style="width:30px"></th><th>公司/主体</th><th>邮箱</th><th>电话</th><th>网站</th><th>评分</th><th>线索特征</th></tr></thead>
+          <tbody>${state.buyerCandidates.map((c, i) => `
+            <tr>
+              <td><input type="checkbox" class="buyer-check" data-i="${i}" checked></td>
+              <td><b>${esc(c.name)}</b><div class="sub">${esc(c.tags || "")}</div></td>
+              <td>${esc(c.email || "—")}</td>
+              <td>${esc(c.phone || "—")}</td>
+              <td class="sub">${c.website ? `<a href="${esc(c.website)}" target="_blank">打开</a>` : "—"}</td>
+              <td>${scoreBadge(c.score)}</td>
+              <td class="sub" style="max-width:220px">${esc(c.score_reason || "")}</td>
+            </tr>`).join("")}
+          </tbody></table></div>
+          ${errs ? `<div style="margin-top:10px;color:var(--orange);font-size:12px">部分页面抓取失败：<ul style="margin:4px 0 0 18px">${errs}</ul></div>` : ""}`;
+      $("#buyer-all").onchange = (e) => $$(".buyer-check").forEach((c) => c.checked = e.target.checked);
+      $("#buyer-add").onclick = async () => {
+        const picks = state.buyerCandidates.filter((_, i) => $$(".buyer-check")[i] && $$(".buyer-check")[i].checked);
+        if (!picks.length) return toast("请先勾选线索", "err");
+        const res = await api("/api/leads/bulk", { method: "POST", body: { leads: picks, source: "买家发现" } });
+        toast(`已添加 ${res.added.length} 条，跳过重复 ${res.duplicates.length} 条`, "ok");
+        state.buyerCandidates = [];
+        $("#buyer-result").innerHTML = `<div class="empty"><div class="ico">✅</div>处理完成，去“客户线索”里查看和跟进</div>`;
+      };
+    } catch (e) { toast(e.message, "err"); }
+    finally { btn.disabled = false; btn.textContent = "🔍 开始发现买家"; }
+  };
+}
+
+function scoreBadge(score) {
+  const s = Number(score || 0);
+  const cls = s >= 7 ? "sc-high" : s >= 4 ? "sc-mid" : "sc-low";
+  return `<span class="badge ${cls}">${s}分</span>`;
 }
 
 /* ---------- 主动触达 ---------- */
@@ -694,6 +842,7 @@ async function renderOutreach() {
     <div class="sub-tabs">
       <button class="sub-tab active" data-group="outreach" data-name="email">📧 邮件群发</button>
       <button class="sub-tab" data-group="outreach" data-name="copy">✍️ 文案生成</button>
+      <button class="sub-tab" data-group="outreach" data-name="social">💬 社媒话术</button>
       <button class="sub-tab" data-group="outreach" data-name="sms">📱 短信</button>
     </div>
     <div class="sub-panel" data-group="outreach" data-name="email">
@@ -852,6 +1001,73 @@ async function renderOutreach() {
   $("#ai-copy").onclick = () => {
     if (!state.aiText) return toast("先生成文案", "err");
     copyText(state.aiText);
+  };
+
+  // 社媒话术
+  const socialTab = `
+    <div class="card">
+      <h3>💬 社媒引流话术库</h3>
+      <div class="field"><label>场景</label>
+        <select class="select full" id="social-scene">
+          <option>抖音评论引流</option>
+          <option>小红书评论</option>
+          <option>私信开场白</option>
+          <option>追粉话术</option>
+        </select>
+      </div>
+      <div class="field"><label>生成数量</label>
+        <select class="select" id="social-count">
+          <option value="1">1 条</option>
+          <option value="3" selected>3 条</option>
+          <option value="5">5 条</option>
+        </select>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn primary" id="social-gen">🎲 随机生成</button>
+        <button class="btn" id="social-ai">✨ AI 生成</button>
+        <button class="btn" id="social-copy-all">📋 复制全部</button>
+      </div>
+      <div class="hint" style="margin-top:8px">参考抖音评论引流工具（来赞）的思路：话术要像真实用户、不硬广，随机换着发更安全。AI 生成需在“设置”里配置 API Key。</div>
+      <div id="social-list" style="margin-top:12px"></div>
+    </div>`;
+  const socialPanel = document.createElement("div");
+  socialPanel.className = "sub-panel";
+  socialPanel.dataset.group = "outreach";
+  socialPanel.dataset.name = "social";
+  socialPanel.style.display = "none";
+  socialPanel.innerHTML = socialTab;
+  $(".sub-panel[data-group='outreach'][data-name='sms']").after(socialPanel);
+
+  const showSocial = (list) => {
+    $("#social-list").innerHTML = list.length
+      ? list.map((t, i) => `
+        <div class="chk-row">
+          <span style="flex:1">${i + 1}. ${esc(t)}</span>
+          <button class="btn sm" data-copy="${i}">复制</button>
+        </div>`).join("")
+      : `<div class="empty">还没有话术</div>`;
+    $$("#social-list [data-copy]").forEach((b) => b.onclick = () => copyText(list[+b.dataset.copy]));
+    state.socialTexts = list;
+  };
+  const runSocial = async (useAi) => {
+    const btn = useAi ? $("#social-ai") : $("#social-gen");
+    btn.disabled = true;
+    try {
+      const res = await api("/api/copy/social", { method: "POST", body: {
+        scenario: $("#social-scene").value,
+        count: $("#social-count").value,
+        use_ai: useAi,
+      } });
+      showSocial(res.texts || []);
+      if (res.ai) toast("AI 话术生成完成", "ok");
+    } catch (e) { toast(e.message, "err"); }
+    finally { btn.disabled = false; }
+  };
+  $("#social-gen").onclick = () => runSocial(false);
+  $("#social-ai").onclick = () => runSocial(true);
+  $("#social-copy-all").onclick = () => {
+    if (!state.socialTexts || !state.socialTexts.length) return toast("先生成话术", "err");
+    copyText(state.socialTexts.join("\n\n"));
   };
 
   // 短信
@@ -1035,8 +1251,9 @@ async function renderSettings() {
       <div class="form-grid">
         <div class="field"><label>OpenAI API Key</label><input class="input full" type="password" id="s-key" placeholder="sk-..." value="${esc(s.openai_api_key)}"></div>
         <div class="field"><label>模型</label><input class="input full" id="s-model" value="${esc(s.openai_model)}"></div>
+        <div class="field" style="grid-column:1/-1"><label>接口地址（OpenAI 兼容协议）</label><input class="input full" id="s-api-base" placeholder="https://api.openai.com/v1" value="${esc(s.openai_api_base || "https://api.openai.com/v1")}"></div>
       </div>
-      <div class="hint">不填也能正常使用工具，只是“AI 生成文案”不可用，可以改用内置行业模板。</div>
+      <div class="hint">支持 OpenAI / DeepSeek / FastGPT 等兼容接口：填各自的 Key、模型名和接口地址即可。不填也能正常使用工具，只是 AI 功能不可用。</div>
     </div>
     <div class="card">
       <h3>📱 短信服务商备注</h3>
@@ -1067,6 +1284,7 @@ async function renderSettings() {
         lp_thanks: $("#s-lp-thanks").value.trim(),
         openai_api_key: $("#s-key").value.trim(),
         openai_model: $("#s-model").value.trim() || "gpt-4o-mini",
+        openai_api_base: $("#s-api-base").value.trim() || "https://api.openai.com/v1",
         sms_notice: $("#s-sms").value.trim(),
       } } });
       toast("设置已保存", "ok");
