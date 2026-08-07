@@ -10,7 +10,8 @@ Restart=always
 RestartSec=3
 Environment=HOST=0.0.0.0
 Environment=PORT=8017
-# 访问密码：请改成你自己的强密码（或去掉下面这行，改用 server.env 配置）
+# 访问密码：推荐在 /opt/yishankeji/server.env 里设置（优先级更高），
+# 这里只作兜底；生产环境请务必改成强密码或删除本行
 Environment=ACCESS_PASSWORD=CHANGE_ME_TO_A_STRONG_PASSWORD
 
 [Install]

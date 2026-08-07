@@ -138,7 +138,8 @@ def _auto_crawl_loop():
 
 
 def _load_env_file():
-    """读取 server.env（可选），支持 HOST / PORT / ACCESS_PASSWORD。"""
+    """读取 server.env（可选），支持 HOST / PORT / ACCESS_PASSWORD。
+    server.env 的配置优先于 systemd 环境变量，方便只改文件不碰服务。"""
     env_path = os.path.join(BASE_DIR, "server.env")
     if not os.path.exists(env_path):
         return
@@ -148,7 +149,7 @@ def _load_env_file():
             if not line or line.startswith("#") or "=" not in line:
                 continue
             k, v = line.split("=", 1)
-            os.environ.setdefault(k.strip(), v.strip())
+            os.environ[k.strip()] = v.strip()
 
 
 def _pw_hash(pw):
