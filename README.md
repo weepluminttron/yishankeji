@@ -51,9 +51,9 @@ sudo apt install -y git python3 python3-venv
 ### 2. 拉取代码并安装依赖
 
 ```bash
-sudo mkdir -p /opt/yishankeji
-sudo chown $USER /opt/yishankeji
-cd /opt/yishankeji
+sudo mkdir -p /data/yishankeji
+sudo chown $USER /data/yishankeji
+cd /data/yishankeji
 git clone https://github.com/weepluminttron/yishankeji.git .
 python3 -m venv venv
 ./venv/bin/pip install -r requirements.txt
@@ -86,7 +86,7 @@ sudo systemctl status yishankeji
 ### 更新代码
 
 ```bash
-cd /opt/yishankeji
+cd /data/yishankeji
 git pull
 sudo systemctl restart yishankeji
 ```
