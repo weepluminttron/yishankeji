@@ -24,15 +24,26 @@ HEADER_MAP = {
 
 SOCIAL_HEADERS = ["平台", "作品/笔记标题", "作品链接", "评论人昵称", "评论内容", "评论时间", "备注"]
 MAP_HEADERS = ["公司名称", "地址", "电话", "分类", "城市", "备注"]
+MAP_HEADER_ALIASES = {
+    "公司名称": "name", "Name": "name", "name": "name",
+    "地址": "address", "Address": "address", "address": "address",
+    "电话": "phone", "Phone": "phone", "PhoneNumber": "phone", "phone": "phone",
+    "分类": "category", "Category": "category", "Type": "category", "category": "category",
+    "城市": "city", "City": "city", "city": "city",
+    "备注": "note", "Notes": "note", "note": "note",
+    "网站": "website", "Website": "website", "website": "website",
+    "评分": "rating", "Rating": "rating", "rating": "rating",
+    "评论数": "reviews", "Reviews": "reviews", "reviews": "reviews",
+}
 
 
 def build_map_template_xlsx():
     wb = Workbook()
     ws = wb.active
     ws.title = "地图线索导入模板"
-    ws.append(MAP_HEADERS)
-    ws.append(["广州XX弱电工程有限公司", "广州市天河区xx路xx号", "020-88886666", "弱电工程", "广州", "后羿/Web Scraper 导出的地图数据整理后填入"])
-    for i, w in enumerate([32, 36, 16, 16, 12, 40], start=1):
+    ws.append(["公司名称", "地址", "电话", "分类", "城市", "网站", "评分", "评论数", "备注"])
+    ws.append(["广州XX弱电工程有限公司", "广州市天河区xx路xx号", "020-88886666", "弱电工程", "广州", "https://example.com", "4.5", "120", "google-maps-scraper / 后羿采集器导出后整理"])
+    for i, w in enumerate([32, 36, 16, 16, 12, 30, 8, 10, 46], start=1):
         ws.column_dimensions[chr(64 + i)].width = w
     buf = io.BytesIO()
     wb.save(buf)
@@ -62,12 +73,15 @@ def parse_map(path):
     if not rows:
         return [], "文件为空"
     header = [str(c or "").strip() for c in rows[0]]
-    idx = {h: i for i, h in enumerate(header) if h in MAP_HEADERS}
-    if "公司名称" not in idx:
-        return [], "表头缺少“公司名称”（请使用：公司名称、地址、电话、分类、城市、备注）"
+    idx = {}
+    for i, h in enumerate(header):
+        if h in MAP_HEADER_ALIASES:
+            idx.setdefault(MAP_HEADER_ALIASES[h], i)
+    if "name" not in idx:
+        return [], "表头缺少“公司名称/Name”（兼容 google-maps-scraper、后羿采集器导出）"
 
-    def val(row, h):
-        i = idx.get(h)
+    def val(row, key):
+        i = idx.get(key)
         if i is None or i >= len(row):
             return ""
         v = row[i].value if hasattr(row[i], "value") else row[i]
@@ -75,20 +89,30 @@ def parse_map(path):
 
     leads = []
     for n, row in enumerate(rows[1:], start=2):
-        name = val(row, "公司名称")
+        name = val(row, "name")
         if not name:
             continue
-        category = val(row, "分类")
+        category = val(row, "category")
         from core.mapsearch import _map_type
+        note = val(row, "note")
+        extra = []
+        if val(row, "website"):
+            extra.append("网站：" + val(row, "website"))
+        if val(row, "rating"):
+            extra.append("评分：" + val(row, "rating"))
+        if val(row, "reviews"):
+            extra.append(val(row, "reviews") + " 条评价")
+        if extra:
+            note = (note + "；" if note else "") + "；".join(extra)
         leads.append({
-            "name": name,
-            "address": val(row, "地址"),
-            "phone": val(row, "电话"),
-            "region": val(row, "城市"),
+            "name": val(row, "name"),
+            "address": val(row, "address"),
+            "phone": val(row, "phone"),
+            "region": val(row, "city"),
             "type": _map_type(category) if category else "其他",
             "source": "地图获客",
             "tags": category or "地图",
-            "note": val(row, "备注"),
+            "note": note,
         })
     return leads, None
 

@@ -280,12 +280,13 @@ def _mail_worker(lead_ids, subject_tpl, body_tpl):
 def _map_worker(data):
     settings = db.get_settings()
     try:
-        candidates = mapsearch.amap_search(
+        pages = int(data.get("pages", 2) or 2)
+        candidates = mapsearch.run_map_search(
+            settings,
             data.get("keyword", ""),
             data.get("city", ""),
-            settings.get("map_api_key", ""),
-            offset=25,
-            max_pages=int(data.get("pages", 2) or 2),
+            pages=pages,
+            max_results=pages * 20,
         )
         _map_job.update(running=False, result=candidates, message="")
     except Exception as e:
@@ -770,7 +771,7 @@ class Handler(BaseHTTPRequestHandler):
             return send_json(self, db.bulk_status(data.get("ids", []), data.get("status", "")))
         if api == "leads" and len(parts) > 2 and parts[2] == "contacted":
             data = read_json_body(self)
-            db.mark_contacted(int(data.get("id", 0)))
+            db.mark_contacted(int(data.get("id", 0)), data.get("type", ""), data.get("note", ""))
             return send_json(self, {"ok": True})
         if api == "leads" and len(parts) > 2 and parts[2] == "score":
             data = read_json_body(self)

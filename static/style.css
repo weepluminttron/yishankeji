@@ -360,6 +360,14 @@ td .sub { color: var(--muted); font-size: 12px; }
 .empty { text-align: center; color: var(--muted); padding: 30px 10px; }
 .empty .ico { font-size: 34px; margin-bottom: 8px; }
 
+/* ---------- 看板 ---------- */
+.kanban { display: flex; gap: 10px; overflow-x: auto; align-items: flex-start; }
+.kanban-col { flex: 1; min-width: 175px; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 8px; }
+.kanban-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.kanban-body { display: flex; flex-direction: column; gap: 8px; min-height: 60px; }
+.kanban-card { background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; cursor: grab; box-shadow: var(--shadow); }
+.kanban-card:hover { border-color: var(--brand); }
+
 /* ---------- 登录 ---------- */
 .login-mask {
   position: fixed;

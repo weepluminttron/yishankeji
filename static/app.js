@@ -199,7 +199,12 @@ async function renderLeads() {
       <button class="btn" id="btn-del-sel" disabled>删除选中</button>
     </div>
     <div class="hint" id="score-all-status" style="margin:-8px 0 12px"></div>
-    <div class="card"><div class="table-wrap" id="lead-table"></div><div class="pager" id="lead-pager"></div></div>`;
+    <div style="display:flex;gap:8px;margin-bottom:10px">
+      <button class="btn sm primary" id="view-list">☰ 列表视图</button>
+      <button class="btn sm" id="view-kanban">🗂 看板视图</button>
+    </div>
+    <div class="card"><div class="table-wrap" id="lead-table"></div><div class="pager" id="lead-pager"></div></div>
+    <div class="card" id="lead-kanban" style="display:none"></div>`;
 
   const qInput = $("#lead-q");
   let timer;
@@ -294,6 +299,59 @@ async function renderLeads() {
     });
   };
   loadLeadList();
+
+  $("#view-list").onclick = () => {
+    $("#view-list").classList.add("primary");
+    $("#view-kanban").classList.remove("primary");
+    $("#lead-kanban").style.display = "none";
+    const card = $("#lead-table").closest(".card");
+    if (card) card.style.display = "";
+  };
+  $("#view-kanban").onclick = () => {
+    $("#view-kanban").classList.add("primary");
+    $("#view-list").classList.remove("primary");
+    const card = $("#lead-table").closest(".card");
+    if (card) card.style.display = "none";
+    $("#lead-kanban").style.display = "";
+    renderKanban();
+  };
+}
+
+async function renderKanban() {
+  const f = state.leads.filters;
+  const params = new URLSearchParams({ size: "300", q: f.q, type: f.type, region: f.region, tag: f.tag, source: f.source });
+  const data = await api("/api/leads?" + params.toString());
+  const byStatus = {};
+  state.meta.statuses.forEach((s) => byStatus[s] = []);
+  data.items.forEach((l) => { (byStatus[l.status] || byStatus["新线索"] || []).push(l); });
+  $("#lead-kanban").innerHTML = `<div class="kanban">${state.meta.statuses.map((s) => `
+    <div class="kanban-col" data-status="${esc(s)}">
+      <div class="kanban-head">${badge(s)} <span class="sub">${byStatus[s].length}</span></div>
+      <div class="kanban-body">
+        ${byStatus[s].map((l) => `
+          <div class="kanban-card" draggable="true" data-id="${l.id}">
+            <div><b>${esc(l.name)}</b></div>
+            <div class="sub">${esc(l.phone || l.email || "无联系方式")}</div>
+            <div style="margin-top:4px">${scoreBadge(l.score)} ${(l.tags || "").split(",").filter(Boolean).slice(0, 2).map((t) => `<span class="tag-chip">${esc(t)}</span>`).join("")}</div>
+          </div>`).join("") || `<div class="empty" style="padding:14px">空</div>`}
+      </div>
+    </div>`).join("")}</div>`;
+  $$(".kanban-card", $("#lead-kanban")).forEach((c) => {
+    c.addEventListener("dragstart", (e) => e.dataTransfer.setData("text/plain", c.dataset.id));
+    c.addEventListener("click", () => openLeadDetail(+c.dataset.id));
+  });
+  $$(".kanban-col", $("#lead-kanban")).forEach((col) => {
+    col.addEventListener("dragover", (e) => e.preventDefault());
+    col.addEventListener("drop", async (e) => {
+      e.preventDefault();
+      const id = +e.dataTransfer.getData("text/plain");
+      const status = col.dataset.status;
+      if (!id || !status) return;
+      await api("/api/leads/" + id, { method: "PUT", body: { status } });
+      toast(`已移动到“${status}”`, "ok");
+      renderKanban();
+    });
+  });
 }
 
 async function loadLeadList() {
@@ -455,12 +513,19 @@ async function openLeadDetail(id) {
       <div class="item" style="grid-column:1/-1"><div class="k">备注</div><div class="v">${esc(lead.note || "—")}</div></div>
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
-      <button class="btn primary sm" id="d-contact">✅ 记录联系</button>
       <button class="btn sm" id="d-edit">编辑</button>
       <button class="btn sm" id="d-mail">发邮件</button>
       <button class="btn sm" id="d-sample">📦 寄样品</button>
       <button class="btn sm" id="d-score">🎯 AI 评分</button>
       <button class="btn sm danger" id="d-del">删除</button>
+    </div>
+    <h3 style="margin-bottom:8px">记录一次联系</h3>
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px">
+      <select class="select" id="d-contact-type">
+        <option>电话</option><option>微信</option><option>邮件</option><option>拜访</option><option>样品</option><option>其他</option>
+      </select>
+      <input class="input grow" id="d-contact-note" placeholder="这次联系的内容…">
+      <button class="btn primary" id="d-contact">✅ 记录联系</button>
     </div>
     <h3 style="margin-bottom:8px">添加跟进备注</h3>
     <div style="display:flex;gap:8px;margin-bottom:14px">
@@ -471,7 +536,7 @@ async function openLeadDetail(id) {
     <div class="timeline">${timeline}</div>
   `, "wide");
   $("#d-contact").onclick = async () => {
-    await api("/api/leads/contacted", { method: "POST", body: { id } });
+    await api("/api/leads/contacted", { method: "POST", body: { id, type: $("#d-contact-type").value, note: $("#d-contact-note").value.trim() } });
     toast("已记录一次联系", "ok");
     closeModal(); openLeadDetail(id);
   };
@@ -616,7 +681,7 @@ async function renderCollect() {
           </select></div>
         </div>
         <button class="btn primary" id="map-run">🗺️ 开始搜索</button>
-        <div class="hint" style="margin-top:8px">需要先在“设置 → 地图接口”配置高德 API Key（免费申请：lbs.amap.com）。内置请求延迟防封。</div>
+        <div class="hint" style="margin-top:8px">地图源在“设置 → 地图接口”选择：高德（国内，需免费 Key）或谷歌地图（复用 SerpAPI Key，可搜海外）。内置请求延迟防封。</div>
       </div>
       <div class="card" id="map-result"><div class="empty">搜索结果显示在这里</div></div>
       <div class="card">
@@ -932,7 +997,7 @@ async function pollMapJob() {
         <tbody>${list.map((c, i) => `
           <tr><td><input type="checkbox" class="map-check" data-i="${i}" checked></td>
           <td><b>${esc(c.name)}</b><div class="sub">${esc(c.tags || "")}</div></td>
-          <td>${esc(c.phone || "—")}</td><td class="sub">${esc(c.address || "")}</td><td>${esc(c.type)}</td></tr>`).join("")}
+          <td>${esc(c.phone || "—")}</td><td class="sub">${esc(c.address || "")}${c.website ? `<div>🌐 ${esc(c.website)}</div>` : ""}</td><td>${esc(c.type)}</td></tr>`).join("")}
         </tbody></table></div>`;
     $("#map-all").onchange = (e) => $$(".map-check").forEach((c) => c.checked = e.target.checked);
     $("#map-add").onclick = async () => {
@@ -1613,8 +1678,16 @@ async function renderSettings() {
     </div>
     <div class="card">
       <h3>🗺️ 地图接口（地图获客用）</h3>
-      <div class="field"><label>高德地图 API Key</label><input class="input full" type="password" id="s-map-key" placeholder="高德 Web 服务 Key" value="${esc(s.map_api_key)}"></div>
-      <div class="hint">免费申请：lbs.amap.com → 控制台 → 应用管理 → 创建应用（类型选 Web 服务），把 Key 填到这里。“地图获客”就能按“关键词 + 城市”搜索弱电/安防/机房建设等公司并提取电话。</div>
+      <div class="form-grid">
+        <div class="field"><label>地图源</label>
+          <select class="select full" id="s-map-provider">
+            <option value="amap" ${(s.map_provider || "amap") === "amap" ? "selected" : ""}>高德地图（需高德 Key）</option>
+            <option value="google_maps" ${s.map_provider === "google_maps" ? "selected" : ""}>谷歌地图（复用 SerpAPI Key）</option>
+          </select>
+        </div>
+        <div class="field"><label>高德地图 API Key</label><input class="input full" type="password" id="s-map-key" placeholder="高德 Web 服务 Key" value="${esc(s.map_api_key)}"></div>
+      </div>
+      <div class="hint">高德 Key 免费申请：lbs.amap.com → 应用管理 → 创建应用（Web 服务）。选“谷歌地图”则复用你已填的 SerpAPI Key，可搜海外公司；谷歌地图接口每次最多 20 条。</div>
     </div>
     <div class="card">
       <h3>📱 短信服务商备注</h3>
@@ -1676,6 +1749,7 @@ async function renderSettings() {
         search_api_key: $("#s-search-key").value.trim(),
         search_engine_id: $("#s-search-cx").value.trim(),
         map_api_key: $("#s-map-key").value.trim(),
+        map_provider: $("#s-map-provider").value,
       } } });
       toast("设置已保存", "ok");
     } catch (e) { toast(e.message, "err"); }

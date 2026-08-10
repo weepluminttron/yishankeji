@@ -379,7 +379,7 @@ def bulk_status(ids, status):
         conn.close()
 
 
-def mark_contacted(lead_id):
+def mark_contacted(lead_id, contact_type="", note=""):
     conn = get_conn()
     try:
         lead = get_lead(lead_id)
@@ -390,7 +390,10 @@ def mark_contacted(lead_id):
             (today_str(), now(), lead_id),
         )
         conn.commit()
-        add_event(lead_id, "完成联系", "记录一次触达")
+        detail = f"{contact_type}触达" if contact_type else "记录一次触达"
+        if note:
+            detail += f"：{note}"
+        add_event(lead_id, "完成联系", detail)
     finally:
         conn.close()
 
@@ -531,6 +534,7 @@ def get_settings():
         "search_api_key": "",
         "search_engine_id": "",
         "map_api_key": "",
+        "map_provider": "amap",
         "lp_enabled": "1",
         "lp_title": "光纤光缆及配套产品 专业供应",
         "lp_subtitle": "免费获取样品与报价，1 个工作日内专人对接",
@@ -555,6 +559,7 @@ def save_settings(values):
         "auto_login_trusted",
         "search_provider", "search_api_key", "search_engine_id",
         "map_api_key",
+        "map_provider",
         "auto_ai_score",
         "access_password", "lp_enabled", "lp_title", "lp_subtitle", "lp_cta",
         "lp_phone", "lp_thanks", "auto_crawl_urls", "auto_crawl_interval",
