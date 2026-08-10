@@ -30,7 +30,8 @@ INTENT_EN = ["buyer", "purchase", "procurement", "import", "wholesale", "distrib
 # 供应商/同行信号（出现则降权）
 SUPPLIER_WORDS = ["厂家直供", "厂家直销", "现货供应", "批发价", "出厂价", "价格优惠", "量大从优",
                   "supplier", "manufacturer", "wholesale price", "factory price", "export",
-                  "我们生产", "我司生产", "主营产品", "热销"]
+                  "我们生产", "我司生产", "主营产品", "热销", "产品中心", "产品介绍",
+                  "产品系列", "产品展示", "产品分类", "产品参数", "光纤预制棒"]
 # 纯噪音站点信号（直接过滤）
 NOISE_WORDS = ["黄页", "百科", "招聘", "求职", "文库", "下载", "登录", "注册", "论坛", "博客",
                "新闻", "资讯", "峰会", "大会", "展会", "知道", "问答", "教程", "视频", "小说"]
@@ -42,6 +43,10 @@ BLOCKED_DOMAINS = (
     "facebook.com", "linkedin.com", "youtube.com", "instagram.com", "wikipedia.org",
     "icp.chinaz.com", "beian.miit.gov.cn", "tianyancha.com", "qichacha.com", "aiqicha.baidu.com",
     "gongshang.mingluji.com", "qcc.com",
+    # 内容/技术博客与招聘平台（大概率不是买家）
+    "csdn.net", "cnblogs.com", "juejin.cn", "segmentfault.com", "51cto.com", "oschina.net",
+    "infoq.cn", "eefocus.com", "elecfans.com", "21ic.com", "zhipin.com", "liepin.com",
+    "51job.com", "c114.com.cn",
 )
 
 WEBMAILS = {"qq.com", "163.com", "126.com", "gmail.com", "outlook.com", "hotmail.com",
@@ -56,8 +61,21 @@ def _domain(url):
         return ""
 
 
+def _resolve_url(url):
+    """把 Bing 的 r.bing.com 跳转链接还原成真实地址。"""
+    try:
+        p = urllib.parse.urlparse(url)
+        if p.hostname and p.hostname.replace("www.", "") in ("r.bing.com", "bing.com"):
+            q = urllib.parse.parse_qs(p.query)
+            if q.get("url"):
+                return q["url"][0]
+    except Exception:
+        pass
+    return url
+
+
 def is_blocked(url):
-    d = _domain(url)
+    d = _domain(_resolve_url(url))
     return any(d == b or d.endswith("." + b) for b in BLOCKED_DOMAINS)
 
 
@@ -298,6 +316,7 @@ def run(keywords, markets=None, max_results=6, urls=None, use_ai=False, settings
                 errors.append(f"搜索“{q}”失败：{e}")
                 continue
             for r in results:
+                r["url"] = _resolve_url(r["url"])
                 if r["url"] in seen:
                     continue
                 seen.add(r["url"])
@@ -349,4 +368,11 @@ def run(keywords, markets=None, max_results=6, urls=None, use_ai=False, settings
             candidates = keep
 
     candidates.sort(key=lambda c: c["score"], reverse=True)
-    return {"candidates": candidates, "errors": errors, "filtered": filtered}
+    dropped_low = 0
+    keep = []
+    for c in candidates:
+        if c["score"] < 2:
+            dropped_low += 1
+            continue
+        keep.append(c)
+    return {"candidates": keep, "errors": errors, "filtered": filtered, "dropped_low": dropped_low}

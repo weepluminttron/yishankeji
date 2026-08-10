@@ -751,13 +751,14 @@ async function renderBuyer() {
       } });
       state.buyerCandidates = res.candidates || [];
       const filteredCount = res.filtered || 0;
+      const droppedLow = res.dropped_low || 0;
       const errs = (res.errors || []).map((e) => `<li>${esc(e)}</li>`).join("");
       if (!state.buyerCandidates.length) {
         $("#buyer-result").innerHTML = `<div class="empty"><div class="ico">😕</div>没有发现线索${errs ? `<ul style="margin-top:8px;color:var(--red);text-align:left">${errs}</ul>` : ""}</div>`;
         return;
       }
       $("#buyer-result").innerHTML = `
-        <h3>发现 ${state.buyerCandidates.length} 条潜在买家${filteredCount ? `（已自动过滤 ${filteredCount} 条噪音/同行）` : ""}</h3>
+        <h3>发现 ${state.buyerCandidates.length} 条潜在买家${filteredCount || droppedLow ? `（已过滤噪音/同行 ${filteredCount} 条${droppedLow ? `，低分 ${droppedLow} 条` : ""}）` : ""}</h3>
         <div style="margin:10px 0;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="buyer-all" checked> 全选</label>
           <button class="btn primary sm" id="buyer-add">＋ 添加选中到客户线索（自动去重）</button>
