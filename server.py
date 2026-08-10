@@ -40,6 +40,8 @@ _score_job = {
     "started": "",
     "message": "",
 }
+_buyer_job = {"running": False, "message": "", "started": "", "result": None}
+_mail_job = {"running": False, "message": "", "started": "", "result": None}
 
 SOCIAL_COPY = {
     "抖音评论引流": [
@@ -115,11 +117,11 @@ def run_auto_crawl_once(urls):
     if total_added > 0:
         settings = db.get_settings()
         if settings.get("notify_webhook"):
-            notify.send_webhook(
-                settings.get("notify_webhook"),
-                "🔔 定时采集发现新客户",
-                f"本次自动采集新增 {total_added} 条线索，记得去跟进哦～",
-            )
+            threading.Thread(
+                target=notify.send_webhook,
+                args=(settings.get("notify_webhook"), "🔔 定时采集发现新客户", f"本次自动采集新增 {total_added} 条线索，记得去跟进哦～"),
+                daemon=True,
+            ).start()
         auto_score_if_enabled()
     return {
         "urls": len(urls),
@@ -196,6 +198,66 @@ def auto_score_if_enabled():
     if settings.get("auto_ai_score", "1") == "1" and settings.get("openai_api_key") and not _score_job.get("running"):
         _score_job.update(running=True, done=0, failed=0, total=0, current="", message="")
         threading.Thread(target=_score_all_worker, daemon=True).start()
+
+
+def _buyer_worker(data):
+    settings = db.get_settings()
+    try:
+        result = buyer.run(
+            keywords=data.get("keywords", ""),
+            markets=data.get("markets", ""),
+            max_results=int(data.get("max_results", 6) or 6),
+            urls=data.get("urls", ""),
+            use_ai=bool(data.get("use_ai")),
+            settings=settings,
+        )
+        _buyer_job.update(running=False, result=result, message="")
+    except Exception as e:
+        _buyer_job.update(running=False, result=None, message=str(e))
+
+
+def start_buyer_job(data):
+    if _buyer_job.get("running"):
+        return False, "已有搜索任务在运行，请等待完成"
+    _buyer_job.update(
+        running=True, result=None, message="",
+        started=time.strftime("%Y-%m-%d %H:%M:%S"),
+    )
+    threading.Thread(target=_buyer_worker, args=(data,), daemon=True).start()
+    return True, "搜索任务已启动"
+
+
+def _mail_worker(lead_ids, subject_tpl, body_tpl):
+    settings = db.get_settings()
+    results = {"ok": True, "sent": 0, "failed": 0, "errors": [], "total": len(lead_ids), "done": 0}
+    for lid in lead_ids:
+        if not _mail_job.get("running"):
+            break
+        lead = db.get_lead(lid)
+        if not lead or not lead.get("email"):
+            results["failed"] += 1
+            results["errors"].append({"id": lid, "name": lead["name"] if lead else str(lid), "msg": "缺少邮箱"})
+            results["done"] += 1
+            _mail_job["result"] = dict(results)
+            continue
+        subject = mailer.personalize(subject_tpl, lead, settings)
+        body = mailer.personalize(body_tpl, lead, settings)
+        ok, err = mailer.send_one(settings, lead["email"], subject, body)
+        if ok:
+            results["sent"] += 1
+            db.add_mail_log(lid, lead["name"], lead["email"], subject, body, "成功")
+            db.mark_contacted(lid)
+        else:
+            results["failed"] += 1
+            db.add_mail_log(lid, lead["name"], lead["email"], subject, body, "失败", err)
+            results["errors"].append({"id": lid, "name": lead["name"], "msg": err})
+        results["done"] += 1
+        _mail_job["result"] = dict(results)
+    _mail_job.update(
+        running=False,
+        result=results,
+        message=f"发送完成：成功 {results['sent']}，失败 {results['failed']}",
+    )
 
 
 def _load_env_file():
@@ -482,6 +544,8 @@ class Handler(BaseHTTPRequestHandler):
             return send_json(self, {"items": items, "total": total, "page": page, "size": size})
         if api == "settings":
             return send_json(self, {"ok": True, "settings": db.get_settings()})
+        if api == "mail" and len(parts) > 2 and parts[2] == "status":
+            return send_json(self, {"ok": True, "job": dict(_mail_job)})
         if api == "mail":
             return send_json(self, {"ok": True, "logs": db.list_mail_logs()})
         if api == "crawl" and len(parts) > 2 and parts[2] == "auto":
@@ -493,6 +557,8 @@ class Handler(BaseHTTPRequestHandler):
             })
         if api == "copy" and len(parts) > 2 and parts[2] == "social":
             return send_json(self, {"ok": True, "list": SOCIAL_COPY})
+        if api == "buyer":
+            return send_json(self, {"ok": True, "job": dict(_buyer_job)})
         if api == "trusted":
             return send_json(self, {
                 "ok": True,
@@ -542,15 +608,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._lp_submit()
         if api == "buyer":
             data = read_json_body(self)
-            result = buyer.run(
-                keywords=data.get("keywords", ""),
-                markets=data.get("markets", ""),
-                max_results=int(data.get("max_results", 6) or 6),
-                urls=data.get("urls", ""),
-                use_ai=bool(data.get("use_ai")),
-                settings=db.get_settings(),
-            )
-            return send_json(self, {"ok": True, **result})
+            ok, msg = start_buyer_job(data)
+            if not ok:
+                return send_json(self, {"ok": False, "msg": msg}, 400)
+            return send_json(self, {"ok": True, "msg": msg, "job": dict(_buyer_job)})
         if api == "copy" and len(parts) > 2 and parts[2] == "social":
             data = read_json_body(self)
             return self._social_copy(data)
@@ -693,7 +754,7 @@ class Handler(BaseHTTPRequestHandler):
             return send_json(self, {"ok": True})
         if api == "mail":
             data = read_json_body(self)
-            return self._send_mails(data)
+            return self._start_mails(data)
         return send_json(self, {"ok": False, "msg": "接口不存在"}, 404)
 
     def _route_put(self):
@@ -771,7 +832,7 @@ class Handler(BaseHTTPRequestHandler):
                 "客户线索.xlsx",
             )
 
-    def _send_mails(self, data):
+    def _start_mails(self, data):
         settings = db.get_settings()
         missing = mailer.validate_settings(settings)
         if missing:
@@ -783,25 +844,20 @@ class Handler(BaseHTTPRequestHandler):
         body_tpl = data.get("body", "")
         if not subject_tpl or not body_tpl:
             return send_json(self, {"ok": False, "msg": "请填写邮件主题和正文"}, 400)
-        results = {"ok": True, "sent": 0, "failed": 0, "errors": []}
-        for lid in lead_ids:
-            lead = db.get_lead(lid)
-            if not lead or not lead.get("email"):
-                results["failed"] += 1
-                results["errors"].append({"id": lid, "name": lead["name"] if lead else str(lid), "msg": "缺少邮箱"})
-                continue
-            subject = mailer.personalize(subject_tpl, lead, settings)
-            body = mailer.personalize(body_tpl, lead, settings)
-            ok, err = mailer.send_one(settings, lead["email"], subject, body)
-            if ok:
-                results["sent"] += 1
-                db.add_mail_log(lid, lead["name"], lead["email"], subject, body, "成功")
-                db.mark_contacted(lid)
-            else:
-                results["failed"] += 1
-                db.add_mail_log(lid, lead["name"], lead["email"], subject, body, "失败", err)
-                results["errors"].append({"id": lid, "name": lead["name"], "msg": err})
-        return send_json(self, results)
+        if _mail_job.get("running"):
+            return send_json(self, {"ok": False, "msg": "已有发送任务在运行，请等待完成"}, 400)
+        _mail_job.update(
+            running=True, result=None, message="",
+            started=time.strftime("%Y-%m-%d %H:%M:%S"),
+        )
+        threading.Thread(
+            target=_mail_worker, args=(lead_ids, subject_tpl, body_tpl), daemon=True
+        ).start()
+        return send_json(self, {
+            "ok": True,
+            "msg": f"发送任务已启动，共 {len(lead_ids)} 封",
+            "job": dict(_mail_job),
+        })
 
     # ---------- 静态文件 ----------
     def _serve_static(self, rel):
@@ -911,11 +967,11 @@ class Handler(BaseHTTPRequestHandler):
             return send_json(self, {"ok": False, "msg": err}, 400)
         s = db.get_settings()
         if s.get("notify_webhook"):
-            notify.send_webhook(
-                s.get("notify_webhook"),
-                "🎉 官网收到新客户留资",
-                notify.lead_notice_text(lead),
-            )
+            threading.Thread(
+                target=notify.send_webhook,
+                args=(s.get("notify_webhook"), "🎉 官网收到新客户留资", notify.lead_notice_text(lead)),
+                daemon=True,
+            ).start()
         auto_score_if_enabled()
         return send_json(self, {"ok": True, "thanks": s.get("lp_thanks", "")})
 

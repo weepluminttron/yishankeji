@@ -20,8 +20,11 @@ _lock = threading.Lock()
 
 def get_conn():
     os.makedirs(DATA_DIR, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=15)
     conn.row_factory = sqlite3.Row
+    # WAL 模式：读写并发不互相阻塞，显著降低等待
+    conn.execute("PRAGMA journal_mode = WAL")
+    conn.execute("PRAGMA busy_timeout = 10000")
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
 
@@ -109,6 +112,8 @@ def init_db():
             );
             CREATE INDEX IF NOT EXISTS idx_leads_status ON leads(status);
             CREATE INDEX IF NOT EXISTS idx_leads_phone ON leads(phone);
+            CREATE INDEX IF NOT EXISTS idx_leads_name ON leads(name);
+            CREATE INDEX IF NOT EXISTS idx_leads_updated ON leads(updated_at);
             CREATE INDEX IF NOT EXISTS idx_notes_lead ON notes(lead_id);
             """
         )

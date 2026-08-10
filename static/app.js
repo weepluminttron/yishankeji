@@ -764,7 +764,7 @@ async function renderBuyer() {
 
   $("#buyer-run").onclick = async () => {
     const btn = $("#buyer-run");
-    btn.disabled = true; btn.textContent = "搜索中…（每个页面约需几秒）";
+    btn.disabled = true; btn.textContent = "启动中…";
     try {
       const res = await api("/api/buyer", { method: "POST", body: {
         keywords: $("#buyer-kws").value.trim(),
@@ -773,51 +773,73 @@ async function renderBuyer() {
         urls: $("#buyer-urls").value.trim(),
         use_ai: $("#buyer-ai").checked,
       } });
-      state.buyerCandidates = res.candidates || [];
-      const filteredCount = res.filtered || 0;
-      const droppedLow = res.dropped_low || 0;
-      const errs = (res.errors || []).map((e) => `<li>${esc(e)}</li>`).join("");
-      if (!state.buyerCandidates.length) {
-        $("#buyer-result").innerHTML = `<div class="empty"><div class="ico">😕</div>没有发现线索${errs ? `<ul style="margin-top:8px;color:var(--red);text-align:left">${errs}</ul>` : ""}</div>`;
-        return;
-      }
-      $("#buyer-result").innerHTML = `
-        <h3>发现 ${state.buyerCandidates.length} 条潜在买家${filteredCount || droppedLow ? `（已过滤噪音/同行 ${filteredCount} 条${droppedLow ? `，低分 ${droppedLow} 条` : ""}）` : ""}</h3>
-        <div style="margin:10px 0;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-          <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="buyer-all" checked> 全选</label>
-          <button class="btn primary sm" id="buyer-add">＋ 添加选中到客户线索（自动去重）</button>
-          <label style="display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" id="buyer-high"> 只看 ≥6 分</label>
-          <span class="hint">评分高 = 有采购意向词 + 企业邮箱/电话；含“厂家直供/批发价”等供应商信号的会扣分</span>
-        </div>
-        <div class="table-wrap"><table>
-          <thead><tr><th style="width:30px"></th><th>公司/主体</th><th>邮箱</th><th>电话</th><th>评分</th><th>判断依据</th></tr></thead>
-          <tbody>${state.buyerCandidates.map((c, i) => `
-            <tr data-score="${c.score}">
-              <td><input type="checkbox" class="buyer-check" data-i="${i}" checked></td>
-              <td><b>${esc(c.name)}</b><div class="sub">${esc(c.tags || "")}</div></td>
-              <td>${esc(c.email || "—")}</td>
-              <td>${esc(c.phone || "—")}</td>
-              <td>${scoreBadge(c.score)}</td>
-              <td class="sub" style="max-width:260px">${esc(c.score_reason || "")}${c.snippet ? `<div style="margin-top:3px;color:var(--muted)">${esc(c.snippet.slice(0, 120))}</div>` : ""}</td>
-            </tr>`).join("")}
-          </tbody></table></div>
-          ${errs ? `<div style="margin-top:10px;color:var(--orange);font-size:12px">部分页面抓取失败：<ul style="margin:4px 0 0 18px">${errs}</ul></div>` : ""}`;
-      $("#buyer-all").onchange = (e) => $$(".buyer-check").forEach((c) => c.checked = e.target.checked);
-      $("#buyer-high").onchange = (e) => {
-        $$("#buyer-result tbody tr").forEach((tr) => {
-          tr.style.display = e.target.checked && Number(tr.dataset.score) < 6 ? "none" : "";
-        });
-      };
-      $("#buyer-add").onclick = async () => {
-        const picks = state.buyerCandidates.filter((_, i) => $$(".buyer-check")[i] && $$(".buyer-check")[i].checked);
-        if (!picks.length) return toast("请先勾选线索", "err");
-        const res = await api("/api/leads/bulk", { method: "POST", body: { leads: picks, source: "买家发现" } });
-        toast(`已添加 ${res.added.length} 条，跳过重复 ${res.duplicates.length} 条`, "ok");
-        state.buyerCandidates = [];
-        $("#buyer-result").innerHTML = `<div class="empty"><div class="ico">✅</div>处理完成，去“客户线索”里查看和跟进</div>`;
-      };
+      $("#buyer-result").innerHTML = `<div class="empty"><div class="ico">⏳</div>搜索任务已启动，正在后台进行…（页面可继续操作）</div>`;
+      pollBuyerJob();
     } catch (e) { toast(e.message, "err"); }
     finally { btn.disabled = false; btn.textContent = "🔍 开始发现买家"; }
+  };
+}
+
+async function pollBuyerJob() {
+  try {
+    const d = await api("/api/buyer");
+    const job = d.job;
+    if (job.running) {
+      $("#buyer-result").innerHTML = `<div class="empty"><div class="ico">⏳</div>正在搜索并分析买家线索…（后台进行中，可先做其他事）</div>`;
+      setTimeout(pollBuyerJob, 1500);
+      return;
+    }
+    if (job.message) {
+      $("#buyer-result").innerHTML = `<div class="empty"><div class="ico">⚠️</div>${esc(job.message)}</div>`;
+      return;
+    }
+    renderBuyerResult(job.result || { candidates: [] });
+  } catch (e) { /* 忽略 */ }
+}
+
+function renderBuyerResult(res) {
+  state.buyerCandidates = res.candidates || [];
+  const filteredCount = res.filtered || 0;
+  const droppedLow = res.dropped_low || 0;
+  const errs = (res.errors || []).map((e) => `<li>${esc(e)}</li>`).join("");
+  if (!state.buyerCandidates.length) {
+    $("#buyer-result").innerHTML = `<div class="empty"><div class="ico">😕</div>没有发现线索${errs ? `<ul style="margin-top:8px;color:var(--red);text-align:left">${errs}</ul>` : ""}</div>`;
+    return;
+  }
+  $("#buyer-result").innerHTML = `
+    <h3>发现 ${state.buyerCandidates.length} 条潜在买家${filteredCount || droppedLow ? `（已过滤噪音/同行 ${filteredCount} 条${droppedLow ? `，低分 ${droppedLow} 条` : ""}）` : ""}</h3>
+    <div style="margin:10px 0;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="buyer-all" checked> 全选</label>
+      <button class="btn primary sm" id="buyer-add">＋ 添加选中到客户线索（自动去重）</button>
+      <label style="display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" id="buyer-high"> 只看 ≥6 分</label>
+      <span class="hint">评分高 = 有采购意向词 + 企业邮箱/电话；含“厂家直供/批发价”等供应商信号的会扣分</span>
+    </div>
+    <div class="table-wrap"><table>
+      <thead><tr><th style="width:30px"></th><th>公司/主体</th><th>邮箱</th><th>电话</th><th>评分</th><th>判断依据</th></tr></thead>
+      <tbody>${state.buyerCandidates.map((c, i) => `
+        <tr data-score="${c.score}">
+          <td><input type="checkbox" class="buyer-check" data-i="${i}" checked></td>
+          <td><b>${esc(c.name)}</b><div class="sub">${esc(c.tags || "")}</div></td>
+          <td>${esc(c.email || "—")}</td>
+          <td>${esc(c.phone || "—")}</td>
+          <td>${scoreBadge(c.score)}</td>
+          <td class="sub" style="max-width:260px">${esc(c.score_reason || "")}${c.snippet ? `<div style="margin-top:3px;color:var(--muted)">${esc(c.snippet.slice(0, 120))}</div>` : ""}</td>
+        </tr>`).join("")}
+      </tbody></table></div>
+      ${errs ? `<div style="margin-top:10px;color:var(--orange);font-size:12px">部分页面抓取失败：<ul style="margin:4px 0 0 18px">${errs}</ul></div>` : ""}`;
+  $("#buyer-all").onchange = (e) => $$(".buyer-check").forEach((c) => c.checked = e.target.checked);
+  $("#buyer-high").onchange = (e) => {
+    $$("#buyer-result tbody tr").forEach((tr) => {
+      tr.style.display = e.target.checked && Number(tr.dataset.score) < 6 ? "none" : "";
+    });
+  };
+  $("#buyer-add").onclick = async () => {
+    const picks = state.buyerCandidates.filter((_, i) => $$(".buyer-check")[i] && $$(".buyer-check")[i].checked);
+    if (!picks.length) return toast("请先勾选线索", "err");
+    const res = await api("/api/leads/bulk", { method: "POST", body: { leads: picks, source: "买家发现" } });
+    toast(`已添加 ${res.added.length} 条，跳过重复 ${res.duplicates.length} 条`, "ok");
+    state.buyerCandidates = [];
+    $("#buyer-result").innerHTML = `<div class="empty"><div class="ico">✅</div>处理完成，去“客户线索”里查看和跟进</div>`;
   };
 }
 
@@ -995,17 +1017,35 @@ async function renderOutreach() {
     if (!picks.length) return toast("请先选择有邮箱的收件人", "err");
     if (!bodyBox.value.trim()) return toast("请填写邮件正文", "err");
     confirmBox(`确定向 ${picks.length} 位客户发送邮件？发送后不可撤回。`, async () => {
-      const btn = $("#btn-send-mail");
-      btn.disabled = true; btn.textContent = "发送中…";
       try {
         const res = await api("/api/mail", { method: "POST", body: { lead_ids: picks.map((p) => p.id), subject: $("#mail-subject").value, body: bodyBox.value } });
-        const errs = res.errors.map((e) => `<li>${esc(e.name)}：${esc(e.msg)}</li>`).join("");
-        $("#mail-result").innerHTML = `<h3>发送结果</h3><p style="margin-top:8px">成功 <b style="color:var(--green)">${res.sent}</b> 封，失败 <b style="color:var(--red)">${res.failed}</b> 封。</p>${errs ? `<ul style="margin:8px 0 0 18px;color:var(--red)">${errs}</ul>` : ""}`;
-        toast(`已发送 ${res.sent} 封`, res.sent ? "ok" : "err");
+        $("#mail-result").innerHTML = `<div class="empty"><div class="ico">⏳</div>发送任务已启动，正在后台逐封发送…（页面可继续操作）</div>`;
+        pollMailJob();
       } catch (e) { toast(e.message, "err"); }
-      finally { btn.disabled = false; btn.textContent = "🚀 发送给选中客户"; }
     });
   };
+
+  async function pollMailJob() {
+    try {
+      const d = await api("/api/mail/status");
+      const job = d.job;
+      if (job.running) {
+        const done = (job.result && job.result.done) || 0;
+        const total = (job.result && job.result.total) || "…";
+        $("#mail-result").innerHTML = `<div class="empty"><div class="ico">📧</div>正在发送 ${done}/${total} 封…（后台进行中）</div>`;
+        setTimeout(pollMailJob, 1500);
+        return;
+      }
+      const r = job.result;
+      if (!r) {
+        $("#mail-result").innerHTML = `<div class="empty"><div class="ico">⚠️</div>${esc(job.message || "发送任务已结束")}</div>`;
+        return;
+      }
+      const errs = (r.errors || []).map((e) => `<li>${esc(e.name)}：${esc(e.msg)}</li>`).join("");
+      $("#mail-result").innerHTML = `<h3>发送结果</h3><p style="margin-top:8px">成功 <b style="color:var(--green)">${r.sent}</b> 封，失败 <b style="color:var(--red)">${r.failed}</b> 封。</p>${errs ? `<ul style="margin:8px 0 0 18px;color:var(--red)">${errs}</ul>` : ""}`;
+      toast(`已发送 ${r.sent} 封`, r.sent ? "ok" : "err");
+    } catch (e) { /* 忽略轮询错误 */ }
+  }
 
   // AI 文案
   $("#ai-gen").onclick = async () => {
