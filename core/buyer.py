@@ -10,6 +10,7 @@
 import json
 import re
 import time
+import urllib.error
 import urllib.parse
 
 from lxml import html as lh
@@ -87,6 +88,21 @@ def _resolve_url(url):
 def is_blocked(url):
     d = _domain(_resolve_url(url))
     return any(d == b or d.endswith("." + b) for b in BLOCKED_DOMAINS)
+
+
+def _is_vpn_link(url):
+    """识别学校/机构 VPN 网关链接（内网页面，外部抓不到）。"""
+    try:
+        p = urllib.parse.urlparse(url)
+        host = (p.hostname or "").lower()
+        path = p.path.lower()
+        if "vpn" in host:
+            return True
+        if re.search(r"/(?:https|http)/", path):
+            return True
+    except Exception:
+        pass
+    return False
 
 
 def build_queries(keyword, market=""):
@@ -290,6 +306,8 @@ def search_web(query, count, settings=None):
 
 def _is_noise(title, snippet, url):
     if is_blocked(url):
+        return True
+    if _is_vpn_link(url):
         return True
     t = (title or "") + (snippet or "")
     return any(w in t for w in NOISE_WORDS)
@@ -517,6 +535,8 @@ def run(keywords, markets=None, max_results=6, urls=None, use_ai=False, settings
             page_text = re.sub(r"<[^>]+>", " ", page_text)[:2000]
             cand = _to_candidate(contact, t.get("title", ""), t.get("snippet", ""), t.get("keyword", ""), t.get("market", ""), page_text)
             candidates.append(cand)
+        except urllib.error.HTTPError as e:
+            errors.append(f"{t['url']} 抓取失败：页面返回 {e.code}（可能已失效或需登录）")
         except Exception as e:
             errors.append(f"{t['url']} 抓取失败：{e}")
 
