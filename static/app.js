@@ -1265,6 +1265,22 @@ async function renderSettings() {
       <div class="hint">支持 OpenAI / DeepSeek / FastGPT 等兼容接口：填各自的 Key、模型名和接口地址即可。不填也能正常使用工具，只是 AI 功能不可用。</div>
     </div>
     <div class="card">
+      <h3>🔎 搜索接口（买家发现用）</h3>
+      <div class="form-grid">
+        <div class="field"><label>搜索源</label>
+          <select class="select full" id="s-search-provider">
+            <option value="so_free" ${(s.search_provider || "so_free") === "so_free" ? "selected" : ""}>360 搜索（免费，推荐）</option>
+            <option value="bing_free" ${s.search_provider === "bing_free" ? "selected" : ""}>免费 Bing（可能被限制）</option>
+            <option value="serpapi" ${s.search_provider === "serpapi" ? "selected" : ""}>SerpAPI（推荐，免费200次/月）</option>
+            <option value="google_cse" ${s.search_provider === "google_cse" ? "selected" : ""}>Google 自定义搜索 API</option>
+          </select>
+        </div>
+        <div class="field"><label>API Key</label><input class="input full" type="password" id="s-search-key" placeholder="serpapi 或 google key" value="${esc(s.search_api_key)}"></div>
+        <div class="field" style="grid-column:1/-1"><label>Google 搜索引擎 ID（cx，仅 Google 源需要）</label><input class="input full" id="s-search-cx" placeholder="0123456789abcdef" value="${esc(s.search_engine_id)}"></div>
+      </div>
+      <div class="hint">默认用 360 搜索（免费、国内可用）；如结果不够精准，可配置 SerpAPI 走 Google 搜索（免费200次/月，申请：serpapi.com）。</div>
+    </div>
+    <div class="card">
       <h3>📱 短信服务商备注</h3>
       <div class="field"><input class="input full" id="s-sms" placeholder="如：阿里云短信，群发平台：xxx" value="${esc(s.sms_notice)}"></div>
     </div>
@@ -1319,6 +1335,9 @@ async function renderSettings() {
         sms_notice: $("#s-sms").value.trim(),
         notify_webhook: $("#s-webhook").value.trim(),
         auto_login_trusted: $("#s-auto-login").value,
+        search_provider: $("#s-search-provider").value,
+        search_api_key: $("#s-search-key").value.trim(),
+        search_engine_id: $("#s-search-cx").value.trim(),
       } } });
       toast("设置已保存", "ok");
     } catch (e) { toast(e.message, "err"); }

@@ -52,6 +52,10 @@ BLOCKED_DOMAINS = (
 WEBMAILS = {"qq.com", "163.com", "126.com", "gmail.com", "outlook.com", "hotmail.com",
             "foxmail.com", "sina.com", "139.com", "aliyun.com", "icloud.com", "yahoo.com"}
 
+# 搜索源被反爬时固定返回的“罐头结果”域名
+JUNK_DOMAINS = ("baike.baidu.com", "zhihu.com", "zhuanlan.zhihu.com", "csdn.net",
+                "toutiao.com", "1688.com", "b2bwiki.baidu.com", "sohu.com")
+
 
 def _domain(url):
     try:
@@ -117,6 +121,94 @@ def search_bing(query, count=5):
         p = li.xpath(".//p")
         snippet = _clean_text(p[0].text_content()) if p else ""
         results.append({"title": title, "url": href, "snippet": snippet})
+    return results
+
+
+def search_so(query, count=6):
+    """360 搜索（免费，国内服务器可用）。真实地址在 data-mdurl 属性里。"""
+    url = "https://www.so.com/s?q=" + urllib.parse.quote(query)
+    html_text, _ = fetch_page(url)
+    doc = lh.fromstring(html_text)
+    results = []
+    for li in doc.xpath("//li[contains(@class,'res-list')]")[:count]:
+        a = li.xpath(".//h3/a | .//a[contains(@class,'res-title')]")
+        if not a:
+            continue
+        a = a[0]
+        href = (a.get("data-mdurl") or a.get("href") or "").strip()
+        title = _clean_text(a.text_content())
+        if not title or not href.startswith("http"):
+            continue
+        block = _clean_text(li.text_content())
+        snippet = block.replace(title, "", 1).strip()[:160]
+        results.append({"title": title, "url": href, "snippet": snippet})
+    return results
+
+
+def search_serpapi(query, count, api_key):
+    url = ("https://serpapi.com/search.json?engine=google&google_domain=google.com.hk"
+           "&q=" + urllib.parse.quote(query) + "&num=" + str(count) + "&hl=zh-cn&gl=cn&api_key=" + urllib.parse.quote(api_key))
+    html_text, _ = fetch_page(url, timeout=20)
+    data = json.loads(html_text)
+    results = []
+    for item in (data.get("organic_results") or [])[:count]:
+        title = _clean_text(item.get("title", ""))
+        link = item.get("link", "")
+        snippet = _clean_text(item.get("snippet", ""))
+        if title and link.startswith("http"):
+            results.append({"title": title, "url": link, "snippet": snippet})
+    return results
+
+
+def search_google_cse(query, count, api_key, engine_id):
+    url = ("https://www.googleapis.com/customsearch/v1?key=" + urllib.parse.quote(api_key)
+           + "&cx=" + urllib.parse.quote(engine_id) + "&q=" + urllib.parse.quote(query)
+           + "&num=" + str(min(10, count)))
+    html_text, _ = fetch_page(url, timeout=20)
+    data = json.loads(html_text)
+    results = []
+    for item in (data.get("items") or [])[:count]:
+        title = _clean_text(item.get("title", ""))
+        link = item.get("link", "")
+        snippet = _clean_text(item.get("snippet", ""))
+        if title and link.startswith("http"):
+            results.append({"title": title, "url": link, "snippet": snippet})
+    return results
+
+
+def _is_canned(results):
+    """判断搜索源是否返回了反爬“罐头结果”（全是百科/知乎/内容站）。"""
+    if not results:
+        return False
+    junk = 0
+    for r in results:
+        d = _domain(_resolve_url(r.get("url", "")))
+        if any(d == j or d.endswith("." + j) for j in JUNK_DOMAINS):
+            junk += 1
+    return junk >= max(1, int(len(results) * 0.6))
+
+
+def search_web(query, count, settings=None):
+    """按设置选择搜索源；免费源被反爬限制时抛出明确错误。"""
+    settings = settings or {}
+    provider = settings.get("search_provider", "bing_free")
+    key = settings.get("search_api_key", "")
+    engine_id = settings.get("search_engine_id", "")
+    if provider == "serpapi" and key:
+        return search_serpapi(query, count, key)
+    if provider == "google_cse" and key and engine_id:
+        return search_google_cse(query, count, key, engine_id)
+    if provider == "so_free":
+        results = search_so(query, count)
+        if not results:
+            raise ValueError("360 搜索没有返回结果，可换关键词或改用 SerpAPI 搜索源")
+        return results
+    results = search_bing(query, count)
+    if _is_canned(results):
+        raise ValueError(
+            "免费搜索源（Bing）被反爬限制，只能返回通用结果。请到“设置 → 搜索接口”"
+            "配置 SerpAPI（免费200次/月）或 Google 自定义搜索 API 密钥后重试。"
+        )
     return results
 
 
@@ -311,9 +403,11 @@ def run(keywords, markets=None, max_results=6, urls=None, use_ai=False, settings
         queries = queries[:15]
         for q in queries:
             try:
-                results = search_bing(q, max_results)
+                results = search_web(q, max_results, settings)
             except Exception as e:
-                errors.append(f"搜索“{q}”失败：{e}")
+                msg = f"搜索“{q}”失败：{e}"
+                if msg not in errors:
+                    errors.append(msg)
                 continue
             for r in results:
                 r["url"] = _resolve_url(r["url"])
