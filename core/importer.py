@@ -23,6 +23,74 @@ HEADER_MAP = {
 }
 
 SOCIAL_HEADERS = ["平台", "作品/笔记标题", "作品链接", "评论人昵称", "评论内容", "评论时间", "备注"]
+MAP_HEADERS = ["公司名称", "地址", "电话", "分类", "城市", "备注"]
+
+
+def build_map_template_xlsx():
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "地图线索导入模板"
+    ws.append(MAP_HEADERS)
+    ws.append(["广州XX弱电工程有限公司", "广州市天河区xx路xx号", "020-88886666", "弱电工程", "广州", "后羿/Web Scraper 导出的地图数据整理后填入"])
+    for i, w in enumerate([32, 36, 16, 16, 12, 40], start=1):
+        ws.column_dimensions[chr(64 + i)].width = w
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf
+
+
+def parse_map(path):
+    """解析地图采集导出文件（.xlsx/.csv）→ 线索列表。"""
+    ext = os.path.splitext(path)[1].lower()
+    if ext == ".xlsx":
+        wb = load_workbook(path, read_only=True, data_only=True)
+        rows = list(wb.active.iter_rows(values_only=True))
+        wb.close()
+    else:
+        raw = open(path, "rb").read()
+        text = None
+        for enc in ("utf-8-sig", "utf-8", "gb18030"):
+            try:
+                text = raw.decode(enc)
+                break
+            except UnicodeDecodeError:
+                continue
+        if text is None:
+            return [], "无法识别文件编码"
+        rows = [r for r in csv.reader(io.StringIO(text))]
+    if not rows:
+        return [], "文件为空"
+    header = [str(c or "").strip() for c in rows[0]]
+    idx = {h: i for i, h in enumerate(header) if h in MAP_HEADERS}
+    if "公司名称" not in idx:
+        return [], "表头缺少“公司名称”（请使用：公司名称、地址、电话、分类、城市、备注）"
+
+    def val(row, h):
+        i = idx.get(h)
+        if i is None or i >= len(row):
+            return ""
+        v = row[i].value if hasattr(row[i], "value") else row[i]
+        return str(v or "").strip()
+
+    leads = []
+    for n, row in enumerate(rows[1:], start=2):
+        name = val(row, "公司名称")
+        if not name:
+            continue
+        category = val(row, "分类")
+        from core.mapsearch import _map_type
+        leads.append({
+            "name": name,
+            "address": val(row, "地址"),
+            "phone": val(row, "电话"),
+            "region": val(row, "城市"),
+            "type": _map_type(category) if category else "其他",
+            "source": "地图获客",
+            "tags": category or "地图",
+            "note": val(row, "备注"),
+        })
+    return leads, None
 
 
 def build_social_template_xlsx():

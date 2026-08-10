@@ -24,7 +24,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from core import ai, buyer, crawler, db, importer, llm_cache, mailer, notify, scorer
+from core import ai, buyer, crawler, db, importer, llm_cache, mailer, mapsearch, notify, scorer
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
@@ -43,6 +43,7 @@ _score_job = {
 }
 _buyer_job = {"running": False, "message": "", "started": "", "result": None}
 _mail_job = {"running": False, "message": "", "started": "", "result": None}
+_map_job = {"running": False, "message": "", "started": "", "result": None}
 
 SOCIAL_COPY = {
     "抖音评论引流": [
@@ -274,6 +275,80 @@ def _mail_worker(lead_ids, subject_tpl, body_tpl):
         result=results,
         message=f"发送完成：成功 {results['sent']}，失败 {results['failed']}",
     )
+
+
+def _map_worker(data):
+    settings = db.get_settings()
+    try:
+        candidates = mapsearch.amap_search(
+            data.get("keyword", ""),
+            data.get("city", ""),
+            settings.get("map_api_key", ""),
+            offset=25,
+            max_pages=int(data.get("pages", 2) or 2),
+        )
+        _map_job.update(running=False, result=candidates, message="")
+    except Exception as e:
+        _map_job.update(running=False, result=None, message=str(e))
+
+
+def start_map_job(data):
+    if not data.get("keyword") or not data.get("city"):
+        return False, "请填写关键词和城市"
+    if _map_job.get("running"):
+        return False, "已有地图搜索在运行，请等待完成"
+    _map_job.update(
+        running=True, result=None, message="",
+        started=time.strftime("%Y-%m-%d %H:%M:%S"),
+    )
+    threading.Thread(target=_map_worker, args=(data,), daemon=True).start()
+    return True, "地图搜索已启动"
+
+
+def _mail_sequence_loop():
+    """后台线程：按计划自动发送跟进序列邮件。"""
+    while True:
+        try:
+            settings = db.get_settings()
+            if settings.get("smtp_host"):
+                due = db.list_due_scheduled_mails()
+                for m in due:
+                    lead = db.get_lead(m["lead_id"])
+                    if not lead:
+                        db.update_scheduled_mail(m["id"], "失败", "线索不存在")
+                        continue
+                    subj = mailer.personalize(m["subject"], lead, settings)
+                    body = mailer.personalize(m["body"], lead, settings)
+                    ok, err = mailer.send_one(settings, lead.get("email", ""), subj, body)
+                    if ok:
+                        db.update_scheduled_mail(m["id"], "成功")
+                        db.add_mail_log(m["lead_id"], lead["name"], lead["email"], subj, body, "成功")
+                        db.mark_contacted(m["lead_id"])
+                    else:
+                        db.update_scheduled_mail(m["id"], "失败", err)
+                        db.add_mail_log(m["lead_id"], lead["name"], lead["email"], subj, body, "失败", err)
+        except Exception:
+            pass
+        time.sleep(60)
+
+
+def find_duplicates():
+    """按电话/公司名找出重复线索分组。"""
+    leads = db.all_leads({})[:2000]
+    groups_map = {}
+    for l in leads:
+        phone = db.norm_phone(l.get("phone", ""))
+        if len(phone) == 11 and phone.startswith("1"):
+            groups_map.setdefault(("电话", phone), []).append(l)
+        name = db.norm_name(l.get("name", ""))
+        if name:
+            groups_map.setdefault(("名称", name), []).append(l)
+    groups = []
+    for (ktype, key), items in groups_map.items():
+        if len(items) >= 2:
+            groups.append({"type": ktype, "key": key, "leads": items})
+    groups.sort(key=lambda g: -len(g["leads"]))
+    return groups[:50]
 
 
 def _load_env_file():
@@ -520,6 +595,14 @@ class Handler(BaseHTTPRequestHandler):
             return self._export(qs)
         if api == "leads" and len(parts) > 2 and parts[2] == "template":
             kind = qs.get("kind", [""])[0]
+            if kind == "map":
+                buf = importer.build_map_template_xlsx()
+                self._send_bytes(
+                    buf.getvalue(),
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    "地图线索导入模板.xlsx",
+                )
+                return
             if kind == "social":
                 buf = importer.build_social_template_xlsx()
                 self._send_bytes(
@@ -542,6 +625,8 @@ class Handler(BaseHTTPRequestHandler):
                 "线索导入模板.xlsx",
             )
             return
+        if api == "leads" and len(parts) > 2 and parts[2] == "duplicates":
+            return send_json(self, {"ok": True, "groups": find_duplicates()})
         if api == "leads" and len(parts) > 2 and parts[2] == "score_all":
             return send_json(self, {"ok": True, "job": dict(_score_job)})
         if api == "leads" and len(parts) > 2:
@@ -577,6 +662,10 @@ class Handler(BaseHTTPRequestHandler):
             return send_json(self, {"ok": True, "presets": buyer.INDUSTRY_PRESETS})
         if api == "buyer":
             return send_json(self, {"ok": True, "job": dict(_buyer_job)})
+        if api == "map":
+            return send_json(self, {"ok": True, "job": dict(_map_job)})
+        if api == "sequences":
+            return send_json(self, {"ok": True, "mails": db.list_scheduled_mails()})
         if api == "trusted":
             return send_json(self, {
                 "ok": True,
@@ -630,6 +719,37 @@ class Handler(BaseHTTPRequestHandler):
             if not ok:
                 return send_json(self, {"ok": False, "msg": msg}, 400)
             return send_json(self, {"ok": True, "msg": msg, "job": dict(_buyer_job)})
+        if api == "map":
+            data = read_json_body(self)
+            ok, msg = start_map_job(data)
+            if not ok:
+                return send_json(self, {"ok": False, "msg": msg}, 400)
+            return send_json(self, {"ok": True, "msg": msg, "job": dict(_map_job)})
+        if api == "sequences" and len(parts) > 2 and parts[2] == "schedule":
+            data = read_json_body(self)
+            lead_ids = data.get("lead_ids", [])
+            stages = data.get("stages", [])
+            if not lead_ids or not stages:
+                return send_json(self, {"ok": False, "msg": "请选择客户并配置跟进节奏"}, 400)
+            if len(stages) > 5:
+                return send_json(self, {"ok": False, "msg": "最多配置 5 个跟进节点"}, 400)
+            scheduled = 0
+            skipped = []
+            base = datetime.now()
+            for lid in lead_ids:
+                lead = db.get_lead(lid)
+                if not lead or not lead.get("email"):
+                    skipped.append({"id": lid, "name": lead["name"] if lead else str(lid), "msg": "缺少邮箱"})
+                    continue
+                for st in stages:
+                    try:
+                        days = int(st.get("days", 0))
+                    except Exception:
+                        days = 0
+                    send_at = (base + timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+                    db.add_scheduled_mail(lid, st.get("subject", ""), st.get("body", ""), send_at)
+                    scheduled += 1
+            return send_json(self, {"ok": True, "scheduled": scheduled, "skipped": skipped})
         if api == "copy" and len(parts) > 2 and parts[2] == "social":
             data = read_json_body(self)
             return self._social_copy(data)
@@ -687,6 +807,14 @@ class Handler(BaseHTTPRequestHandler):
             db.update_lead(lead_id, {"status": new_status, "reminder_date": remind})
             db.add_event(lead_id, "寄出样品", f"样品测试跟进：{remind} 回访测试结果（插损/回损）")
             return send_json(self, {"ok": True, "lead": db.get_lead(lead_id)})
+        if api == "leads" and len(parts) > 2 and parts[2] == "merge":
+            data = read_json_body(self)
+            keep_id = int(data.get("keep_id", 0))
+            remove_ids = [int(x) for x in data.get("remove_ids", []) if str(x).isdigit()]
+            if not keep_id or not remove_ids:
+                return send_json(self, {"ok": False, "msg": "参数不完整"}, 400)
+            db.merge_leads(keep_id, remove_ids)
+            return send_json(self, {"ok": True})
         if api == "leads" and len(parts) > 2:
             lead_id = int(parts[2])
             if len(parts) > 3 and parts[3] == "notes":
@@ -704,6 +832,8 @@ class Handler(BaseHTTPRequestHandler):
                     leads, err = importer.parse_social(tmp_path)
                 elif kind == "wechat":
                     leads, err = importer.parse_wechat(tmp_path)
+                elif kind == "map":
+                    leads, err = importer.parse_map(tmp_path)
                 else:
                     leads, err = importer.parse_file(tmp_path, filename)
                 if err:
@@ -1012,6 +1142,7 @@ def main():
     port = int(os.environ.get("PORT", DEFAULT_PORT))
     server = ThreadingHTTPServer((host, port), Handler)
     threading.Thread(target=_auto_crawl_loop, daemon=True).start()
+    threading.Thread(target=_mail_sequence_loop, daemon=True).start()
 
     def _handle_stop(sig, frame):
         print("\n收到停止信号，正在安全关闭...")

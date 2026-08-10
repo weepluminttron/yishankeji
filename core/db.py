@@ -106,6 +106,16 @@ def init_db():
                 status TEXT DEFAULT '',
                 created_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS scheduled_mails (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                lead_id INTEGER,
+                subject TEXT DEFAULT '',
+                body TEXT DEFAULT '',
+                send_at TEXT NOT NULL,
+                status TEXT DEFAULT '待发送',
+                error TEXT DEFAULT '',
+                created_at TEXT NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS settings (
                 key TEXT PRIMARY KEY,
                 value TEXT
@@ -520,6 +530,7 @@ def get_settings():
         "search_provider": "so_free",
         "search_api_key": "",
         "search_engine_id": "",
+        "map_api_key": "",
         "lp_enabled": "1",
         "lp_title": "光纤光缆及配套产品 专业供应",
         "lp_subtitle": "免费获取样品与报价，1 个工作日内专人对接",
@@ -543,6 +554,7 @@ def save_settings(values):
         "notify_webhook",
         "auto_login_trusted",
         "search_provider", "search_api_key", "search_engine_id",
+        "map_api_key",
         "auto_ai_score",
         "access_password", "lp_enabled", "lp_title", "lp_subtitle", "lp_cta",
         "lp_phone", "lp_thanks", "auto_crawl_urls", "auto_crawl_interval",
@@ -681,5 +693,74 @@ def untrust_ip(ip):
     try:
         conn.execute("DELETE FROM trusted_ips WHERE ip = ?", (ip or "",))
         conn.commit()
+    finally:
+        conn.close()
+
+
+def add_scheduled_mail(lead_id, subject, body, send_at):
+    conn = get_conn()
+    try:
+        conn.execute(
+            "INSERT INTO scheduled_mails (lead_id, subject, body, send_at, status, created_at) VALUES (?,?,?,?,?,?)",
+            (lead_id, subject, body, send_at, "待发送", now()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def list_due_scheduled_mails(limit=50):
+    conn = get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM scheduled_mails WHERE status = '待发送' AND send_at <= ? "
+            "ORDER BY send_at LIMIT ?",
+            (now(), limit),
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def update_scheduled_mail(mail_id, status, error=""):
+    conn = get_conn()
+    try:
+        conn.execute(
+            "UPDATE scheduled_mails SET status = ?, error = ? WHERE id = ?",
+            (status, error, mail_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def list_scheduled_mails(limit=50):
+    conn = get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM scheduled_mails ORDER BY id DESC LIMIT ?", (limit,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def merge_leads(keep_id, remove_ids):
+    """合并线索：把待删线索的备注挪到保留线索上，然后删除。"""
+    conn = get_conn()
+    try:
+        for rid in remove_ids:
+            notes = conn.execute(
+                "SELECT content, created_at FROM notes WHERE lead_id = ? ORDER BY id", (rid,)
+            ).fetchall()
+            for n in notes:
+                conn.execute(
+                    "INSERT INTO notes (lead_id, content, created_at) VALUES (?,?,?)",
+                    (keep_id, f"[合并自线索{rid}] {n['content']}", n["created_at"]),
+                )
+            conn.execute("DELETE FROM leads WHERE id = ?", (rid,))
+        conn.commit()
+        add_event(keep_id, "合并线索", f"合并了 {len(remove_ids)} 条重复线索")
+        return True
     finally:
         conn.close()

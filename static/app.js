@@ -193,6 +193,7 @@ async function renderLeads() {
       <button class="btn" id="btn-export-x">⬇ 导出 Excel</button>
       <button class="btn" id="btn-export-c">⬇ 导出 CSV</button>
       <button class="btn" id="btn-score-all">✨ 全量 AI 评分</button>
+      <button class="btn" id="btn-clean">🧹 数据清洗</button>
       <span style="flex:1"></span>
       <button class="btn" id="btn-mail-sel" disabled>📧 邮件触达选中</button>
       <button class="btn" id="btn-del-sel" disabled>删除选中</button>
@@ -242,6 +243,39 @@ async function renderLeads() {
       const d = await api("/api/leads/score_all", { method: "POST", body: {} });
       toast(d.msg, "ok");
       pollScore();
+    } catch (e) { toast(e.message, "err"); }
+  };
+  $("#btn-clean").onclick = async () => {
+    try {
+      const d = await api("/api/leads/duplicates");
+      const groups = d.groups || [];
+      if (!groups.length) return toast("没有发现重复线索", "ok");
+      openModal(`
+        <div class="modal-head"><h2>数据清洗（发现 ${groups.length} 组重复）</h2><button class="close-x" onclick="closeModal()">×</button></div>
+        <div style="max-height:60vh;overflow-y:auto">
+        ${groups.map((g, gi) => `
+          <div style="border:1px solid var(--line);border-radius:9px;padding:10px;margin-bottom:10px">
+            <b>${esc(g.type)}重复：${esc(g.key)}（${g.leads.length} 条）</b>
+            ${g.leads.map((l, li) => `
+              <div style="display:flex;gap:8px;align-items:center;padding:4px 0">
+                <input type="radio" name="keep${gi}" value="${l.id}" ${li === 0 ? "checked" : ""}>
+                <span style="flex:1">${esc(l.name)} · ${esc(l.phone || "—")} · ${esc(l.source || "")} · ${esc(l.created_at || "")}</span>
+              </div>`).join("")}
+            <button class="btn sm primary" data-merge="${gi}" style="margin-top:6px">合并其余到保留项</button>
+          </div>`).join("")}
+        </div>
+        <div class="modal-foot"><button class="btn" onclick="closeModal()">关闭</button></div>`, "wide");
+      $$("[data-merge]").forEach((b) => b.onclick = async () => {
+        const gi = +b.dataset.merge;
+        const g = groups[gi];
+        const keepId = +document.querySelector(`input[name="keep${gi}"]:checked`).value;
+        const removeIds = g.leads.map((l) => l.id).filter((id) => id !== keepId);
+        if (!removeIds.length) return;
+        await api("/api/leads/merge", { method: "POST", body: { keep_id: keepId, remove_ids: removeIds } });
+        toast(`已合并 ${removeIds.length} 条重复线索`, "ok");
+        closeModal();
+        loadLeadList();
+      });
     } catch (e) { toast(e.message, "err"); }
   };
   $("#btn-mail-sel").onclick = () => {
@@ -489,6 +523,7 @@ async function renderCollect() {
       <button class="sub-tab" data-group="collect" data-name="auto">⏰ 定时自动采集</button>
       <button class="sub-tab" data-group="collect" data-name="social">📱 社媒评论导入</button>
       <button class="sub-tab" data-group="collect" data-name="wechat">💬 微信记录导入</button>
+      <button class="sub-tab" data-group="collect" data-name="map">🗺️ 地图获客</button>
       <button class="sub-tab" data-group="collect" data-name="manual">✍️ 手动录入</button>
     </div>
     <div class="sub-panel" data-group="collect" data-name="import">
@@ -570,6 +605,31 @@ async function renderCollect() {
       </div>
       <div class="card" id="wechat-result"></div>
     </div>
+    <div class="sub-panel" data-group="collect" data-name="map" style="display:none">
+      <div class="card">
+        <h3>🗺️ 地图获客（高德搜索）</h3>
+        <div class="form-grid">
+          <div class="field"><label>搜索关键词</label><input class="input full" id="map-kw" placeholder="弱电工程 / 安防监控 / 机房建设 / 通信工程"></div>
+          <div class="field"><label>城市</label><input class="input full" id="map-city" placeholder="广州 / 上海"></div>
+          <div class="field"><label>抓取页数（每页 25 条）</label><select class="select full" id="map-pages">
+            <option value="1">1 页</option><option value="2" selected>2 页</option><option value="4">4 页</option>
+          </select></div>
+        </div>
+        <button class="btn primary" id="map-run">🗺️ 开始搜索</button>
+        <div class="hint" style="margin-top:8px">需要先在“设置 → 地图接口”配置高德 API Key（免费申请：lbs.amap.com）。内置请求延迟防封。</div>
+      </div>
+      <div class="card" id="map-result"><div class="empty">搜索结果显示在这里</div></div>
+      <div class="card">
+        <h3>或用采集器导出后导入（Web Scraper / 后羿采集器）</h3>
+        <div class="drop-zone" id="map-zone">
+          <div class="big">上传地图采集导出文件</div>
+          <div>支持 .xlsx / .csv，表头：公司名称、地址、电话、分类、城市</div>
+          <div style="margin-top:10px"><a href="/api/leads/template?kind=map" class="btn primary">⬇ 下载地图线索模板</a></div>
+        </div>
+        <input type="file" id="map-file" accept=".xlsx,.csv" style="display:none">
+      </div>
+      <div class="card" id="map-import-result"></div>
+    </div>
     <div class="sub-panel" data-group="collect" data-name="manual" style="display:none">
       <div class="card"><div id="manual-form"></div></div>
     </div>`;
@@ -606,6 +666,24 @@ async function renderCollect() {
   wZone.ondragleave = () => wZone.classList.remove("over");
   wZone.ondrop = (e) => { e.preventDefault(); wZone.classList.remove("over"); if (e.dataTransfer.files[0]) uploadFile(e.dataTransfer.files[0], "wechat", "#wechat-result"); };
   wInput.onchange = () => { if (wInput.files[0]) uploadFile(wInput.files[0], "wechat", "#wechat-result"); };
+
+  // 地图获客
+  const mZone = $("#map-zone"), mInput = $("#map-file");
+  mZone.onclick = () => mInput.click();
+  mZone.ondragover = (e) => { e.preventDefault(); mZone.classList.add("over"); };
+  mZone.ondragleave = () => mZone.classList.remove("over");
+  mZone.ondrop = (e) => { e.preventDefault(); mZone.classList.remove("over"); if (e.dataTransfer.files[0]) uploadFile(e.dataTransfer.files[0], "map", "#map-import-result"); };
+  mInput.onchange = () => { if (mInput.files[0]) uploadFile(mInput.files[0], "map", "#map-import-result"); };
+  $("#map-run").onclick = async () => {
+    const btn = $("#map-run");
+    btn.disabled = true;
+    try {
+      await api("/api/map", { method: "POST", body: { keyword: $("#map-kw").value.trim(), city: $("#map-city").value.trim(), pages: $("#map-pages").value } });
+      $("#map-result").innerHTML = `<div class="empty"><div class="ico">⏳</div>地图搜索已启动，正在后台进行…</div>`;
+      pollMapJob();
+    } catch (e) { toast(e.message, "err"); }
+    finally { btn.disabled = false; }
+  };
 
   // 网页采集
   $("#crawl-btn").onclick = async () => {
@@ -824,6 +902,49 @@ async function pollBuyerJob() {
   } catch (e) { /* 忽略 */ }
 }
 
+async function pollMapJob() {
+  try {
+    const d = await api("/api/map");
+    const job = d.job;
+    if (job.running) {
+      $("#map-result").innerHTML = `<div class="empty"><div class="ico">🗺️</div>正在搜索地图客户…（每页 25 条，带防限流延迟）</div>`;
+      setTimeout(pollMapJob, 1500);
+      return;
+    }
+    if (job.message) {
+      $("#map-result").innerHTML = `<div class="empty"><div class="ico">⚠️</div>${esc(job.message)}</div>`;
+      return;
+    }
+    const list = job.result || [];
+    state.mapCandidates = list;
+    if (!list.length) {
+      $("#map-result").innerHTML = `<div class="empty">没有找到结果，试试换个关键词或城市</div>`;
+      return;
+    }
+    $("#map-result").innerHTML = `
+      <h3>找到 ${list.length} 家公司</h3>
+      <div style="margin:10px 0;display:flex;gap:8px;align-items:center">
+        <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="map-all" checked> 全选</label>
+        <button class="btn primary sm" id="map-add">＋ 添加选中到客户线索（自动去重）</button>
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr><th style="width:30px"></th><th>公司名称</th><th>电话</th><th>地址</th><th>类型</th></tr></thead>
+        <tbody>${list.map((c, i) => `
+          <tr><td><input type="checkbox" class="map-check" data-i="${i}" checked></td>
+          <td><b>${esc(c.name)}</b><div class="sub">${esc(c.tags || "")}</div></td>
+          <td>${esc(c.phone || "—")}</td><td class="sub">${esc(c.address || "")}</td><td>${esc(c.type)}</td></tr>`).join("")}
+        </tbody></table></div>`;
+    $("#map-all").onchange = (e) => $$(".map-check").forEach((c) => c.checked = e.target.checked);
+    $("#map-add").onclick = async () => {
+      const picks = list.filter((_, i) => $$(".map-check")[i] && $$(".map-check")[i].checked);
+      if (!picks.length) return toast("请先勾选", "err");
+      const res = await api("/api/leads/bulk", { method: "POST", body: { leads: picks, source: "地图获客" } });
+      toast(`已添加 ${res.added.length} 条，跳过重复 ${res.duplicates.length} 条`, "ok");
+      $("#map-result").innerHTML = `<div class="empty"><div class="ico">✅</div>已处理，去“客户线索”查看</div>`;
+    };
+  } catch (e) { /* 忽略 */ }
+}
+
 function renderBuyerResult(res) {
   state.buyerCandidates = res.candidates || [];
   const filteredCount = res.filtered || 0;
@@ -943,6 +1064,7 @@ async function renderOutreach() {
       <button class="sub-tab active" data-group="outreach" data-name="email">📧 邮件群发</button>
       <button class="sub-tab" data-group="outreach" data-name="copy">✍️ 文案生成</button>
       <button class="sub-tab" data-group="outreach" data-name="social">💬 社媒话术</button>
+      <button class="sub-tab" data-group="outreach" data-name="sequence">⏰ 跟进序列</button>
       <button class="sub-tab" data-group="outreach" data-name="sms">📱 短信</button>
     </div>
     <div class="sub-panel" data-group="outreach" data-name="email">
@@ -1208,6 +1330,97 @@ async function renderOutreach() {
     if (!nums.length) return toast("收件人里没有电话号码", "err");
     downloadText(nums.join("\n"), "短信名单.txt");
   };
+
+  // 跟进序列
+  const seqPanel = document.createElement("div");
+  seqPanel.className = "sub-panel";
+  seqPanel.dataset.group = "outreach";
+  seqPanel.dataset.name = "sequence";
+  seqPanel.style.display = "none";
+  seqPanel.innerHTML = `
+    <div class="card">
+      <h3>⏰ 跟进序列（自动按节奏发送）</h3>
+      <p class="hint" style="margin-bottom:10px">收件人：<b id="seq-count">${state.recipients.length}</b> 人
+        <button class="btn sm" id="seq-pick" style="margin-left:8px">👥 选择收件人</button>
+      </p>
+      <div id="seq-stages"></div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <button class="btn primary" id="seq-schedule">📅 安排跟进序列</button>
+        <span class="hint">例：第 1 天开发信 → 第 3 天跟进资料 → 第 7 天追单。需要已配置 SMTP 发信邮箱、客户有邮箱。</span>
+      </div>
+    </div>
+    <div class="card"><h3>已安排的序列</h3><div id="seq-list"><div class="empty">加载中…</div></div></div>`;
+  $(".sub-panel[data-group='outreach'][data-name='sms']").after(seqPanel);
+
+  const buildStage = (i, tplIdx, days) => {
+    const t = EMAIL_TPLS[tplIdx] || EMAIL_TPLS[0];
+    const row = document.createElement("div");
+    row.style.cssText = "border:1px solid var(--line);border-radius:9px;padding:10px;margin-bottom:10px";
+    row.innerHTML = `
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <b>第 ${i + 1} 封</b>
+        <select class="select seq-tpl" style="min-width:220px">
+          ${EMAIL_TPLS.map((t, k) => `<option value="${k}" ${k === tplIdx ? "selected" : ""}>${esc(t.name)}</option>`).join("")}
+        </select>
+        <label style="display:flex;gap:6px;align-items:center">间隔
+          <input class="input seq-days" type="number" min="0" max="30" value="${days}" style="width:70px"> 天</label>
+        <button class="btn sm danger seq-del" ${i === 0 ? "disabled" : ""}>删除</button>
+      </div>
+      <div class="field" style="margin:8px 0 0"><label>主题</label><input class="input full seq-subject" value="${esc(t.subject)}"></div>
+      <div class="field" style="margin-top:6px"><label>正文</label><textarea class="textarea full seq-body" style="min-height:90px">${esc(t.body)}</textarea></div>`;
+    const tplSel = row.querySelector(".seq-tpl");
+    tplSel.onchange = () => {
+      const t2 = EMAIL_TPLS[+tplSel.value];
+      row.querySelector(".seq-subject").value = t2.subject;
+      row.querySelector(".seq-body").value = t2.body;
+    };
+    return row;
+  };
+  const stageBox = $("#seq-stages");
+  const renderStages = () => {
+    stageBox.innerHTML = "";
+    const defaults = [0, 1, 3]; // 模板序号与间隔天数
+    defaults.forEach((d, i) => stageBox.appendChild(buildStage(i, i, d)));
+    $$("#seq-stages .seq-del").forEach((b) => b.onclick = () => { b.closest("div").remove(); });
+  };
+  renderStages();
+
+  $("#seq-pick").onclick = openRecipientPicker;
+  $("#seq-schedule").onclick = async () => {
+    const picks = state.recipients.filter((r) => r.email);
+    if (!picks.length) return toast("请先选择有邮箱的收件人", "err");
+    const stages = $$("#seq-stages > div").map((row) => ({
+      subject: row.querySelector(".seq-subject").value.trim(),
+      body: row.querySelector(".seq-body").value,
+      days: +row.querySelector(".seq-days").value || 0,
+    })).filter((s) => s.subject && s.body);
+    if (!stages.length) return toast("请至少保留一个跟进节点", "err");
+    confirmBox(`确定为 ${picks.length} 位客户安排 ${stages.length} 个跟进节点（共 ${picks.length * stages.length} 封定时邮件）？`, async () => {
+      try {
+        const res = await api("/api/sequences/schedule", { method: "POST", body: {
+          lead_ids: picks.map((p) => p.id),
+          stages,
+        } });
+        toast(`已安排 ${res.scheduled} 封定时邮件`, "ok");
+        loadSeqList();
+      } catch (e) { toast(e.message, "err"); }
+    });
+  };
+  const loadSeqList = async () => {
+    try {
+      const d = await api("/api/sequences");
+      const rows = (d.mails || []).map((m) => `
+        <tr>
+          <td>${esc(m.created_at)}</td><td>${esc(m.subject)}</td>
+          <td>${esc(m.send_at)}</td>
+          <td>${m.status === "成功" ? `<span style="color:var(--green)">成功</span>` : m.status === "失败" ? `<span style="color:var(--red)" title="${esc(m.error || "")}">失败</span>` : esc(m.status)}</td>
+        </tr>`).join("");
+      $("#seq-list").innerHTML = rows
+        ? `<div class="table-wrap"><table><thead><tr><th>安排时间</th><th>主题</th><th>计划发送</th><th>状态</th></tr></thead><tbody>${rows}</tbody></table></div>`
+        : `<div class="empty">还没有安排跟进序列</div>`;
+    } catch (e) { /* 忽略 */ }
+  };
+  loadSeqList();
 }
 
 function personalize(tpl, lead, settings) {
@@ -1399,6 +1612,11 @@ async function renderSettings() {
       <div class="hint">推荐用博查 AI 搜索（国内稳定、结果精准，平台：open.bochaai.com）；也可用免费 360/搜狗，或 SerpAPI 走 Google（serpapi.com）。</div>
     </div>
     <div class="card">
+      <h3>🗺️ 地图接口（地图获客用）</h3>
+      <div class="field"><label>高德地图 API Key</label><input class="input full" type="password" id="s-map-key" placeholder="高德 Web 服务 Key" value="${esc(s.map_api_key)}"></div>
+      <div class="hint">免费申请：lbs.amap.com → 控制台 → 应用管理 → 创建应用（类型选 Web 服务），把 Key 填到这里。“地图获客”就能按“关键词 + 城市”搜索弱电/安防/机房建设等公司并提取电话。</div>
+    </div>
+    <div class="card">
       <h3>📱 短信服务商备注</h3>
       <div class="field"><input class="input full" id="s-sms" placeholder="如：阿里云短信，群发平台：xxx" value="${esc(s.sms_notice)}"></div>
     </div>
@@ -1457,6 +1675,7 @@ async function renderSettings() {
         search_provider: $("#s-search-provider").value,
         search_api_key: $("#s-search-key").value.trim(),
         search_engine_id: $("#s-search-cx").value.trim(),
+        map_api_key: $("#s-map-key").value.trim(),
       } } });
       toast("设置已保存", "ok");
     } catch (e) { toast(e.message, "err"); }
