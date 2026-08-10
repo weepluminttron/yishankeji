@@ -9,6 +9,7 @@
 """
 import json
 import re
+import time
 import urllib.parse
 
 from lxml import html as lh
@@ -128,6 +129,8 @@ def search_so(query, count=6):
     """360 搜索（免费，国内服务器可用）。真实地址在 data-mdurl 属性里。"""
     url = "https://www.so.com/s?q=" + urllib.parse.quote(query)
     html_text, _ = fetch_page(url)
+    if len(html_text) < 12000 and ("访问异常" in html_text or "安全验证" in html_text or "captcha" in html_text.lower()):
+        raise ValueError("360 搜索暂时被限流（访问异常），请稍后再试，或到“设置 → 搜索接口”配置 SerpAPI 更稳定")
     doc = lh.fromstring(html_text)
     results = []
     for li in doc.xpath("//li[contains(@class,'res-list')]")[:count]:
@@ -199,10 +202,18 @@ def search_web(query, count, settings=None):
     if provider == "google_cse" and key and engine_id:
         return search_google_cse(query, count, key, engine_id)
     if provider == "so_free":
-        results = search_so(query, count)
-        if not results:
-            raise ValueError("360 搜索没有返回结果，可换关键词或改用 SerpAPI 搜索源")
-        return results
+        try:
+            results = search_so(query, count)
+            if not results:
+                time.sleep(5)
+                results = search_so(query, count)
+            if not results:
+                raise ValueError("360 搜索没有返回结果，可换关键词或改用 SerpAPI 搜索源")
+            return results
+        except ValueError:
+            raise
+        except Exception as e:
+            raise ValueError(f"360 搜索失败：{e}")
     results = search_bing(query, count)
     if _is_canned(results):
         raise ValueError(
@@ -410,7 +421,9 @@ def run(keywords, markets=None, max_results=6, urls=None, use_ai=False, settings
                 msg = f"搜索“{q}”失败：{e}"
                 if msg not in errors:
                     errors.append(msg)
+                time.sleep(2)
                 continue
+            time.sleep(2)
             for r in results:
                 r["url"] = _resolve_url(r["url"])
                 if r["url"] in seen:
