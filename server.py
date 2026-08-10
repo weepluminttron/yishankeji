@@ -44,6 +44,7 @@ _score_job = {
 _buyer_job = {"running": False, "message": "", "started": "", "result": None}
 _mail_job = {"running": False, "message": "", "started": "", "result": None}
 _map_job = {"running": False, "message": "", "started": "", "result": None}
+_login_attempts = {}
 
 SOCIAL_COPY = {
     "抖音评论引流": [
@@ -91,7 +92,10 @@ def log_error(msg):
     try:
         err_dir = os.path.join(BASE_DIR, "data")
         os.makedirs(err_dir, exist_ok=True)
-        with open(os.path.join(err_dir, "error.log"), "a", encoding="utf-8") as f:
+        err_path = os.path.join(err_dir, "error.log")
+        if os.path.exists(err_path) and os.path.getsize(err_path) > 5 * 1024 * 1024:
+            os.replace(err_path, err_path + ".old")
+        with open(err_path, "a", encoding="utf-8") as f:
             f.write("[" + time.strftime("%Y-%m-%d %H:%M:%S") + "]\n" + msg + "\n")
     except Exception:
         pass
@@ -107,6 +111,33 @@ def rate_allow(ip, limit=5, window=3600):
         return False
     lst.append(now_t)
     return True
+
+
+def safe_int(v, default=0):
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return default
+
+
+def login_throttled(ip):
+    """10 分钟内失败 5 次则临时锁定。"""
+    now_t = time.time()
+    lst = _login_attempts.setdefault(ip, [])
+    lst = [t for t in lst if now_t - t < 600]
+    _login_attempts[ip] = lst
+    return len(lst) >= 5
+
+
+def record_login_fail(ip):
+    lst = _login_attempts.setdefault(ip, [])
+    lst.append(time.time())
+    if len(lst) > 50:
+        del lst[:len(lst) - 50]
+
+
+def clear_login_fails(ip):
+    _login_attempts.pop(ip, None)
 
 
 def run_auto_crawl_once(urls):
@@ -488,6 +519,10 @@ class Handler(BaseHTTPRequestHandler):
     def _check_auth(self):
         if not auth_enabled():
             return True
+        if len(_sessions) > 200:
+            now_t = time.time()
+            for k in [k for k, v in _sessions.items() if v <= now_t]:
+                _sessions.pop(k, None)
         tok = self._cookie_token()
         return bool(tok) and _sessions.get(tok, 0) > time.time()
 
@@ -589,7 +624,19 @@ class Handler(BaseHTTPRequestHandler):
                 "password_set": auth_enabled(),
             }, headers=headers)
         if api == "health":
-            return send_json(self, {"ok": True, "status": "up"})
+            db_ok = True
+            try:
+                conn = db.get_conn()
+                conn.execute("SELECT 1").fetchone()
+                conn.close()
+            except Exception:
+                db_ok = False
+            return send_json(self, {
+                "ok": db_ok,
+                "status": "up" if db_ok else "degraded",
+                "version": "2.0.0",
+                "time": time.strftime("%Y-%m-%d %H:%M:%S"),
+            })
         if api == "lp":
             return send_json(self, {"ok": True, "config": self._lp_config()})
         if api == "leads" and len(parts) > 2 and parts[2] == "export":
@@ -631,7 +678,9 @@ class Handler(BaseHTTPRequestHandler):
         if api == "leads" and len(parts) > 2 and parts[2] == "score_all":
             return send_json(self, {"ok": True, "job": dict(_score_job)})
         if api == "leads" and len(parts) > 2:
-            lead_id = int(parts[2])
+            lead_id = safe_int(parts[2])
+            if not lead_id:
+                return send_json(self, {"ok": False, "msg": "线索不存在"}, 404)
             if len(parts) > 3 and parts[3] == "history":
                 notes, events = db.lead_history(lead_id)
                 return send_json(self, {"notes": notes, "events": events})
@@ -641,7 +690,7 @@ class Handler(BaseHTTPRequestHandler):
             return send_json(self, lead)
         if api == "leads":
             page = int(qs.get("page", ["1"])[0] or 1)
-            size = min(int(qs.get("size", ["20"])[0] or 20), 200)
+            size = min(int(qs.get("size", ["20"])[0] or 20), 1000)
             items, total = db.list_leads(page=page, size=size, **lead_filters(qs))
             return send_json(self, {"items": items, "total": total, "page": page, "size": size})
         if api == "settings":
@@ -695,13 +744,18 @@ class Handler(BaseHTTPRequestHandler):
             data = read_json_body(self)
             if not auth_enabled():
                 return send_json(self, {"ok": True, "msg": "未启用密码保护"})
+            ip = self._client_ip()
+            if login_throttled(ip):
+                return send_json(self, {"ok": False, "msg": "尝试次数过多，请 1 分钟后再试"}, 429)
             if check_password(data.get("password", "")):
-                db.add_login_log(self._client_ip(), self._ua(), "密码登录", "成功")
-                db.trust_ip(self._client_ip(), self._ua())
+                clear_login_fails(ip)
+                db.add_login_log(ip, self._ua(), "密码登录", "成功")
+                db.trust_ip(ip, self._ua())
                 return send_json(
                     self, {"ok": True}, headers={"Set-Cookie": self._issue_session()},
                 )
-            db.add_login_log(self._client_ip(), self._ua(), "密码错误", "失败")
+            record_login_fail(ip)
+            db.add_login_log(ip, self._ua(), "密码错误", "失败")
             return send_json(self, {"ok": False, "msg": "密码不正确"}, 401)
         if api == "logout":
             tok = self._cookie_token()
@@ -771,11 +825,11 @@ class Handler(BaseHTTPRequestHandler):
             return send_json(self, db.bulk_status(data.get("ids", []), data.get("status", "")))
         if api == "leads" and len(parts) > 2 and parts[2] == "contacted":
             data = read_json_body(self)
-            db.mark_contacted(int(data.get("id", 0)), data.get("type", ""), data.get("note", ""))
+            db.mark_contacted(safe_int(data.get("id")), data.get("type", ""), data.get("note", ""))
             return send_json(self, {"ok": True})
         if api == "leads" and len(parts) > 2 and parts[2] == "score":
             data = read_json_body(self)
-            lead_id = int(data.get("id", 0))
+            lead_id = safe_int(data.get("id"))
             lead = db.get_lead(lead_id)
             if not lead:
                 return send_json(self, {"ok": False, "msg": "线索不存在"}, 404)
@@ -799,7 +853,7 @@ class Handler(BaseHTTPRequestHandler):
             return send_json(self, {"ok": True, "msg": msg, "job": dict(_score_job)})
         if api == "leads" and len(parts) > 2 and parts[2] == "sample":
             data = read_json_body(self)
-            lead_id = int(data.get("id", 0))
+            lead_id = safe_int(data.get("id"))
             lead = db.get_lead(lead_id)
             if not lead:
                 return send_json(self, {"ok": False, "msg": "线索不存在"}, 404)
@@ -810,14 +864,16 @@ class Handler(BaseHTTPRequestHandler):
             return send_json(self, {"ok": True, "lead": db.get_lead(lead_id)})
         if api == "leads" and len(parts) > 2 and parts[2] == "merge":
             data = read_json_body(self)
-            keep_id = int(data.get("keep_id", 0))
+            keep_id = safe_int(data.get("keep_id"))
             remove_ids = [int(x) for x in data.get("remove_ids", []) if str(x).isdigit()]
             if not keep_id or not remove_ids:
                 return send_json(self, {"ok": False, "msg": "参数不完整"}, 400)
             db.merge_leads(keep_id, remove_ids)
             return send_json(self, {"ok": True})
         if api == "leads" and len(parts) > 2:
-            lead_id = int(parts[2])
+            lead_id = safe_int(parts[2])
+            if not lead_id:
+                return send_json(self, {"ok": False, "msg": "线索不存在"}, 404)
             if len(parts) > 3 and parts[3] == "notes":
                 data = read_json_body(self)
                 db.add_note(lead_id, data.get("content", ""))
@@ -923,7 +979,9 @@ class Handler(BaseHTTPRequestHandler):
         if denied:
             return denied
         if len(parts) >= 3 and parts[0] == "api" and parts[1] == "leads":
-            lead_id = int(parts[2])
+            lead_id = safe_int(parts[2])
+            if not lead_id:
+                return send_json(self, {"ok": False, "msg": "线索不存在"}, 404)
             data = read_json_body(self)
             lead, err = db.update_lead(lead_id, data)
             if err:
@@ -940,7 +998,10 @@ class Handler(BaseHTTPRequestHandler):
             db.untrust_ip(urllib.parse.unquote(parts[2]))
             return send_json(self, {"ok": True})
         if len(parts) >= 3 and parts[0] == "api" and parts[1] == "leads":
-            db.delete_lead(int(parts[2]))
+            lead_id = safe_int(parts[2])
+            if not lead_id:
+                return send_json(self, {"ok": False, "msg": "线索不存在"}, 404)
+            db.delete_lead(lead_id)
             return send_json(self, {"ok": True})
         return send_json(self, {"ok": False, "msg": "接口不存在"}, 404)
 
