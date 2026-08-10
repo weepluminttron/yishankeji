@@ -746,8 +746,9 @@ async function renderBuyer() {
         <div class="field"><label>每个关键词抓取数量</label>
           <select class="select full" id="buyer-max">
             <option value="3">3 条</option>
-            <option value="5" selected>5 条</option>
-            <option value="8">8 条</option>
+            <option value="5">5 条</option>
+            <option value="8" selected>8 条</option>
+            <option value="10">10 条</option>
           </select>
         </div>
       </div>
@@ -757,7 +758,7 @@ async function renderBuyer() {
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <button class="btn primary" id="buyer-run">🔍 开始发现买家</button>
         <label style="display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" id="buyer-ai"> AI 智能筛选（需要 API Key）</label>
-        <span class="hint">自动过滤黄页/新闻/招聘等噪音，识别采购意向和供应商信号后评分 0-10 分</span>
+        <span class="hint">自动扩展相关词（如 光缆→光纤光缆/通信光缆），按采购/招标/求购/报价多角度搜索，过滤噪音后评分 0-10 分</span>
       </div>
     </div>
     <div class="card" id="buyer-result"><div class="empty"><div class="ico">🎯</div>搜索结果显示在这里</div></div>`;

@@ -54,6 +54,17 @@ BLOCKED_DOMAINS = (
 WEBMAILS = {"qq.com", "163.com", "126.com", "gmail.com", "outlook.com", "hotmail.com",
             "foxmail.com", "sina.com", "139.com", "aliyun.com", "icloud.com", "yahoo.com"}
 
+# 光纤行业同义词扩展（提升线索量）
+SYNONYMS = {
+    "光缆": ["光纤光缆", "通信光缆"],
+    "光纤": ["光纤光缆", "光缆"],
+    "光纤光缆": ["光缆", "通信光缆"],
+    "通信光缆": ["光缆", "光纤光缆"],
+    "光纤收发器": ["光收发器", "光电转换器"],
+    "熔接机": ["光纤熔接机", "熔接设备"],
+    "FTTH": ["光纤到户", "光纤入户"],
+}
+
 # 搜索源被反爬时固定返回的“罐头结果”域名
 JUNK_DOMAINS = ("baike.baidu.com", "zhihu.com", "zhuanlan.zhihu.com", "csdn.net",
                 "toutiao.com", "1688.com", "b2bwiki.baidu.com", "sohu.com")
@@ -117,13 +128,22 @@ def build_queries(keyword, market=""):
     else:
         variants = [
             _with_words(keyword, ["采购", "询价"]),
-            _with_words(keyword, ["招标", "项目", "工程"]),
+            _with_words(keyword, ["招标", "公告"]),
+            _with_words(keyword, ["求购", "信息"]),
             _with_words(keyword, ["需要", "报价"]),
         ]
     out = []
     for v in variants:
         out.append(f"{v} {market}".strip())
     return out
+
+
+def expand_keywords(keyword):
+    """同义词扩展：光缆 → 光缆/光纤光缆/通信光缆。"""
+    kw = keyword.strip()
+    if kw in SYNONYMS:
+        return [kw] + SYNONYMS[kw]
+    return [kw]
 
 
 def search_bing(query, count=5):
@@ -477,6 +497,12 @@ def run(keywords, markets=None, max_results=6, urls=None, use_ai=False, settings
         markets = [str(m).strip() for m in (markets or []) if str(m).strip()]
     keywords = keywords[:5]
     markets = markets[:5]
+    expanded = []
+    for kw in keywords:
+        for e in expand_keywords(kw):
+            if e not in expanded:
+                expanded.append(e)
+    keywords = expanded[:6]
     errors = []
     filtered = 0
     seen = set()
@@ -496,7 +522,7 @@ def run(keywords, markets=None, max_results=6, urls=None, use_ai=False, settings
         for market in markets or [""]:
             for kw in keywords:
                 queries.extend(build_queries(kw, market))
-        queries = queries[:15]
+        queries = queries[:24]
         for q in queries:
             try:
                 results = search_web(q, max_results, settings)
@@ -517,7 +543,7 @@ def run(keywords, markets=None, max_results=6, urls=None, use_ai=False, settings
                     continue
                 cn, en, sup = _text_signals(r["title"] + " " + r["snippet"])
                 # 片段里只有供应商信号、没有任何采购意向 → 大概率是同行，跳过抓取
-                if sup > 0 and cn == 0 and en == 0:
+                if sup >= 2 and cn == 0 and en == 0:
                     filtered += 1
                     continue
                 r["keyword"] = q.split(" ")[0]
@@ -527,7 +553,7 @@ def run(keywords, markets=None, max_results=6, urls=None, use_ai=False, settings
             return {"candidates": [], "errors": errors or ["没有找到符合条件的线索，请换个关键词或地区"]}
 
     candidates = []
-    for t in targets[:20]:
+    for t in targets[:30]:
         try:
             html_text, final_url = fetch_page(t["url"], timeout=10)
             contact = extract_contacts(html_text, final_url or t["url"])
@@ -550,12 +576,13 @@ def run(keywords, markets=None, max_results=6, urls=None, use_ai=False, settings
                     keep.append(c)
                     continue
                 if item.get("buyer") is False:
-                    filtered += 1
-                    continue
-                try:
-                    c["score"] = max(0, min(10, int(item.get("score", c["score"]))))
-                except Exception:
-                    pass
+                    c["score"] = min(c["score"], 3)
+                    c["score_reason"] = c.get("score_reason", "") + "；AI：疑似非买家（保留供判断）"
+                else:
+                    try:
+                        c["score"] = max(0, min(10, int(item.get("score", c["score"]))))
+                    except Exception:
+                        pass
                 if item.get("reason"):
                     c["score_reason"] = c.get("score_reason", "") + "；AI：" + str(item["reason"])[:60]
                 keep.append(c)
