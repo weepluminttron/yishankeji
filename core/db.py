@@ -119,6 +119,8 @@ def init_db():
             conn.execute("ALTER TABLE leads ADD COLUMN score INTEGER DEFAULT 0")
         if "score_reason" not in cols:
             conn.execute("ALTER TABLE leads ADD COLUMN score_reason TEXT DEFAULT ''")
+        if "ai_scored" not in cols:
+            conn.execute("ALTER TABLE leads ADD COLUMN ai_scored INTEGER DEFAULT 0")
         conn.commit()
     finally:
         conn.close()
@@ -378,15 +380,32 @@ def mark_contacted(lead_id):
         conn.close()
 
 
-def set_lead_score(lead_id, score, reason=""):
+def set_lead_score(lead_id, score, reason="", ai=False):
     conn = get_conn()
     try:
-        conn.execute(
-            "UPDATE leads SET score = ?, score_reason = ?, updated_at = ? WHERE id = ?",
-            (score, reason, now(), lead_id),
-        )
+        if ai:
+            conn.execute(
+                "UPDATE leads SET score = ?, score_reason = ?, ai_scored = 1, updated_at = ? WHERE id = ?",
+                (score, reason, now(), lead_id),
+            )
+        else:
+            conn.execute(
+                "UPDATE leads SET score = ?, score_reason = ?, updated_at = ? WHERE id = ?",
+                (score, reason, now(), lead_id),
+            )
         conn.commit()
         add_event(lead_id, "线索评分", f"{score}分 - {reason}")
+    finally:
+        conn.close()
+
+
+def list_unscored_leads(limit=2000):
+    conn = get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM leads WHERE ai_scored = 0 ORDER BY id LIMIT ?", (limit,)
+        ).fetchall()
+        return [dict(r) for r in rows]
     finally:
         conn.close()
 
@@ -505,6 +524,7 @@ def get_settings():
         "auto_crawl_urls": "",
         "auto_crawl_interval": "0",
         "last_auto_crawl": "",
+        "auto_ai_score": "1",
     }
     merged = dict(defaults)
     merged.update(saved)
@@ -518,6 +538,7 @@ def save_settings(values):
         "notify_webhook",
         "auto_login_trusted",
         "search_provider", "search_api_key", "search_engine_id",
+        "auto_ai_score",
         "access_password", "lp_enabled", "lp_title", "lp_subtitle", "lp_cta",
         "lp_phone", "lp_thanks", "auto_crawl_urls", "auto_crawl_interval",
         "last_auto_crawl",

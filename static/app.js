@@ -192,10 +192,12 @@ async function renderLeads() {
       <button class="btn" id="btn-import">📥 批量导入</button>
       <button class="btn" id="btn-export-x">⬇ 导出 Excel</button>
       <button class="btn" id="btn-export-c">⬇ 导出 CSV</button>
+      <button class="btn" id="btn-score-all">✨ 全量 AI 评分</button>
       <span style="flex:1"></span>
       <button class="btn" id="btn-mail-sel" disabled>📧 邮件触达选中</button>
       <button class="btn" id="btn-del-sel" disabled>删除选中</button>
     </div>
+    <div class="hint" id="score-all-status" style="margin:-8px 0 12px"></div>
     <div class="card"><div class="table-wrap" id="lead-table"></div><div class="pager" id="lead-pager"></div></div>`;
 
   const qInput = $("#lead-q");
@@ -220,6 +222,28 @@ async function renderLeads() {
   $("#btn-import").onclick = () => { go("collect"); activateSubTab("collect", "import"); };
   $("#btn-export-x").onclick = () => exportLeads("xlsx");
   $("#btn-export-c").onclick = () => exportLeads("csv");
+  const pollScore = async () => {
+    try {
+      const d = await api("/api/leads/score_all");
+      const job = d.job;
+      const box = $("#score-all-status");
+      if (job.running) {
+        box.textContent = `⏳ 正在AI评分：${job.done}/${job.total || "计算中"}${job.current ? "（" + job.current + "）" : ""}`;
+        setTimeout(pollScore, 2000);
+      } else if (job.message) {
+        box.textContent = job.message;
+        setTimeout(() => { box.textContent = ""; }, 8000);
+        loadLeadList();
+      }
+    } catch (e) { /* 忽略轮询错误 */ }
+  };
+  $("#btn-score-all").onclick = async () => {
+    try {
+      const d = await api("/api/leads/score_all", { method: "POST", body: {} });
+      toast(d.msg, "ok");
+      pollScore();
+    } catch (e) { toast(e.message, "err"); }
+  };
   $("#btn-mail-sel").onclick = () => {
     const ids = [...state.leads.selected];
     state.recipients = state.recipients.filter((r) => ids.includes(r.id));
@@ -1260,9 +1284,13 @@ async function renderSettings() {
       <div class="form-grid">
         <div class="field"><label>OpenAI API Key</label><input class="input full" type="password" id="s-key" placeholder="sk-..." value="${esc(s.openai_api_key)}"></div>
         <div class="field"><label>模型</label><input class="input full" id="s-model" value="${esc(s.openai_model)}"></div>
+        <div class="field"><label>新线索自动 AI 评分</label><select class="select full" id="s-auto-ai">
+          <option value="1" ${(s.auto_ai_score || "1") === "1" ? "selected" : ""}>开启（推荐）</option>
+          <option value="0" ${s.auto_ai_score === "0" ? "selected" : ""}>关闭</option>
+        </select></div>
         <div class="field" style="grid-column:1/-1"><label>接口地址（OpenAI 兼容协议）</label><input class="input full" id="s-api-base" placeholder="https://api.openai.com/v1" value="${esc(s.openai_api_base || "https://api.openai.com/v1")}"></div>
       </div>
-      <div class="hint">支持 OpenAI / DeepSeek / FastGPT 等兼容接口：填各自的 Key、模型名和接口地址即可。不填也能正常使用工具，只是 AI 功能不可用。</div>
+      <div class="hint">支持 OpenAI / DeepSeek / FastGPT 等兼容接口。开启“自动 AI 评分”后，新线索（落地页留资、导入、买家发现、定时采集）会后台自动评分，无需手动操作。</div>
     </div>
     <div class="card">
       <h3>🔎 搜索接口（买家发现用）</h3>
@@ -1333,6 +1361,7 @@ async function renderSettings() {
         openai_api_key: $("#s-key").value.trim(),
         openai_model: $("#s-model").value.trim() || "gpt-4o-mini",
         openai_api_base: $("#s-api-base").value.trim() || "https://api.openai.com/v1",
+        auto_ai_score: $("#s-auto-ai").value,
         sms_notice: $("#s-sms").value.trim(),
         notify_webhook: $("#s-webhook").value.trim(),
         auto_login_trusted: $("#s-auto-login").value,

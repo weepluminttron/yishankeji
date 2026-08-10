@@ -31,6 +31,15 @@ DEFAULT_PORT = 8017
 SESSION_TTL = 12 * 3600
 _sessions = {}
 _lp_requests = {}
+_score_job = {
+    "running": False,
+    "total": 0,
+    "done": 0,
+    "failed": 0,
+    "current": "",
+    "started": "",
+    "message": "",
+}
 
 SOCIAL_COPY = {
     "抖音评论引流": [
@@ -111,6 +120,7 @@ def run_auto_crawl_once(urls):
                 "🔔 定时采集发现新客户",
                 f"本次自动采集新增 {total_added} 条线索，记得去跟进哦～",
             )
+        auto_score_if_enabled()
     return {
         "urls": len(urls),
         "found": sum(l["found"] for l in logs),
@@ -144,6 +154,48 @@ def _auto_crawl_loop():
         except Exception:
             pass
         time.sleep(60)
+
+
+def _score_all_worker():
+    """后台线程：给所有未 AI 评分的线索批量评分。"""
+    settings = db.get_settings()
+    if not settings.get("openai_api_key"):
+        _score_job.update(running=False, message="未配置 AI 密钥，无法评分")
+        return
+    leads = db.list_unscored_leads()
+    _score_job.update(total=len(leads), done=0, failed=0, started=time.strftime("%Y-%m-%d %H:%M:%S"), message="")
+    for lead in leads:
+        if not _score_job.get("running"):
+            break
+        _score_job["current"] = str(lead.get("name", ""))[:30]
+        score, reason = scorer.ai_score(settings, lead)
+        if score is not None:
+            db.set_lead_score(lead["id"], score, reason, ai=True)
+            _score_job["done"] += 1
+        else:
+            _score_job["failed"] += 1
+        time.sleep(0.3)
+    _score_job.update(running=False, current="", message=f"评分完成：成功 {_score_job['done']}，失败 {_score_job['failed']}")
+
+
+def start_score_job():
+    """启动全量评分（未运行时才启动），返回 (ok, msg)。"""
+    settings = db.get_settings()
+    if not settings.get("openai_api_key"):
+        return False, "未配置 AI 密钥，请先到“设置 → AI 文案”填写"
+    if _score_job.get("running"):
+        return False, "评分任务正在运行中"
+    _score_job.update(running=True, done=0, failed=0, total=0, current="", message="")
+    threading.Thread(target=_score_all_worker, daemon=True).start()
+    return True, "评分任务已启动"
+
+
+def auto_score_if_enabled():
+    """新线索入库后自动评分（设置里可关闭）。"""
+    settings = db.get_settings()
+    if settings.get("auto_ai_score", "1") == "1" and settings.get("openai_api_key") and not _score_job.get("running"):
+        _score_job.update(running=True, done=0, failed=0, total=0, current="", message="")
+        threading.Thread(target=_score_all_worker, daemon=True).start()
 
 
 def _load_env_file():
@@ -412,6 +464,8 @@ class Handler(BaseHTTPRequestHandler):
                 "线索导入模板.xlsx",
             )
             return
+        if api == "leads" and len(parts) > 2 and parts[2] == "score_all":
+            return send_json(self, {"ok": True, "job": dict(_score_job)})
         if api == "leads" and len(parts) > 2:
             lead_id = int(parts[2])
             if len(parts) > 3 and parts[3] == "history":
@@ -505,10 +559,12 @@ class Handler(BaseHTTPRequestHandler):
             lead, err = db.create_lead(data)
             if err:
                 return send_json(self, {"ok": False, "msg": err}, 400)
+            auto_score_if_enabled()
             return send_json(self, {"ok": True, "lead": lead})
         if api == "leads" and len(parts) > 2 and parts[2] == "bulk":
             data = read_json_body(self)
             result = db.bulk_add(data.get("leads", []), source=data.get("source", "批量导入"))
+            auto_score_if_enabled()
             return send_json(self, {"ok": True, **result})
         if api == "leads" and len(parts) > 2 and parts[2] == "bulk_status":
             data = read_json_body(self)
@@ -536,6 +592,11 @@ class Handler(BaseHTTPRequestHandler):
                     return send_json(self, {"ok": False, "msg": ai_reason}, 400)
             db.set_lead_score(lead_id, score, reason)
             return send_json(self, {"ok": True, "score": score, "reason": reason})
+        if api == "leads" and len(parts) > 2 and parts[2] == "score_all":
+            ok, msg = start_score_job()
+            if not ok:
+                return send_json(self, {"ok": False, "msg": msg}, 400)
+            return send_json(self, {"ok": True, "msg": msg, "job": dict(_score_job)})
         if api == "leads" and len(parts) > 2:
             lead_id = int(parts[2])
             if len(parts) > 3 and parts[3] == "notes":
@@ -559,6 +620,7 @@ class Handler(BaseHTTPRequestHandler):
                     return send_json(self, {"ok": False, "msg": err}, 400)
                 source = {"social": "社媒评论", "wechat": "微信记录"}.get(kind, "Excel导入")
                 result = db.bulk_add(leads, source=source)
+                auto_score_if_enabled()
                 return send_json(self, {"ok": True, "total": len(leads), **result})
             finally:
                 if tmp_path and os.path.exists(tmp_path):
@@ -854,6 +916,7 @@ class Handler(BaseHTTPRequestHandler):
                 "🎉 官网收到新客户留资",
                 notify.lead_notice_text(lead),
             )
+        auto_score_if_enabled()
         return send_json(self, {"ok": True, "thanks": s.get("lp_thanks", "")})
 
 
