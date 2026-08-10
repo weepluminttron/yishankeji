@@ -66,6 +66,11 @@ def _domain(url):
         return ""
 
 
+def _with_words(kw, words):
+    """关键词 + 意图词，避免重复（如关键词已含“采购”就不再拼一次）。"""
+    return " ".join([kw] + [w for w in words if w not in kw])
+
+
 def _resolve_url(url):
     """把 Bing 的 r.bing.com 跳转链接还原成真实地址。"""
     try:
@@ -89,15 +94,15 @@ def build_queries(keyword, market=""):
     overseas = bool(re.search(r"[a-zA-Z]{2,}", market or ""))
     if overseas:
         variants = [
-            f"{keyword} buyer purchase procurement",
-            f"{keyword} rfq tender project",
-            f"{keyword} distributor dealer import",
+            _with_words(keyword, ["buyer", "purchase", "procurement"]),
+            _with_words(keyword, ["rfq", "tender", "project"]),
+            _with_words(keyword, ["distributor", "dealer", "import"]),
         ]
     else:
         variants = [
-            f"{keyword} 采购 询价",
-            f"{keyword} 招标 项目 工程",
-            f"{keyword} 需要 报价",
+            _with_words(keyword, ["采购", "询价"]),
+            _with_words(keyword, ["招标", "项目", "工程"]),
+            _with_words(keyword, ["需要", "报价"]),
         ]
     out = []
     for v in variants:
@@ -143,6 +148,29 @@ def search_so(query, count=6):
         if not title or not href.startswith("http"):
             continue
         block = _clean_text(li.text_content())
+        snippet = block.replace(title, "", 1).strip()[:160]
+        results.append({"title": title, "url": href, "snippet": snippet})
+    return results
+
+
+def search_sogou(query, count=6):
+    """搜狗搜索（免费备用源）。链接是 /link?url= 跳转，抓取时自动跟随。"""
+    url = "https://www.sogou.com/web?query=" + urllib.parse.quote(query)
+    html_text, _ = fetch_page(url)
+    if len(html_text) < 12000 and ("验证" in html_text or "访问" in html_text):
+        raise ValueError("搜狗搜索暂时不可用")
+    doc = lh.fromstring(html_text)
+    results = []
+    for a in doc.xpath("//h3/a | //a[contains(@class,'vr-title')]")[:count]:
+        href = (a.get("href") or "").strip()
+        title = _clean_text(a.text_content())
+        if not title or len(title) < 4:
+            continue
+        if href.startswith("/"):
+            href = "https://www.sogou.com" + href
+        if not href.startswith("http"):
+            continue
+        block = _clean_text(a.xpath("ancestor::li[1]")[0].text_content()) if a.xpath("ancestor::li[1]") else title
         snippet = block.replace(title, "", 1).strip()[:160]
         results.append({"title": title, "url": href, "snippet": snippet})
     return results
@@ -202,18 +230,23 @@ def search_web(query, count, settings=None):
     if provider == "google_cse" and key and engine_id:
         return search_google_cse(query, count, key, engine_id)
     if provider == "so_free":
+        chain = []
         try:
             results = search_so(query, count)
-            if not results:
-                time.sleep(5)
-                results = search_so(query, count)
-            if not results:
-                raise ValueError("360 搜索没有返回结果，可换关键词或改用 SerpAPI 搜索源")
-            return results
-        except ValueError:
-            raise
+            if results:
+                return results
+            chain.append("360 无结果")
         except Exception as e:
-            raise ValueError(f"360 搜索失败：{e}")
+            chain.append(f"360：{e}")
+        try:
+            time.sleep(2)
+            results = search_sogou(query, count)
+            if results:
+                return results
+            chain.append("搜狗无结果")
+        except Exception as e:
+            chain.append(f"搜狗：{e}")
+        raise ValueError("免费搜索源均不可用（" + "；".join(chain) + "）。建议到“设置 → 搜索接口”配置 SerpAPI，更稳定精准")
     results = search_bing(query, count)
     if _is_canned(results):
         raise ValueError(
@@ -446,8 +479,8 @@ def run(keywords, markets=None, max_results=6, urls=None, use_ai=False, settings
     candidates = []
     for t in targets[:20]:
         try:
-            html_text, _ = fetch_page(t["url"], timeout=10)
-            contact = extract_contacts(html_text, t["url"])
+            html_text, final_url = fetch_page(t["url"], timeout=10)
+            contact = extract_contacts(html_text, final_url or t["url"])
             page_text = re.sub(r"<script.*?</script>|<style.*?</style>", " ", html_text, flags=re.S | re.I)
             page_text = re.sub(r"<[^>]+>", " ", page_text)[:2000]
             cand = _to_candidate(contact, t.get("title", ""), t.get("snippet", ""), t.get("keyword", ""), t.get("market", ""), page_text)

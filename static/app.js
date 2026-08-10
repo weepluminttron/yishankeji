@@ -1269,7 +1269,7 @@ async function renderSettings() {
       <div class="form-grid">
         <div class="field"><label>搜索源</label>
           <select class="select full" id="s-search-provider">
-            <option value="so_free" ${(s.search_provider || "so_free") === "so_free" ? "selected" : ""}>360 搜索（免费，推荐）</option>
+            <option value="so_free" ${(s.search_provider || "so_free") === "so_free" ? "selected" : ""}>免费搜索（360+搜狗自动切换，推荐）</option>
             <option value="bing_free" ${s.search_provider === "bing_free" ? "selected" : ""}>免费 Bing（可能被限制）</option>
             <option value="serpapi" ${s.search_provider === "serpapi" ? "selected" : ""}>SerpAPI（推荐，免费200次/月）</option>
             <option value="google_cse" ${s.search_provider === "google_cse" ? "selected" : ""}>Google 自定义搜索 API</option>
