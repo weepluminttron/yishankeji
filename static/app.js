@@ -1269,6 +1269,7 @@ async function renderSettings() {
       <div class="form-grid">
         <div class="field"><label>搜索源</label>
           <select class="select full" id="s-search-provider">
+            <option value="bocha" ${s.search_provider === "bocha" ? "selected" : ""}>博查 AI 搜索（推荐，国内稳定）</option>
             <option value="so_free" ${(s.search_provider || "so_free") === "so_free" ? "selected" : ""}>免费搜索（360+搜狗自动切换，推荐）</option>
             <option value="bing_free" ${s.search_provider === "bing_free" ? "selected" : ""}>免费 Bing（可能被限制）</option>
             <option value="serpapi" ${s.search_provider === "serpapi" ? "selected" : ""}>SerpAPI（推荐，免费200次/月）</option>
@@ -1278,7 +1279,7 @@ async function renderSettings() {
         <div class="field"><label>API Key</label><input class="input full" type="password" id="s-search-key" placeholder="serpapi 或 google key" value="${esc(s.search_api_key)}"></div>
         <div class="field" style="grid-column:1/-1"><label>Google 搜索引擎 ID（cx，仅 Google 源需要）</label><input class="input full" id="s-search-cx" placeholder="0123456789abcdef" value="${esc(s.search_engine_id)}"></div>
       </div>
-      <div class="hint">默认用 360 搜索（免费、国内可用）；如结果不够精准，可配置 SerpAPI 走 Google 搜索（免费200次/月，申请：serpapi.com）。</div>
+      <div class="hint">推荐用博查 AI 搜索（国内稳定、结果精准，平台：open.bochaai.com）；也可用免费 360/搜狗，或 SerpAPI 走 Google（serpapi.com）。</div>
     </div>
     <div class="card">
       <h3>📱 短信服务商备注</h3>

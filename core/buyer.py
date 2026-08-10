@@ -207,6 +207,36 @@ def search_google_cse(query, count, api_key, engine_id):
     return results
 
 
+def search_bocha(query, count, api_key):
+    """博查 AI 搜索（国内稳定，API Key 格式为 64 位 hex）。"""
+    payload = json.dumps({
+        "query": query,
+        "count": max(3, min(10, count)),
+        "freshness": "noLimit",
+        "summary": False,
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        "https://api.bochaai.com/v1/web-search",
+        data=payload,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": "Bearer " + api_key,
+        },
+    )
+    with urllib.request.urlopen(req, timeout=20) as resp:
+        data = json.loads(resp.read().decode("utf-8", errors="replace"))
+    if data.get("code") not in (None, 200, 0):
+        raise ValueError(f"博查搜索返回错误：{data.get('message') or data.get('msg') or data}")
+    results = []
+    for item in ((data.get("data") or {}).get("webPages") or {}).get("value") or []:
+        title = _clean_text(item.get("name", ""))
+        url = item.get("url", "")
+        snippet = _clean_text(item.get("snippet") or item.get("summary") or "")
+        if title and url.startswith("http"):
+            results.append({"title": title, "url": url, "snippet": snippet})
+    return results
+
+
 def _is_canned(results):
     """判断搜索源是否返回了反爬“罐头结果”（全是百科/知乎/内容站）。"""
     if not results:
@@ -229,6 +259,8 @@ def search_web(query, count, settings=None):
         return search_serpapi(query, count, key)
     if provider == "google_cse" and key and engine_id:
         return search_google_cse(query, count, key, engine_id)
+    if provider == "bocha" and key:
+        return search_bocha(query, count, key)
     if provider == "so_free":
         chain = []
         try:
