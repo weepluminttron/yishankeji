@@ -168,7 +168,7 @@ def is_duplicate(name=None, phone=None, exclude_id=None):
             params.append(name.strip())
         if not sql:
             return None
-        where = " OR ".join(sql)
+        where = "(" + " OR ".join(sql) + ")"
         if exclude_id:
             where += " AND id != ?"
             params.append(exclude_id)

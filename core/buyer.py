@@ -65,6 +65,34 @@ SYNONYMS = {
     "FTTH": ["光纤到户", "光纤入户"],
 }
 
+# 光纤行业获客词模板（长尾词 + 目标市场），对应行业获客方案
+INDUSTRY_PRESETS = {
+    "光缆/跳线长尾词": {
+        "keywords": ["光纤跳线 3米 SC/UPC 电信级", "4芯室外单模光缆 钢丝铠装", "1U 96芯 MPO 光纤配线架"],
+        "markets": ["广东", "浙江"],
+    },
+    "MPO/预端接（高利润）": {
+        "keywords": ["MPO MTP 预端接光缆", "高密度光纤配线架 机房", "预端接 布线 方案"],
+        "markets": ["广东", "上海", "北京"],
+    },
+    "分纤箱/终端盒/收发器（走量）": {
+        "keywords": ["分纤箱 采购", "光纤终端盒 询价", "光纤收发器 工程商"],
+        "markets": ["广东", "浙江", "江苏"],
+    },
+    "弱电/安防工程商（金矿）": {
+        "keywords": ["弱电工程公司 光缆", "安防监控公司 光纤", "网络科技公司 综合布线", "机房建设 工程商"],
+        "markets": ["广东", "湖南", "江西", "广西"],
+    },
+    "通信工程/总包公司": {
+        "keywords": ["通信工程有限公司 光缆", "通信工程 采购 光缆", "FTTH 施工 公司"],
+        "markets": ["广东", "四川", "湖北"],
+    },
+    "外贸买家（海外）": {
+        "keywords": ["fiber optic cable distributor", "ISP telecom installation company", "FTTH contractor", "fiber patch cord wholesale"],
+        "markets": ["Vietnam", "Indonesia", "UAE", "Saudi Arabia", "Nigeria", "Brazil"],
+    },
+}
+
 # 搜索源被反爬时固定返回的“罐头结果”域名
 JUNK_DOMAINS = ("baike.baidu.com", "zhihu.com", "zhuanlan.zhihu.com", "csdn.net",
                 "toutiao.com", "1688.com", "b2bwiki.baidu.com", "sohu.com")

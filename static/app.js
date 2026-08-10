@@ -424,6 +424,7 @@ async function openLeadDetail(id) {
       <button class="btn primary sm" id="d-contact">✅ 记录联系</button>
       <button class="btn sm" id="d-edit">编辑</button>
       <button class="btn sm" id="d-mail">发邮件</button>
+      <button class="btn sm" id="d-sample">📦 寄样品</button>
       <button class="btn sm" id="d-score">🎯 AI 评分</button>
       <button class="btn sm danger" id="d-del">删除</button>
     </div>
@@ -454,6 +455,13 @@ async function openLeadDetail(id) {
       closeModal(); openLeadDetail(id);
     } catch (e) { toast(e.message, "err"); }
     finally { btn.disabled = false; btn.textContent = "🎯 AI 评分"; }
+  };
+  $("#d-sample").onclick = async () => {
+    try {
+      await api("/api/leads/sample", { method: "POST", body: { id } });
+      toast("已记录寄样，7天后自动提醒跟进", "ok");
+      closeModal(); openLeadDetail(id);
+    } catch (e) { toast(e.message, "err"); }
   };
   $("#d-del").onclick = () => { closeModal(); deleteLead(id); };
   $("#d-note-btn").onclick = async () => {
@@ -740,6 +748,9 @@ async function renderBuyer() {
         <div class="field" style="grid-column:1/-1"><label>搜索关键词（每行一个，建议 1-3 个）</label>
           <textarea class="textarea full" id="buyer-kws" placeholder="光纤光缆采购&#10;光纤收发器工程商&#10;FTTH 项目招标"></textarea>
         </div>
+        <div class="field" style="grid-column:1/-1"><label>行业获客词模板（一键套用）</label>
+          <div id="buyer-presets" style="display:flex;gap:8px;flex-wrap:wrap"><span class="hint">加载中…</span></div>
+        </div>
         <div class="field"><label>目标地区/市场（每行一个，可留空）</label>
           <textarea class="textarea full" id="buyer-markets" style="min-height:80px" placeholder="广东&#10;浙江&#10;海外：Peru"></textarea>
         </div>
@@ -779,6 +790,21 @@ async function renderBuyer() {
     } catch (e) { toast(e.message, "err"); }
     finally { btn.disabled = false; btn.textContent = "🔍 开始发现买家"; }
   };
+  const loadPresets = async () => {
+    try {
+      const d = await api("/api/buyer/presets");
+      const presets = d.presets || {};
+      const box = $("#buyer-presets");
+      box.innerHTML = Object.entries(presets).map(([name]) => `<button class="btn sm" data-p="${esc(name)}">${esc(name)}</button>`).join("");
+      $$("#buyer-presets [data-p]").forEach((b) => b.onclick = () => {
+        const p = presets[b.dataset.p];
+        $("#buyer-kws").value = (p.keywords || []).join("\n");
+        $("#buyer-markets").value = (p.markets || []).join("\n");
+        toast("已套用模板：" + b.dataset.p, "ok");
+      });
+    } catch (e) { /* 忽略 */ }
+  };
+  loadPresets();
 }
 
 async function pollBuyerJob() {
@@ -882,6 +908,24 @@ const EMAIL_TPLS = [
     subject: "您好，{{我方公司}}向您问好",
     body: "{{联系人}}您好：\n\n我是{{我方公司}}的{{自己}}，我们主营{{产品}}。了解到贵公司从事{{地区}}相关业务，想看看有没有合作机会。\n\n如果方便，可以加个微信或留个电话，我发一份资料给您，不耽误您时间。\n\n祝好！\n{{我方公司}} {{自己}}",
   },
+  {
+    name: "工程商现货开发信",
+    desc: "面向弱电/安防工程商：现货+当天发货+同行价",
+    subject: "光纤配套现货，工程商当天发货",
+    body: "{{联系人}}您好：\n\n我是{{我方公司}}的{{自己}}，厂家直供光纤跳线、配线架、分纤箱等配套产品。针对工程商客户，我们提供：\n\n1. 常备现货：常用型号仓库现货，当天发货，不耽误您工期；\n2. 工程商同行价：量大可谈，长期合作月结；\n3. 免费样品：可先寄样品测试（插损/回损数据随样附上），测试通过再下单。\n\n如果贵公司近期在{{地区}}有光纤配套采购需求，加个微信，我发份电子画册和价格表给您备选。\n\n祝工程顺利！\n{{我方公司}} {{自己}}",
+  },
+  {
+    name: "样品测试跟进",
+    desc: "寄样后回访测试结果",
+    subject: "样品测试情况跟进（{{公司}}）",
+    body: "{{联系人}}您好：\n\n上次寄给贵公司的样品，不知道测试结果如何？如插损、回损或兼容性有任何问题，随时发我，我们技术同事第一时间协助解决。\n\n如果测试通过需要批量采购，我这边可以按工程商价出正式报价，常用型号现货、当天发货。\n\n期待您的反馈！\n{{我方公司}} {{自己}}",
+  },
+  {
+    name: "外贸开发信（英文）",
+    desc: "海外 ISP/工程商开发信，含 CE/RoHS/ISO9001",
+    subject: "Fiber Optic Patch Cords & Distribution - OEM Supplier with CE/RoHS/ISO9001",
+    body: "Dear {{联系人}},\n\nThis is {{自己}} from {{我方公司}}, a professional manufacturer of fiber optic patch cords, patch panels, and FTTH products.\n\nWe supply:\n- Telecom-grade patch cords (SC/LC/FC, UPC/APC)\n- High-density MPO/MTP pre-terminated solutions\n- FTTH distribution boxes and accessories\n\nAll products comply with CE, RoHS, and ISO 9001 standards. Samples are available for testing before your bulk order, and we offer competitive OEM/ODM pricing.\n\nCould you please share your current requirements? I will send our catalog and quotation within 24 hours.\n\nBest regards,\n{{自己}}\n{{我方公司}}",
+  },
 ];
 
 const SMS_TPLS = [
@@ -939,6 +983,7 @@ async function renderOutreach() {
         <div class="form-grid">
           <div class="field"><label>文案场景</label><select class="select full" id="ai-scene">
             <option>开发信（邮件）</option><option>短信</option><option>微信/朋友圈</option><option>报价跟进</option>
+            <option>技术科普文章</option><option>B2B平台发布文案</option><option>外贸开发信（英文）</option>
           </select></div>
           <div class="field"><label>目标客户</label><select class="select full" id="ai-audience">
             <option>运营商</option><option>工程商</option><option>集成商</option><option>分销商</option><option>代工厂</option><option>终端客户</option>
@@ -1086,6 +1131,9 @@ async function renderOutreach() {
           <option>抖音评论引流</option>
           <option>小红书评论</option>
           <option>私信开场白</option>
+          <option>加微信申请</option>
+          <option>群内解答后引流</option>
+          <option>样品测试跟进</option>
           <option>追粉话术</option>
         </select>
       </div>

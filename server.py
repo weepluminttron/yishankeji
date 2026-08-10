@@ -19,6 +19,7 @@ import threading
 import time
 import traceback
 import urllib.parse
+from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -66,6 +67,21 @@ SOCIAL_COPY = {
         "上次聊的{{产品}}资料已经整理好了，今天发您？",
         "您好，上次您问的报价我这边申请到了更优惠的政策，方便再聊两句吗？",
         "跟您同步下：那批货下周就到，到时第一时间通知您～",
+    ],
+    "加微信申请": [
+        "您好，我是{{我方公司}}的光纤厂家，专做弱电工程/机房布线用的跳线和配线架。仓库常备现货，工程商当天发货、同行价，方便发份电子画册给您备选吗？",
+        "您好，看到贵公司做弱电/安防工程，我们光纤配套产品支持现货当天发，可免费寄样品测试，加个微信方便发资料吗？",
+        "您好，我们厂家直供光缆跳线、配线架，支持工程商价格和样品测试，加微信发份价格表，备选不打扰～",
+    ],
+    "群内解答后引流": [
+        "刚好我们做这类光纤产品，如果您需要，我可以免费寄 2 根样品给您测试比对（插损回损都测好再寄）。",
+        "您这个问题我们车间经常遇到，需要的话私信我，发一份图文版施工建议给您，顺带寄样品测试。",
+        "这个型号我们有现货，您需要样品的话说一声，免费寄，测试没问题再谈合作。",
+    ],
+    "样品测试跟进": [
+        "您好，样品寄出{{天数}}天了，测试结果怎么样？插损回损有异常随时发我，我让技术同事帮您看。",
+        "样品测试顺利吗？如果批量用，我这边可以按工程商价出报价单，现货当天发。",
+        "跟进一下样品：如果测试通过，这周下单我给您申请加急发货，最快次日达。",
     ],
 }
 
@@ -557,6 +573,8 @@ class Handler(BaseHTTPRequestHandler):
             })
         if api == "copy" and len(parts) > 2 and parts[2] == "social":
             return send_json(self, {"ok": True, "list": SOCIAL_COPY})
+        if api == "buyer" and len(parts) > 2 and parts[2] == "presets":
+            return send_json(self, {"ok": True, "presets": buyer.INDUSTRY_PRESETS})
         if api == "buyer":
             return send_json(self, {"ok": True, "job": dict(_buyer_job)})
         if api == "trusted":
@@ -658,6 +676,17 @@ class Handler(BaseHTTPRequestHandler):
             if not ok:
                 return send_json(self, {"ok": False, "msg": msg}, 400)
             return send_json(self, {"ok": True, "msg": msg, "job": dict(_score_job)})
+        if api == "leads" and len(parts) > 2 and parts[2] == "sample":
+            data = read_json_body(self)
+            lead_id = int(data.get("id", 0))
+            lead = db.get_lead(lead_id)
+            if not lead:
+                return send_json(self, {"ok": False, "msg": "线索不存在"}, 404)
+            remind = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d")
+            new_status = lead["status"] if lead["status"] in ("跟进中", "已成交", "无效") else "跟进中"
+            db.update_lead(lead_id, {"status": new_status, "reminder_date": remind})
+            db.add_event(lead_id, "寄出样品", f"样品测试跟进：{remind} 回访测试结果（插损/回损）")
+            return send_json(self, {"ok": True, "lead": db.get_lead(lead_id)})
         if api == "leads" and len(parts) > 2:
             lead_id = int(parts[2])
             if len(parts) > 3 and parts[3] == "notes":
