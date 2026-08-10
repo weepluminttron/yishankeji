@@ -157,7 +157,7 @@ def search_sogou(query, count=6):
     """搜狗搜索（免费备用源）。链接是 /link?url= 跳转，抓取时自动跟随。"""
     url = "https://www.sogou.com/web?query=" + urllib.parse.quote(query)
     html_text, _ = fetch_page(url)
-    if len(html_text) < 12000 and ("验证" in html_text or "访问" in html_text):
+    if len(html_text) < 12000 and any(w in html_text for w in ("访问过于频繁", "安全验证", "请输入验证码", "captcha")):
         raise ValueError("搜狗搜索暂时不可用")
     doc = lh.fromstring(html_text)
     results = []
