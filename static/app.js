@@ -732,7 +732,8 @@ async function renderBuyer() {
       </div>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <button class="btn primary" id="buyer-run">🔍 开始发现买家</button>
-        <span class="hint">自动过滤黄页/电商平台等噪音站点，规则评分 0-10 分（有邮箱、电话、独立网站得分更高）</span>
+        <label style="display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" id="buyer-ai"> AI 智能筛选（需要 API Key）</label>
+        <span class="hint">自动过滤黄页/新闻/招聘等噪音，识别采购意向和供应商信号后评分 0-10 分</span>
       </div>
     </div>
     <div class="card" id="buyer-result"><div class="empty"><div class="ico">🎯</div>搜索结果显示在这里</div></div>`;
@@ -746,35 +747,42 @@ async function renderBuyer() {
         markets: $("#buyer-markets").value.trim(),
         max_results: $("#buyer-max").value,
         urls: $("#buyer-urls").value.trim(),
+        use_ai: $("#buyer-ai").checked,
       } });
       state.buyerCandidates = res.candidates || [];
+      const filteredCount = res.filtered || 0;
       const errs = (res.errors || []).map((e) => `<li>${esc(e)}</li>`).join("");
       if (!state.buyerCandidates.length) {
         $("#buyer-result").innerHTML = `<div class="empty"><div class="ico">😕</div>没有发现线索${errs ? `<ul style="margin-top:8px;color:var(--red);text-align:left">${errs}</ul>` : ""}</div>`;
         return;
       }
       $("#buyer-result").innerHTML = `
-        <h3>发现 ${state.buyerCandidates.length} 条潜在买家</h3>
+        <h3>发现 ${state.buyerCandidates.length} 条潜在买家${filteredCount ? `（已自动过滤 ${filteredCount} 条噪音/同行）` : ""}</h3>
         <div style="margin:10px 0;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="buyer-all" checked> 全选</label>
           <button class="btn primary sm" id="buyer-add">＋ 添加选中到客户线索（自动去重）</button>
-          <span class="hint">规则评分 ≥ 6 分优先跟进</span>
+          <label style="display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" id="buyer-high"> 只看 ≥6 分</label>
+          <span class="hint">评分高 = 有采购意向词 + 企业邮箱/电话；含“厂家直供/批发价”等供应商信号的会扣分</span>
         </div>
         <div class="table-wrap"><table>
-          <thead><tr><th style="width:30px"></th><th>公司/主体</th><th>邮箱</th><th>电话</th><th>网站</th><th>评分</th><th>线索特征</th></tr></thead>
+          <thead><tr><th style="width:30px"></th><th>公司/主体</th><th>邮箱</th><th>电话</th><th>评分</th><th>判断依据</th></tr></thead>
           <tbody>${state.buyerCandidates.map((c, i) => `
-            <tr>
+            <tr data-score="${c.score}">
               <td><input type="checkbox" class="buyer-check" data-i="${i}" checked></td>
               <td><b>${esc(c.name)}</b><div class="sub">${esc(c.tags || "")}</div></td>
               <td>${esc(c.email || "—")}</td>
               <td>${esc(c.phone || "—")}</td>
-              <td class="sub">${c.website ? `<a href="${esc(c.website)}" target="_blank">打开</a>` : "—"}</td>
               <td>${scoreBadge(c.score)}</td>
-              <td class="sub" style="max-width:220px">${esc(c.score_reason || "")}</td>
+              <td class="sub" style="max-width:260px">${esc(c.score_reason || "")}${c.snippet ? `<div style="margin-top:3px;color:var(--muted)">${esc(c.snippet.slice(0, 120))}</div>` : ""}</td>
             </tr>`).join("")}
           </tbody></table></div>
           ${errs ? `<div style="margin-top:10px;color:var(--orange);font-size:12px">部分页面抓取失败：<ul style="margin:4px 0 0 18px">${errs}</ul></div>` : ""}`;
       $("#buyer-all").onchange = (e) => $$(".buyer-check").forEach((c) => c.checked = e.target.checked);
+      $("#buyer-high").onchange = (e) => {
+        $$("#buyer-result tbody tr").forEach((tr) => {
+          tr.style.display = e.target.checked && Number(tr.dataset.score) < 6 ? "none" : "";
+        });
+      };
       $("#buyer-add").onclick = async () => {
         const picks = state.buyerCandidates.filter((_, i) => $$(".buyer-check")[i] && $$(".buyer-check")[i].checked);
         if (!picks.length) return toast("请先勾选线索", "err");

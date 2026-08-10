@@ -493,6 +493,8 @@ class Handler(BaseHTTPRequestHandler):
                 markets=data.get("markets", ""),
                 max_results=int(data.get("max_results", 6) or 6),
                 urls=data.get("urls", ""),
+                use_ai=bool(data.get("use_ai")),
+                settings=db.get_settings(),
             )
             return send_json(self, {"ok": True, **result})
         if api == "copy" and len(parts) > 2 and parts[2] == "social":
