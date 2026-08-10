@@ -311,7 +311,9 @@ def _score_candidate(cand, page_text):
 def _to_candidate(contact, title, snippet, keyword, market, page_text):
     email = contact["emails"][0] if contact["emails"] else ""
     phone = contact["phones"][0] if contact["phones"] else ""
-    name = contact["company"] or _clean_company(title, contact["website"]) or "未命名"
+    name = contact["company"] or _clean_company(title, contact["website"]) or ""
+    if not name or name.lower() in ("undefined", "none", "null"):
+        name = "未命名"
     cand = {
         "name": name,
         "contact": "",
@@ -460,6 +462,20 @@ def run(keywords, markets=None, max_results=6, urls=None, use_ai=False, settings
                     c["score_reason"] = c.get("score_reason", "") + "；AI：" + str(item["reason"])[:60]
                 keep.append(c)
             candidates = keep
+
+    # 招标平台共享邮箱/电话去重：同一联系方式只保留在最高分候选上
+    from collections import Counter
+    email_counts = Counter(c.get("email", "") for c in candidates if c.get("email"))
+    phone_counts = Counter(c.get("phone", "") for c in candidates if c.get("phone"))
+    for c in candidates:
+        if c.get("email") and email_counts[c["email"]] >= 2:
+            c["email"] = ""
+            c["score"] = max(0, c["score"] - 2)
+            c["score_reason"] = (c.get("score_reason", "") + "；该邮箱为招标平台共享").strip("；")
+        if c.get("phone") and phone_counts[c["phone"]] >= 2:
+            c["phone"] = ""
+            c["score"] = max(0, c["score"] - 2)
+            c["score_reason"] = (c.get("score_reason", "") + "；该电话为招标平台共享").strip("；")
 
     candidates.sort(key=lambda c: c["score"], reverse=True)
     dropped_low = 0
