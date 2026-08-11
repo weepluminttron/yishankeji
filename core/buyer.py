@@ -29,6 +29,13 @@ INTENT_CN = ["采购", "求购", "询价", "招标", "投标", "项目", "工程
 # 采购意向信号（英文，海外市场）
 INTENT_EN = ["buyer", "purchase", "procurement", "import", "wholesale", "distributor", "dealer",
              "rfq", "sourcing", "inquiry", "tender", "project", "need"]
+# 强商业意向词：命中直接加权，白名单机制
+STRONG_INTENT = [
+    "采购经理", "采购部", "采购公告", "招标公告", "询价公告", "采购需求", "采购计划",
+    "总包", "项目方", "供应商征集", "招标文件", "中标",
+    "RFP", "RFQ", "procurement manager", "tender notice", "request for proposal",
+    "request for quotation", "invitation to bid",
+]
 # 供应商/同行信号（出现则降权）
 SUPPLIER_WORDS = ["厂家直供", "厂家直销", "现货供应", "批发价", "出厂价", "价格优惠", "量大从优",
                   "supplier", "manufacturer", "wholesale price", "factory price", "export",
@@ -36,7 +43,8 @@ SUPPLIER_WORDS = ["厂家直供", "厂家直销", "现货供应", "批发价", "
                   "产品系列", "产品展示", "产品分类", "产品参数", "光纤预制棒"]
 # 纯噪音站点信号（直接过滤）
 NOISE_WORDS = ["黄页", "百科", "招聘", "求职", "文库", "下载", "登录", "注册", "论坛", "博客",
-               "新闻", "资讯", "峰会", "大会", "展会", "知道", "问答", "教程", "视频", "小说"]
+               "新闻", "资讯", "峰会", "大会", "展会", "知道", "问答", "教程", "视频", "小说",
+               "论文", "期刊", "高校", "大学", "学院", "学术", "学报"]
 
 BLOCKED_DOMAINS = (
     "alibaba.com", "made-in-china.com", "1688.com", "taobao.com", "tmall.com", "jd.com",
@@ -152,6 +160,7 @@ def build_queries(keyword, market=""):
             _with_words(keyword, ["buyer", "purchase", "procurement"]),
             _with_words(keyword, ["rfq", "tender", "project"]),
             _with_words(keyword, ["distributor", "dealer", "import"]),
+            _with_words(keyword, ["procurement manager", "RFP"]),
         ]
     else:
         variants = [
@@ -159,6 +168,7 @@ def build_queries(keyword, market=""):
             _with_words(keyword, ["招标", "公告"]),
             _with_words(keyword, ["求购", "信息"]),
             _with_words(keyword, ["需要", "报价"]),
+            _with_words(keyword, ["采购经理", "项目"]),
         ]
     out = []
     for v in variants:
@@ -366,7 +376,8 @@ def _text_signals(text):
     cn = sum(t.count(w) for w in INTENT_CN)
     en = sum(t.count(w) for w in INTENT_EN)
     sup = sum(t.count(w) for w in SUPPLIER_WORDS)
-    return cn, en, sup
+    strong = sum(t.count(w.lower()) for w in STRONG_INTENT)
+    return cn, en, sup, strong
 
 
 def _clean_company(raw, url):
@@ -416,7 +427,7 @@ def _score_candidate(cand, page_text):
     """买家意向评分：联系方式基础分 + 意图信号加分 - 供应商信号扣分。"""
     score = 0
     reasons = []
-    cn, en, sup = _text_signals(page_text)
+    cn, en, sup, strong = _text_signals(page_text)
     if cn:
         score += min(3, cn)
         reasons.append(f"采购意向词×{cn}")
@@ -426,6 +437,9 @@ def _score_candidate(cand, page_text):
     if sup:
         score -= min(2, sup)
         reasons.append(f"疑似供应商×{sup}")
+    if strong:
+        score += min(4, strong * 2)
+        reasons.append(f"强意向词×{strong}")
     email = cand.get("email", "")
     if email:
         dom = email.split("@")[-1].lower()
@@ -550,7 +564,7 @@ def run(keywords, markets=None, max_results=6, urls=None, use_ai=False, settings
         for market in markets or [""]:
             for kw in keywords:
                 queries.extend(build_queries(kw, market))
-        queries = queries[:24]
+        queries = queries[:30]
         q_total = len(queries)
         for qi, q in enumerate(queries, 1):
             try:
@@ -572,9 +586,9 @@ def run(keywords, markets=None, max_results=6, urls=None, use_ai=False, settings
                 if _is_noise(r["title"], r["snippet"], r["url"]):
                     filtered += 1
                     continue
-                cn, en, sup = _text_signals(r["title"] + " " + r["snippet"])
+                cn, en, sup, strong = _text_signals(r["title"] + " " + r["snippet"])
                 # 片段里只有供应商信号、没有任何采购意向 → 大概率是同行，跳过抓取
-                if sup >= 2 and cn == 0 and en == 0:
+                if sup >= 2 and cn == 0 and en == 0 and strong == 0:
                     filtered += 1
                     continue
                 r["keyword"] = q.split(" ")[0]

@@ -1179,9 +1179,10 @@ async function renderBuyer() {
     </div>
     <div class="card">
       <h3>🔍 手动搜索（高级）</h3>
+      <div class="hint" style="margin-bottom:10px">💡 技巧：关键词 = 产品词 + 买方动作（采购/招标/询价/项目），例如 “WDM 采购”、“波分复用设备 项目方”，比只写产品名精准得多。</div>
       <div class="form-grid">
         <div class="field" style="grid-column:1/-1"><label>搜索关键词（每行一个，建议 1-3 个）</label>
-          <textarea class="textarea full" id="buyer-kws" placeholder="光纤光缆采购&#10;光纤收发器工程商&#10;FTTH 项目招标"></textarea>
+          <textarea class="textarea full" id="buyer-kws" placeholder="WDM 采购&#10;波分复用设备 招标&#10;光传输扩容 项目方"></textarea>
         </div>
         <div class="field" style="grid-column:1/-1"><label>行业获客词模板（一键套用）</label>
           <div id="buyer-presets" style="display:flex;gap:8px;flex-wrap:wrap"><span class="hint">加载中…</span></div>
