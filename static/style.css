@@ -326,6 +326,48 @@ td .sub { color: var(--muted); font-size: 12px; }
 .toast.err { background: var(--red); }
 @keyframes slidein { from { transform: translateX(20px); opacity: 0; } to { transform: none; opacity: 1; } }
 
+/* ---------- 全局任务栏 ---------- */
+#task-bar {
+  position: fixed;
+  top: 14px;
+  right: 14px;
+  z-index: 90;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 360px;
+}
+.task-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #1f2d3d;
+  color: #fff;
+  border-radius: 10px;
+  padding: 8px 12px;
+  font-size: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+}
+.task-chip .t-label { font-weight: 700; white-space: nowrap; }
+.task-chip .t-stage { color: #b9c7da; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.task-chip .t-prog {
+  min-width: 60px;
+  height: 5px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.2);
+  overflow: hidden;
+}
+.task-chip .t-prog i {
+  display: block;
+  height: 100%;
+  background: var(--brand-2);
+  border-radius: 3px;
+  transition: width 0.3s;
+}
+.task-chip.t-done { background: var(--green); }
+.task-chip.t-fail { background: var(--red); }
+
 /* ---------- 采集 ---------- */
 .sub-tabs { display: flex; gap: 8px; margin-bottom: 16px; border-bottom: 1px solid var(--line); padding-bottom: 0; }
 .sub-tab {

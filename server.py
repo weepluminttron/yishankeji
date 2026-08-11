@@ -45,6 +45,44 @@ _buyer_job = {"running": False, "message": "", "started": "", "result": None}
 _mail_job = {"running": False, "message": "", "started": "", "result": None}
 _map_job = {"running": False, "message": "", "started": "", "result": None}
 _login_attempts = {}
+_tasks = {}
+
+
+def task_start(task_id, label, total=0):
+    _tasks[task_id] = {
+        "id": task_id, "label": label, "status": "运行中", "stage": "准备中",
+        "done": 0, "total": total, "message": "",
+        "started": time.strftime("%Y-%m-%d %H:%M:%S"), "finished": "",
+        "result": None,
+    }
+
+
+def task_progress(task_id, stage=None, done=None, total=None, message=None):
+    t = _tasks.get(task_id)
+    if not t:
+        return
+    if stage:
+        t["stage"] = stage
+    if done is not None:
+        t["done"] = done
+    if total is not None:
+        t["total"] = total
+    if message is not None:
+        t["message"] = message
+
+
+def task_finish(task_id, status, message=""):
+    t = _tasks.get(task_id)
+    if not t:
+        return
+    t.update(status=status, message=message, finished=time.strftime("%Y-%m-%d %H:%M:%S"))
+    finished = [k for k, v in _tasks.items() if v["status"] != "运行中"]
+    for k in sorted(finished, key=lambda x: _tasks[x]["finished"], reverse=True)[20:]:
+        _tasks.pop(k, None)
+
+
+def task_snapshot(task_id):
+    return dict(_tasks.get(task_id) or {})
 
 SOCIAL_COPY = {
     "抖音评论引流": [
@@ -147,9 +185,11 @@ def run_auto_crawl_once(urls):
     urls = [u for u in (urls or []) if str(u).strip()]
     if not urls:
         return {"urls": 0, "found": 0, "added": 0, "skipped": 0, "errors": 0, "logs": []}
+    task_start("autocrawl", "定时自动采集", len(urls))
     total_added = 0
     logs = []
-    for url in urls:
+    for ui, url in enumerate(urls, 1):
+        task_progress("autocrawl", stage="正在采集", done=ui, message=url[:50])
         candidates, err = crawler.crawl(url=url)
         if err:
             db.add_auto_crawl_log(url, 0, 0, 0, err)
@@ -161,6 +201,7 @@ def run_auto_crawl_once(urls):
         total_added += added
         db.add_auto_crawl_log(url, len(candidates), added, skipped, "")
         logs.append({"url": url, "found": len(candidates), "added": added, "skipped": skipped, "error": ""})
+    task_finish("autocrawl", "成功", f"新增 {total_added} 条线索")
     db.save_settings({"last_auto_crawl": db.now()})
     if total_added > 0:
         settings = db.get_settings()
@@ -213,11 +254,13 @@ def _score_all_worker():
         _score_job.update(running=False, message="未配置 AI 密钥，无法评分")
         return
     leads = db.list_unscored_leads()
+    task_start("score", "全量 AI 评分", len(leads))
     _score_job.update(total=len(leads), done=0, failed=0, started=time.strftime("%Y-%m-%d %H:%M:%S"), message="")
     for lead in leads:
         if not _score_job.get("running"):
             break
         _score_job["current"] = str(lead.get("name", ""))[:30]
+        task_progress("score", stage="AI 评分中", done=_score_job["done"] + 1, message=str(lead.get("name", ""))[:30])
         score, reason = scorer.ai_score(settings, lead)
         if score is not None:
             db.set_lead_score(lead["id"], score, reason, ai=True)
@@ -226,6 +269,7 @@ def _score_all_worker():
             _score_job["failed"] += 1
         time.sleep(0.3)
     _score_job.update(running=False, current="", message=f"评分完成：成功 {_score_job['done']}，失败 {_score_job['failed']}")
+    task_finish("score", "成功", f"成功 {_score_job['done']}，失败 {_score_job['failed']}")
 
 
 def start_score_job():
@@ -250,6 +294,13 @@ def auto_score_if_enabled():
 
 def _buyer_worker(data):
     settings = db.get_settings()
+    task_start("buyer", "买家发现搜索")
+    _buyer_job.update(running=True, result=None, message="", stage="准备中", started=time.strftime("%Y-%m-%d %H:%M:%S"))
+
+    def cb(p):
+        _buyer_job["stage"] = p.get("stage", "")
+        task_progress("buyer", stage=p.get("stage"), done=p.get("done"), total=p.get("total"), message=p.get("message", ""))
+
     try:
         result = buyer.run(
             keywords=data.get("keywords", ""),
@@ -258,10 +309,13 @@ def _buyer_worker(data):
             urls=data.get("urls", ""),
             use_ai=bool(data.get("use_ai")),
             settings=settings,
+            progress=cb,
         )
         _buyer_job.update(running=False, result=result, message="")
+        task_finish("buyer", "成功", f"发现 {len(result.get('candidates', []))} 条线索")
     except Exception as e:
         _buyer_job.update(running=False, result=None, message=str(e))
+        task_finish("buyer", "失败", str(e))
 
 
 def start_buyer_job(data):
@@ -277,6 +331,7 @@ def start_buyer_job(data):
 
 def _mail_worker(lead_ids, subject_tpl, body_tpl):
     settings = db.get_settings()
+    task_start("mail", "邮件群发", len(lead_ids))
     results = {"ok": True, "sent": 0, "failed": 0, "errors": [], "total": len(lead_ids), "done": 0}
     for lid in lead_ids:
         if not _mail_job.get("running"):
@@ -301,27 +356,37 @@ def _mail_worker(lead_ids, subject_tpl, body_tpl):
             results["errors"].append({"id": lid, "name": lead["name"], "msg": err})
         results["done"] += 1
         _mail_job["result"] = dict(results)
+        task_progress("mail", stage="正在发送邮件", done=results["done"], message=str(lead.get("name", ""))[:30])
     _mail_job.update(
         running=False,
         result=results,
         message=f"发送完成：成功 {results['sent']}，失败 {results['failed']}",
     )
+    task_finish("mail", "成功" if results["failed"] == 0 else "部分失败", f"成功 {results['sent']}，失败 {results['failed']}")
 
 
 def _map_worker(data):
     settings = db.get_settings()
+    pages = int(data.get("pages", 2) or 2)
+    task_start("map", "地图获客", pages)
+    _map_job.update(running=True, result=None, message="", stage="准备中", started=time.strftime("%Y-%m-%d %H:%M:%S"))
     try:
-        pages = int(data.get("pages", 2) or 2)
+        def cb(page, total):
+            _map_job["stage"] = f"正在搜索第 {page}/{total} 页"
+            task_progress("map", stage=f"正在搜索第 {page}/{total} 页", done=page, total=total)
         candidates = mapsearch.run_map_search(
             settings,
             data.get("keyword", ""),
             data.get("city", ""),
             pages=pages,
             max_results=pages * 20,
+            progress=cb,
         )
         _map_job.update(running=False, result=candidates, message="")
+        task_finish("map", "成功", f"找到 {len(candidates)} 家公司")
     except Exception as e:
         _map_job.update(running=False, result=None, message=str(e))
+        task_finish("map", "失败", str(e))
 
 
 def start_map_job(data):
@@ -362,6 +427,70 @@ def _mail_sequence_loop():
         except Exception:
             pass
         time.sleep(60)
+
+
+def _strategy_worker(data, settings):
+    """后台线程：AI 生成获客方案。"""
+    desc = str(data.get("description", "")).strip()
+    task_progress("strategy", stage="AI 生成中")
+    system = (
+        "你是一名资深 B2B 获客策略顾问，擅长为任意行业设计可执行的客户开发方案。"
+        "根据用户的业务描述，设计 3-5 套不同的获客方案，覆盖不同客户类型、地区和利润组合。"
+        '只输出一个 JSON 对象，不要输出任何其他内容，格式：'
+        '{"plans":[{"title":"方案标题","target_customers":"目标客户描述","keywords":["关键词1","关键词2"],'
+        '"markets":["地区1","地区2"],"profit":1到5的整数,"brand":1到5的整数,"demand":1到5的整数,'
+        '"strategy":"获客策略建议","cooperation":"合作模式"}]}'
+    )
+    user = (
+        f"公司：{settings.get('company_name', '')}\n"
+        f"主营产品：{settings.get('product_name', '')}\n"
+        f"业务描述：{desc}\n\n"
+        "请生成方案。关键词请给出可直接用于搜索引擎的短语（每套 5-8 个，海外市场用英文）；"
+        "利润/知名度/需求量用 1-5 整数表示（5 最高）。"
+    )
+    text, err = ai.generate_copy(
+        settings.get("openai_api_key"),
+        settings.get("openai_model"),
+        system,
+        user,
+        settings.get("openai_api_base", ""),
+    )
+    if err:
+        task_finish("strategy", "失败", err)
+        return
+    task_progress("strategy", stage="解析方案")
+    m = re.search(r"\{.*\}", text, re.S)
+    if not m:
+        task_finish("strategy", "失败", "AI 返回格式无法解析，请重试")
+        return
+    try:
+        parsed = json.loads(m.group(0))
+        plans = []
+        for p in (parsed.get("plans") or [])[:5]:
+            try:
+                profit = int(p.get("profit", 3) or 3)
+                brand = int(p.get("brand", 3) or 3)
+                demand = int(p.get("demand", 3) or 3)
+            except Exception:
+                profit = brand = demand = 3
+            plans.append({
+                "title": str(p.get("title", "获客方案"))[:60],
+                "target_customers": str(p.get("target_customers", ""))[:200],
+                "keywords": [str(k).strip() for k in (p.get("keywords") or []) if str(k).strip()][:8],
+                "markets": [str(x).strip() for x in (p.get("markets") or []) if str(x).strip()][:4],
+                "profit": min(5, max(1, profit)),
+                "brand": min(5, max(1, brand)),
+                "demand": min(5, max(1, demand)),
+                "strategy": str(p.get("strategy", ""))[:300],
+                "cooperation": str(p.get("cooperation", ""))[:120],
+            })
+        if not plans:
+            task_finish("strategy", "失败", "AI 没有生成有效方案，请重试")
+            return
+        _tasks["strategy"]["result"] = {"plans": plans}
+        task_finish("strategy", "成功", f"生成 {len(plans)} 套方案")
+    except Exception as e:
+        task_finish("strategy", "失败", f"方案解析失败：{e}")
 
 
 def find_duplicates():
@@ -710,8 +839,14 @@ class Handler(BaseHTTPRequestHandler):
             return send_json(self, {"ok": True, "list": SOCIAL_COPY})
         if api == "buyer" and len(parts) > 2 and parts[2] == "presets":
             return send_json(self, {"ok": True, "presets": buyer.INDUSTRY_PRESETS})
+        if api == "buyer" and len(parts) > 2 and parts[2] == "strategy":
+            return send_json(self, {"ok": True, "task": task_snapshot("strategy")})
         if api == "buyer":
             return send_json(self, {"ok": True, "job": dict(_buyer_job)})
+        if api == "tasks":
+            tasks = [dict(v) for v in _tasks.values()]
+            tasks.sort(key=lambda t: (0 if t["status"] == "运行中" else 1, t.get("started", "")), reverse=True)
+            return send_json(self, {"ok": True, "tasks": tasks})
         if api == "map":
             return send_json(self, {"ok": True, "job": dict(_map_job)})
         if api == "sequences":
@@ -1016,59 +1151,11 @@ class Handler(BaseHTTPRequestHandler):
         settings = db.get_settings()
         if not settings.get("openai_api_key"):
             return send_json(self, {"ok": False, "msg": "AI 策略生成需要配置 AI 密钥（“设置 → AI 文案”，支持 DeepSeek/OpenAI）"}, 400)
-        system = (
-            "你是一名资深 B2B 获客策略顾问，擅长为任意行业设计可执行的客户开发方案。"
-            "根据用户的业务描述，设计 3-5 套不同的获客方案，覆盖不同客户类型、地区和利润组合。"
-            '只输出一个 JSON 对象，不要输出任何其他内容，格式：'
-            '{"plans":[{"title":"方案标题","target_customers":"目标客户描述","keywords":["关键词1","关键词2"],'
-            '"markets":["地区1","地区2"],"profit":1到5的整数,"brand":1到5的整数,"demand":1到5的整数,'
-            '"strategy":"获客策略建议","cooperation":"合作模式"}]}'
-        )
-        user = (
-            f"公司：{settings.get('company_name', '')}\n"
-            f"主营产品：{settings.get('product_name', '')}\n"
-            f"业务描述：{desc}\n\n"
-            "请生成方案。关键词请给出可直接用于搜索引擎的短语（每套 5-8 个，海外市场用英文）；"
-            "利润/知名度/需求量用 1-5 整数表示（5 最高）。"
-        )
-        text, err = ai.generate_copy(
-            settings.get("openai_api_key"),
-            settings.get("openai_model"),
-            system,
-            user,
-            settings.get("openai_api_base", ""),
-        )
-        if err:
-            return send_json(self, {"ok": False, "msg": err}, 400)
-        m = re.search(r"\{.*\}", text, re.S)
-        if not m:
-            return send_json(self, {"ok": False, "msg": "AI 返回格式无法解析，请重试"}, 400)
-        try:
-            parsed = json.loads(m.group(0))
-            plans = []
-            for p in (parsed.get("plans") or [])[:5]:
-                try:
-                    profit = int(p.get("profit", 3) or 3)
-                    brand = int(p.get("brand", 3) or 3)
-                    demand = int(p.get("demand", 3) or 3)
-                except Exception:
-                    profit = brand = demand = 3
-                plans.append({
-                    "title": str(p.get("title", "获客方案"))[:60],
-                    "target_customers": str(p.get("target_customers", ""))[:200],
-                    "keywords": [str(k).strip() for k in (p.get("keywords") or []) if str(k).strip()][:8],
-                    "markets": [str(x).strip() for x in (p.get("markets") or []) if str(x).strip()][:4],
-                    "profit": min(5, max(1, profit)),
-                    "brand": min(5, max(1, brand)),
-                    "demand": min(5, max(1, demand)),
-                    "strategy": str(p.get("strategy", ""))[:300],
-                    "cooperation": str(p.get("cooperation", ""))[:120],
-                })
-            if not plans:
-                return send_json(self, {"ok": False, "msg": "AI 没有生成有效方案，请重试"}, 400)
-            return send_json(self, {"ok": True, "plans": plans})
-        except Exception as e:
-            return send_json(self, {"ok": False, "msg": f"方案解析失败：{e}"}, 400)
+        if task_snapshot("strategy").get("status") == "运行中":
+            return send_json(self, {"ok": False, "msg": "已有方案生成任务在运行，请等待完成"}, 400)
+        task_start("strategy", "AI 获客方案生成")
+        threading.Thread(target=_strategy_worker, args=(data, settings), daemon=True).start()
+        return send_json(self, {"ok": True, "msg": "方案生成任务已启动", "task": task_snapshot("strategy")})
 
     def _social_copy(self, data):
         scenario = data.get("scenario", "抖音评论引流")

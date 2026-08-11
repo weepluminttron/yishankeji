@@ -47,6 +47,54 @@ function openModal(html, cls = "") {
 }
 function closeModal() { $("#modal-root").innerHTML = ""; }
 
+let lastTaskSeen = {};
+async function pollTasks() {
+  try {
+    const d = await api("/api/tasks");
+    const tasks = d.tasks || [];
+    const running = tasks.filter((t) => t.status === "运行中");
+    const bar = $("#task-bar");
+    if (running.length) {
+      bar.innerHTML = running.map((t) => {
+        const pct = t.total ? Math.min(100, Math.round((t.done / t.total) * 100)) : null;
+        return `<div class="task-chip" onclick="openTaskPanel()">
+          <span class="t-label">${esc(t.label)}</span>
+          <span class="t-stage">${esc(t.stage || "")}${t.total ? ` ${t.done}/${t.total}` : ""}</span>
+          ${pct !== null ? `<span class="t-prog"><i style="width:${pct}%"></i></span>` : ""}
+        </div>`;
+      }).join("");
+    } else {
+      bar.innerHTML = "";
+    }
+    tasks.filter((t) => t.status !== "运行中" && t.finished).forEach((t) => {
+      if (lastTaskSeen[t.id] !== t.finished) {
+        lastTaskSeen[t.id] = t.finished;
+        toast(`${t.label}：${t.message || t.status}`, t.status === "成功" ? "ok" : "err");
+      }
+    });
+  } catch (e) { /* 忽略轮询错误 */ }
+  setTimeout(pollTasks, 2500);
+}
+
+function openTaskPanel() {
+  api("/api/tasks").then((d) => {
+    const tasks = d.tasks || [];
+    openModal(`
+      <div class="modal-head"><h2>任务中心</h2><button class="close-x" onclick="closeModal()">×</button></div>
+      ${tasks.length ? `<div class="table-wrap"><table>
+        <thead><tr><th>任务</th><th>状态</th><th>进度</th><th>当前阶段</th><th>开始时间</th></tr></thead>
+        <tbody>${tasks.map((t) => `<tr>
+          <td><b>${esc(t.label)}</b><div class="sub">${esc(t.message || "")}</div></td>
+          <td>${t.status === "运行中" ? '<span style="color:var(--brand);font-weight:700">⏳ 运行中</span>' : t.status === "成功" ? '<span style="color:var(--green)">✅ 成功</span>' : '<span style="color:var(--red)">⚠️ ' + esc(t.status) + '</span>'}</td>
+          <td>${t.total ? `${t.done}/${t.total}` : "—"}</td>
+          <td class="sub">${esc(t.stage || "")}</td>
+          <td class="sub">${esc(t.started || "")}</td>
+        </tr>`).join("")}</tbody></table></div>`
+        : `<div class="empty">暂无任务</div>`}
+      <div class="modal-foot"><button class="btn" onclick="closeModal()">关闭</button></div>`, "wide");
+  }).catch(() => {});
+}
+
 function showLogin(msg) {
   $("#login-root").innerHTML = `
     <div class="login-mask">
@@ -1010,13 +1058,31 @@ async function renderBuyer() {
     const desc = $("#strategy-desc").value.trim();
     if (!desc) return toast("请先描述你的业务和客户需求", "err");
     const btn = $("#strategy-gen");
-    btn.disabled = true; btn.textContent = "AI 思考中…（约 20 秒）";
+    btn.disabled = true; btn.textContent = "启动中…";
     try {
-      const res = await api("/api/buyer/strategy", { method: "POST", body: { description: desc } });
-      renderPlans(res.plans || []);
+      await api("/api/buyer/strategy", { method: "POST", body: { description: desc } });
+      $("#strategy-plans").innerHTML = `<div class="empty"><div class="ico">🤖</div>AI 正在生成方案…（约 20-40 秒，进度看右上角任务栏）</div>`;
+      pollStrategy();
     } catch (e) { toast(e.message, "err"); }
     finally { btn.disabled = false; btn.textContent = "🤖 AI 生成获客方案"; }
   };
+}
+
+async function pollStrategy() {
+  try {
+    const d = await api("/api/buyer/strategy");
+    const t = d.task || {};
+    if (t.status === "运行中") {
+      $("#strategy-plans").innerHTML = `<div class="empty"><div class="ico">⏳</div>${esc(t.stage || "AI 生成中")}…（进度看右上角任务栏）</div>`;
+      setTimeout(pollStrategy, 1500);
+      return;
+    }
+    if (t.status === "成功" && t.result && t.result.plans) {
+      renderPlans(t.result.plans);
+    } else {
+      $("#strategy-plans").innerHTML = `<div class="empty"><div class="ico">⚠️</div>${esc(t.message || "生成失败，请重试")}</div>`;
+    }
+  } catch (e) { /* 忽略 */ }
 }
 
 function renderPlans(plans) {
@@ -1058,7 +1124,7 @@ async function pollBuyerJob() {
     const d = await api("/api/buyer");
     const job = d.job;
     if (job.running) {
-      $("#buyer-result").innerHTML = `<div class="empty"><div class="ico">⏳</div>正在搜索并分析买家线索…（后台进行中，可先做其他事）</div>`;
+      $("#buyer-result").innerHTML = `<div class="empty"><div class="ico">⏳</div>${esc(job.stage || "正在搜索并分析买家线索")}…（进度看右上角任务栏）</div>`;
       setTimeout(pollBuyerJob, 1500);
       return;
     }
@@ -1075,7 +1141,7 @@ async function pollMapJob() {
     const d = await api("/api/map");
     const job = d.job;
     if (job.running) {
-      $("#map-result").innerHTML = `<div class="empty"><div class="ico">🗺️</div>正在搜索地图客户…（每页 25 条，带防限流延迟）</div>`;
+      $("#map-result").innerHTML = `<div class="empty"><div class="ico">🗺️</div>${esc(job.stage || "正在搜索地图客户")}…（进度看右上角任务栏）</div>`;
       setTimeout(pollMapJob, 1500);
       return;
     }
@@ -1926,6 +1992,7 @@ async function renderSettings() {
     if (sess.password_set) {
       $("#nav-logout").style.display = "block";
     }
+    pollTasks();
   } catch (e) {
     toast("无法连接本地服务：" + e.message, "err");
   }

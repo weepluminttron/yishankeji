@@ -513,7 +513,7 @@ def ai_filter(settings, candidates):
         return None
 
 
-def run(keywords, markets=None, max_results=6, urls=None, use_ai=False, settings=None):
+def run(keywords, markets=None, max_results=6, urls=None, use_ai=False, settings=None, progress=None):
     """执行一次买家发现，返回 {candidates, errors, filtered}。"""
     if isinstance(keywords, str):
         keywords = [k.strip() for k in keywords.splitlines() if k.strip()]
@@ -551,7 +551,8 @@ def run(keywords, markets=None, max_results=6, urls=None, use_ai=False, settings
             for kw in keywords:
                 queries.extend(build_queries(kw, market))
         queries = queries[:24]
-        for q in queries:
+        q_total = len(queries)
+        for qi, q in enumerate(queries, 1):
             try:
                 results = search_web(q, max_results, settings)
             except Exception as e:
@@ -560,6 +561,8 @@ def run(keywords, markets=None, max_results=6, urls=None, use_ai=False, settings
                     errors.append(msg)
                 time.sleep(2)
                 continue
+            if progress:
+                progress({"stage": "正在搜索方案词", "done": qi, "total": q_total, "message": q})
             time.sleep(2)
             for r in results:
                 r["url"] = _resolve_url(r["url"])
@@ -581,7 +584,8 @@ def run(keywords, markets=None, max_results=6, urls=None, use_ai=False, settings
             return {"candidates": [], "errors": errors or ["没有找到符合条件的线索，请换个关键词或地区"]}
 
     candidates = []
-    for t in targets[:30]:
+    fetch_targets = targets[:30]
+    for i, t in enumerate(fetch_targets, 1):
         try:
             html_text, final_url = fetch_page(t["url"], timeout=10)
             contact = extract_contacts(html_text, final_url or t["url"])
@@ -593,8 +597,12 @@ def run(keywords, markets=None, max_results=6, urls=None, use_ai=False, settings
             errors.append(f"{t['url']} 抓取失败：页面返回 {e.code}（可能已失效或需登录）")
         except Exception as e:
             errors.append(f"{t['url']} 抓取失败：{e}")
+        if progress:
+            progress({"stage": "正在分析页面", "done": i, "total": len(fetch_targets), "message": t["url"]})
 
     if use_ai:
+        if progress:
+            progress({"stage": "AI 智能筛选", "done": 0, "total": len(candidates)})
         ai_map = ai_filter(settings, candidates)
         if ai_map:
             keep = []

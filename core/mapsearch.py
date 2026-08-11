@@ -25,7 +25,7 @@ def _map_type(category):
     return "其他"
 
 
-def amap_search(keyword, city, api_key, offset=25, max_pages=4):
+def amap_search(keyword, city, api_key, offset=25, max_pages=4, progress=None):
     """按关键词+城市搜索，返回 [{name, phone, address, region, type, source, tags, note}]。"""
     if not api_key:
         raise ValueError("未配置高德地图 API Key，请到“设置 → 地图接口”填写（免费申请：lbs.amap.com）")
@@ -71,6 +71,8 @@ def amap_search(keyword, city, api_key, offset=25, max_pages=4):
             })
         if len(pois) < offset:
             break
+        if progress:
+            progress(page, max_pages)
         time.sleep(1.2)  # 防限流延迟
     return results
 
@@ -123,9 +125,9 @@ def serpapi_maps_search(keyword, location, api_key, max_results=50):
     return results
 
 
-def run_map_search(settings, keyword, location, pages=2, max_results=50):
+def run_map_search(settings, keyword, location, pages=2, max_results=50, progress=None):
     """按设置的地图源执行搜索。"""
     provider = settings.get("map_provider", "amap")
     if provider == "google_maps":
         return serpapi_maps_search(keyword, location, settings.get("search_api_key", ""), max_results)
-    return amap_search(keyword, location, settings.get("map_api_key", ""), offset=25, max_pages=pages)
+    return amap_search(keyword, location, settings.get("map_api_key", ""), offset=25, max_pages=pages, progress=progress)
