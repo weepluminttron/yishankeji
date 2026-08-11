@@ -768,6 +768,8 @@ class Handler(BaseHTTPRequestHandler):
             )
         if api == "lp" and len(parts) > 2 and parts[2] == "submit":
             return self._lp_submit()
+        if api == "buyer" and len(parts) > 2 and parts[2] == "strategy":
+            return self._buyer_strategy()
         if api == "buyer":
             data = read_json_body(self)
             ok, msg = start_buyer_job(data)
@@ -1006,6 +1008,68 @@ class Handler(BaseHTTPRequestHandler):
         return send_json(self, {"ok": False, "msg": "接口不存在"}, 404)
 
     # ---------- 业务辅助 ----------
+    def _buyer_strategy(self):
+        data = read_json_body(self)
+        desc = str(data.get("description", "")).strip()
+        if not desc:
+            return send_json(self, {"ok": False, "msg": "请先描述你的业务和客户需求"}, 400)
+        settings = db.get_settings()
+        if not settings.get("openai_api_key"):
+            return send_json(self, {"ok": False, "msg": "AI 策略生成需要配置 AI 密钥（“设置 → AI 文案”，支持 DeepSeek/OpenAI）"}, 400)
+        system = (
+            "你是一名资深 B2B 获客策略顾问，擅长为任意行业设计可执行的客户开发方案。"
+            "根据用户的业务描述，设计 3-5 套不同的获客方案，覆盖不同客户类型、地区和利润组合。"
+            '只输出一个 JSON 对象，不要输出任何其他内容，格式：'
+            '{"plans":[{"title":"方案标题","target_customers":"目标客户描述","keywords":["关键词1","关键词2"],'
+            '"markets":["地区1","地区2"],"profit":1到5的整数,"brand":1到5的整数,"demand":1到5的整数,'
+            '"strategy":"获客策略建议","cooperation":"合作模式"}]}'
+        )
+        user = (
+            f"公司：{settings.get('company_name', '')}\n"
+            f"主营产品：{settings.get('product_name', '')}\n"
+            f"业务描述：{desc}\n\n"
+            "请生成方案。关键词请给出可直接用于搜索引擎的短语（每套 5-8 个，海外市场用英文）；"
+            "利润/知名度/需求量用 1-5 整数表示（5 最高）。"
+        )
+        text, err = ai.generate_copy(
+            settings.get("openai_api_key"),
+            settings.get("openai_model"),
+            system,
+            user,
+            settings.get("openai_api_base", ""),
+        )
+        if err:
+            return send_json(self, {"ok": False, "msg": err}, 400)
+        m = re.search(r"\{.*\}", text, re.S)
+        if not m:
+            return send_json(self, {"ok": False, "msg": "AI 返回格式无法解析，请重试"}, 400)
+        try:
+            parsed = json.loads(m.group(0))
+            plans = []
+            for p in (parsed.get("plans") or [])[:5]:
+                try:
+                    profit = int(p.get("profit", 3) or 3)
+                    brand = int(p.get("brand", 3) or 3)
+                    demand = int(p.get("demand", 3) or 3)
+                except Exception:
+                    profit = brand = demand = 3
+                plans.append({
+                    "title": str(p.get("title", "获客方案"))[:60],
+                    "target_customers": str(p.get("target_customers", ""))[:200],
+                    "keywords": [str(k).strip() for k in (p.get("keywords") or []) if str(k).strip()][:8],
+                    "markets": [str(x).strip() for x in (p.get("markets") or []) if str(x).strip()][:4],
+                    "profit": min(5, max(1, profit)),
+                    "brand": min(5, max(1, brand)),
+                    "demand": min(5, max(1, demand)),
+                    "strategy": str(p.get("strategy", ""))[:300],
+                    "cooperation": str(p.get("cooperation", ""))[:120],
+                })
+            if not plans:
+                return send_json(self, {"ok": False, "msg": "AI 没有生成有效方案，请重试"}, 400)
+            return send_json(self, {"ok": True, "plans": plans})
+        except Exception as e:
+            return send_json(self, {"ok": False, "msg": f"方案解析失败：{e}"}, 400)
+
     def _social_copy(self, data):
         scenario = data.get("scenario", "抖音评论引流")
         count = max(1, min(5, int(data.get("count", 3) or 3)))

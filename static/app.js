@@ -885,8 +885,20 @@ async function renderBuyer() {
   const el = $("#page-buyer");
   el.innerHTML = `
     <div class="page-title">买家发现</div>
-    <div class="page-sub">输入行业关键词和目标地区，自动搜索潜在买家并提取联系方式（参考 B2B 买家发现流程）</div>
+    <div class="page-sub">用一句话描述你的业务，AI 帮你出获客方案；也可以手动输入关键词精确搜索</div>
     <div class="card">
+      <h3>🤖 AI 获客策略助手（不限行业）</h3>
+      <div class="field"><label>描述你的业务和理想客户（用大白话就行）</label>
+        <textarea class="textarea full" id="strategy-desc" style="min-height:100px" placeholder="例如：我们做光纤通信设备，WDM和EDFA是拳头产品，想找海外有大型数据中心建设需求的集成商，最好利润空间大、对方有一定行业知名度。&#10;或者：我们做3C电子代工，想找北美有品牌的小家电客户。"></textarea>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button class="btn primary" id="strategy-gen">🤖 AI 生成获客方案</button>
+        <span class="hint">AI 会生成 3-5 套方案（目标客户、关键词、地区、利润/需求/知名度评分、策略建议），选一套即可一键开搜。需要先配置 AI 密钥（设置 → AI 文案）。</span>
+      </div>
+      <div id="strategy-plans" style="margin-top:14px"></div>
+    </div>
+    <div class="card">
+      <h3>🔍 手动搜索（高级）</h3>
       <div class="form-grid">
         <div class="field" style="grid-column:1/-1"><label>搜索关键词（每行一个，建议 1-3 个）</label>
           <textarea class="textarea full" id="buyer-kws" placeholder="光纤光缆采购&#10;光纤收发器工程商&#10;FTTH 项目招标"></textarea>
@@ -948,6 +960,52 @@ async function renderBuyer() {
     } catch (e) { /* 忽略 */ }
   };
   loadPresets();
+
+  $("#strategy-gen").onclick = async () => {
+    const desc = $("#strategy-desc").value.trim();
+    if (!desc) return toast("请先描述你的业务和客户需求", "err");
+    const btn = $("#strategy-gen");
+    btn.disabled = true; btn.textContent = "AI 思考中…（约 20 秒）";
+    try {
+      const res = await api("/api/buyer/strategy", { method: "POST", body: { description: desc } });
+      renderPlans(res.plans || []);
+    } catch (e) { toast(e.message, "err"); }
+    finally { btn.disabled = false; btn.textContent = "🤖 AI 生成获客方案"; }
+  };
+}
+
+function renderPlans(plans) {
+  const box = $("#strategy-plans");
+  if (!box) return;
+  if (!plans.length) {
+    box.innerHTML = `<div class="empty">没有生成方案，请调整描述后重试</div>`;
+    return;
+  }
+  const stars = (n) => "★★★★★".slice(0, n) + "☆☆☆☆☆".slice(0, 5 - n);
+  box.innerHTML = plans.map((p, i) => `
+    <div style="border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
+        <b>方案 ${"ABCDE"[i] || i + 1}：${esc(p.title)}</b>
+        <button class="btn primary sm" data-use="${i}">🚀 使用此方案搜索</button>
+      </div>
+      <div style="margin-top:6px">🎯 目标客户：${esc(p.target_customers)}</div>
+      <div class="sub" style="margin-top:4px">关键词：${(p.keywords || []).map((k) => `<span class="tag-chip">${esc(k)}</span>`).join("")}</div>
+      <div class="sub">地区：${(p.markets || []).map((m) => `<span class="tag-chip">${esc(m)}</span>`).join("") || "—"}</div>
+      <div style="margin-top:6px">
+        <span style="color:#e8913a">利润 ${stars(p.profit)}</span>
+        <span style="color:#8b5cf6;margin-left:12px">知名度 ${stars(p.brand)}</span>
+        <span style="color:#0ea5b7;margin-left:12px">需求量 ${stars(p.demand)}</span>
+        ${p.cooperation ? `<span class="type-chip" style="margin-left:12px">${esc(p.cooperation)}</span>` : ""}
+      </div>
+      ${p.strategy ? `<div class="hint" style="margin-top:6px">💡 ${esc(p.strategy)}</div>` : ""}
+    </div>`).join("");
+  $$("[data-use]", box).forEach((b) => b.onclick = () => {
+    const p = plans[+b.dataset.use];
+    $("#buyer-kws").value = (p.keywords || []).join("\n");
+    $("#buyer-markets").value = (p.markets || []).join("\n");
+    toast("已按方案填入关键词，开始搜索…", "ok");
+    $("#buyer-run").click();
+  });
 }
 
 async function pollBuyerJob() {
