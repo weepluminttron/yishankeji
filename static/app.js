@@ -39,7 +39,7 @@ function toast(msg, type = "") {
 function openModal(html, cls = "") {
   // 拆分弹窗：头部/底部固定，中间内容独立滚动（关闭按钮始终可见）
   let head = "", foot = "", body = html;
-  const hm = html.match(/^(<div class="modal-head">[\s\S]*?<\/div>)/);
+  const hm = html.match(/^\s*(<div class="modal-head">[\s\S]*?<\/div>)/);
   if (hm) {
     head = hm[1];
     body = html.slice(hm[1].length);
@@ -455,7 +455,7 @@ async function renderLeads() {
       if (!groups.length) return toast("没有发现重复线索", "ok");
       openModal(`
         <div class="modal-head"><h2>数据清洗（发现 ${groups.length} 组重复）</h2><button class="close-x" onclick="closeModal()">×</button></div>
-        <div style="max-height:60vh;overflow-y:auto">
+        <div>
         ${groups.map((g, gi) => `
           <div style="border:1px solid var(--line);border-radius:9px;padding:10px;margin-bottom:10px">
             <b>${esc(g.type)}重复：${esc(g.key)}（${g.leads.length} 条）</b>
