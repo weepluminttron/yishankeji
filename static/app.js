@@ -70,6 +70,10 @@ async function pollTasks() {
       if (lastTaskSeen[t.id] !== t.finished) {
         lastTaskSeen[t.id] = t.finished;
         toast(`${t.label}：${t.message || t.status}`, t.status === "成功" ? "ok" : "err");
+        // AI 方案生成完成后：如果人不在方案页，自动跳过去显示方案
+        if (t.id === "strategy" && t.status === "成功" && state.page !== "buyer") {
+          setTimeout(() => go("buyer"), 800);
+        }
       }
     });
   } catch (e) { /* 忽略轮询错误 */ }
@@ -1302,7 +1306,12 @@ function renderPlans(plans) {
     return;
   }
   const stars = (n) => "★★★★★".slice(0, n) + "☆☆☆☆☆".slice(0, 5 - n);
-  box.innerHTML = plans.map((p, i) => `
+  box.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <b>🤖 AI 获客方案（${plans.length} 套）</b>
+      <button class="btn sm" id="plans-toggle">收起 ▲</button>
+    </div>
+    <div id="plans-body">` + plans.map((p, i) => `
     <div style="border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:10px">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
         <b>方案 ${"ABCDE"[i] || i + 1}：${esc(p.title)}</b>
@@ -1318,7 +1327,13 @@ function renderPlans(plans) {
         ${p.cooperation ? `<span class="type-chip" style="margin-left:12px">${esc(p.cooperation)}</span>` : ""}
       </div>
       ${p.strategy ? `<div class="hint" style="margin-top:6px">💡 ${esc(p.strategy)}</div>` : ""}
-    </div>`).join("");
+    </div>`).join("") + `</div>`;
+  $("#plans-toggle").onclick = () => {
+    const body = $("#plans-body");
+    const collapsed = body.style.display === "none";
+    body.style.display = collapsed ? "" : "none";
+    $("#plans-toggle").textContent = collapsed ? "收起 ▲" : "展开 ▼";
+  };
   $$("[data-use]", box).forEach((b) => b.onclick = () => {
     const p = plans[+b.dataset.use];
     $("#buyer-kws").value = (p.keywords || []).join("\n");
