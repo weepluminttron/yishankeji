@@ -1047,7 +1047,7 @@ class Handler(BaseHTTPRequestHandler):
                     reason = reason + "（AI：" + ai_reason + "）"
                 else:
                     return send_json(self, {"ok": False, "msg": ai_reason}, 400)
-            db.set_lead_score(lead_id, score, reason)
+            db.set_lead_score(lead_id, score, reason, ai=use_ai)
             return send_json(self, {"ok": True, "score": score, "reason": reason})
         if api == "leads" and len(parts) > 2 and parts[2] == "score_all":
             ok, msg = start_score_job()
