@@ -200,8 +200,12 @@ def polish_plan_keywords(keywords, markets):
             continue
         if any(n in k for n in PLAN_NOISE_WORDS):
             continue
-        if not any(w in k.lower() for w in (INTENT_REQUIRED_EN if overseas else INTENT_REQUIRED_CN)):
-            k = k + (" buyer" if overseas else " 采购")
+        has_cjk = bool(re.search(r"[\u4e00-\u9fff]", k))
+        is_abbr = not has_cjk and len(k) <= 8 and " " not in k
+        use_en = not has_cjk and (overseas if is_abbr else True)
+        required = INTENT_REQUIRED_EN if use_en else INTENT_REQUIRED_CN
+        if not any(w in k.lower() for w in required):
+            k = k + (" buyer" if use_en else " 采购")
         if k not in out:
             out.append(k)
     return out[:8]
