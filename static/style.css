@@ -100,6 +100,42 @@ body {
 .stat-card .accent.green { color: var(--green); }
 .stat-card .accent.orange { color: var(--orange); }
 
+/* ---------- 高频操作 ---------- */
+.action-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 14px; }
+.action-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 16px 8px;
+  cursor: pointer;
+  box-shadow: var(--shadow);
+  transition: all 0.15s;
+  font-size: 13px;
+  color: var(--text);
+  font-weight: 600;
+}
+.action-btn .ico { font-size: 24px; }
+.action-btn:hover { border-color: var(--brand); transform: translateY(-2px); box-shadow: 0 6px 16px rgba(14,125,214,0.15); }
+.action-btn.primary { background: var(--brand-grad); color: #fff; border: none; }
+.action-btn.primary:hover { filter: brightness(1.08); }
+.onboard-steps { display: flex; gap: 10px; flex-wrap: wrap; }
+.onboard-step {
+  flex: 1;
+  min-width: 200px;
+  background: #f7faff;
+  border: 1px dashed #b9d2ec;
+  border-radius: 12px;
+  padding: 14px;
+}
+.onboard-step .n { color: var(--brand); font-weight: 800; }
+.onboard-step .t { font-weight: 700; margin: 4px 0; }
+.onboard-step .d { color: var(--muted); font-size: 12px; margin-bottom: 8px; line-height: 1.6; }
+
 .two-col { display: grid; grid-template-columns: 1.4fr 1fr; gap: 16px; }
 .pipeline { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
 .pipe-item {

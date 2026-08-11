@@ -106,6 +106,8 @@ const state = {
     filters: { q: "", status: "", type: "", region: "", tag: "", source: "" },
     selected: new Set(),
   },
+  collectTab: "import",
+  outreachTab: "email",
   recipients: [], // 主动触达选择的收件人
 };
 
@@ -130,7 +132,7 @@ async function renderDashboard() {
       <div class="n">${sc[st] || 0}</div><div class="t">${esc(st)}</div>
     </div>`).join("");
   const due = s.due_reminders.map((r) => `
-    <div class="mini-row">
+    <div class="mini-row clickable" onclick="openLeadDetail(${r.id})">
       <div><span class="who">${esc(r.name)}</span> <span class="tag-chip">${esc(r.type)}</span></div>
       <div class="when">${badge(r.status)}</div>
     </div>`).join("") || `<div class="empty">今天没有到期跟进，保持领先 🎉</div>`;
@@ -140,9 +142,41 @@ async function renderDashboard() {
       <div class="when">${fmtDate(r.created_at)}</div>
     </div>`).join("") || `<div class="empty">还没有线索，去“线索采集”添加第一批客户吧</div>`;
   const types = s.top_types.map((t) => `${esc(t.type)} ${t.count}`).join(" · ") || "—";
+  const onboarding = s.total === 0 ? `
+    <div class="card">
+      <h3>🚀 三步开始获客</h3>
+      <div class="onboard-steps">
+        <div class="onboard-step">
+          <div class="n">第 1 步</div><div class="t">🤖 让 AI 出获客方案</div>
+          <div class="d">一句话描述业务，AI 生成多套方案，选一套就能开搜</div>
+          <button class="btn primary sm" onclick="go('buyer')">去生成方案</button>
+        </div>
+        <div class="onboard-step">
+          <div class="n">第 2 步</div><div class="t">📥 导入已有名单</div>
+          <div class="d">Excel、地图采集、微信/社媒记录都能直接导入</div>
+          <button class="btn sm" onclick="setCollectTab('import');go('collect')">去导入</button>
+        </div>
+        <div class="onboard-step">
+          <div class="n">第 3 步</div><div class="t">✍️ 手动添加客户</div>
+          <div class="d">先录入第一批客户，从今天开始跟进</div>
+          <button class="btn sm" onclick="openLeadForm()">去添加</button>
+        </div>
+      </div>
+    </div>` : "";
   el.innerHTML = `
     <div class="page-title">工作台</div>
-    <div class="page-sub">数据截至 ${esc(s.today)}</div>
+    <div class="page-sub">高频操作都在上面：找客户 → 管客户 → 触达客户${s.total ? ` · 数据截至 ${esc(s.today)}` : ""}</div>
+    <div class="action-grid">
+      <div class="action-btn primary" onclick="go('buyer')"><span class="ico">🤖</span>AI 获客方案</div>
+      <div class="action-btn" onclick="openLeadForm()"><span class="ico">➕</span>新增客户</div>
+      <div class="action-btn" onclick="setCollectTab('map');go('collect')"><span class="ico">🗺️</span>地图获客</div>
+      <div class="action-btn" onclick="setCollectTab('import');go('collect')"><span class="ico">📥</span>批量导入</div>
+      <div class="action-btn" onclick="setOutreachTab('email');go('outreach')"><span class="ico">📧</span>邮件触达</div>
+      <div class="action-btn" onclick="setOutreachTab('sequence');go('outreach')"><span class="ico">⏰</span>跟进序列</div>
+      <div class="action-btn" onclick="scoreAllFromHome()"><span class="ico">✨</span>全量 AI 评分</div>
+      <div class="action-btn" onclick="go('leads')"><span class="ico">📇</span>客户列表</div>
+    </div>
+    ${onboarding}
     <div class="stat-grid">
       <div class="stat-card"><div class="label">全部线索</div><div class="num accent">${s.total}</div></div>
       <div class="stat-card"><div class="label">本周新增</div><div class="num accent green">${s.new_week}</div></div>
@@ -151,13 +185,20 @@ async function renderDashboard() {
     </div>
     <div class="card"><h3>客户阶段分布</h3><div class="pipeline">${pipe}</div></div>
     <div class="two-col">
-      <div class="card"><h3>今日到期跟进</h3><div class="mini-list">${due}</div></div>
+      <div class="card"><h3>今日到期跟进${s.due_reminders.length ? `（${s.due_reminders.length}）` : ""}</h3><div class="mini-list">${due}</div></div>
       <div class="card"><h3>最新线索</h3><div class="mini-list">${recent}</div></div>
     </div>
-    <div class="card"><h3>客户类型占比</h3><div>${types}</div>
-      <div style="margin-top:12px"><button class="btn primary" onclick="go('collect')">＋ 去添加线索</button>
-      <button class="btn" onclick="go('outreach')">📣 去触达客户</button></div>
-    </div>`;
+    <div class="card"><h3>客户类型占比</h3><div>${types}</div></div>`;
+}
+
+function setCollectTab(tab) { state.collectTab = tab; }
+function setOutreachTab(tab) { state.outreachTab = tab; }
+async function scoreAllFromHome() {
+  try {
+    await api("/api/leads/score_all", { method: "POST", body: {} });
+    toast("全量 AI 评分任务已启动", "ok");
+  } catch (e) { toast(e.message, "err"); }
+  go("leads");
 }
 
 function setFilter(key, value) {
@@ -698,7 +739,10 @@ async function renderCollect() {
     <div class="sub-panel" data-group="collect" data-name="manual" style="display:none">
       <div class="card"><div id="manual-form"></div></div>
     </div>`;
-  $$(".sub-tab", el).forEach((t) => t.onclick = () => activateSubTab("collect", t.dataset.name));
+  $$(".sub-tab", el).forEach((t) => t.onclick = () => {
+    state.collectTab = t.dataset.name;
+    activateSubTab("collect", t.dataset.name);
+  });
 
   // 手动录入
   $("#manual-form").innerHTML = leadFormHtml();
@@ -810,6 +854,7 @@ async function renderCollect() {
     finally { btn.disabled = false; btn.textContent = "▶ 立即采集一次"; }
   };
   loadAuto();
+  activateSubTab("collect", state.collectTab || "import");
 }
 
 function renderCandidates() {
@@ -1265,7 +1310,10 @@ async function renderOutreach() {
         <div class="hint" style="margin-top:10px">发送短信需要运营商短信网关（如阿里云短信）。当前版本先把“号码+短信内容”整理好：复制到手机短信 App 或导入第三方群发平台即可。在“设置”里可以填写你的短信服务商备注。</div>
       </div>
     </div>`;
-  $$(".sub-tab", el).forEach((t) => t.onclick = () => activateSubTab("outreach", t.dataset.name));
+  $$(".sub-tab", el).forEach((t) => t.onclick = () => {
+    state.outreachTab = t.dataset.name;
+    activateSubTab("outreach", t.dataset.name);
+  });
   renderRecipients();
 
   $("#pick-recipients").onclick = openRecipientPicker;
@@ -1544,6 +1592,7 @@ async function renderOutreach() {
     } catch (e) { /* 忽略 */ }
   };
   loadSeqList();
+  activateSubTab("outreach", state.outreachTab || "email");
 }
 
 function personalize(tpl, lead, settings) {
