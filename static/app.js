@@ -1173,7 +1173,7 @@ async function renderBuyer() {
       </div>
       <div style="display:flex;gap:8px;align-items:center">
         <button class="btn primary" id="strategy-gen">🤖 AI 生成获客方案</button>
-        <span class="hint">AI 会生成 3-5 套方案（目标客户、关键词、地区、利润/需求/知名度评分、策略建议），选一套即可一键开搜。需要先配置 AI 密钥（设置 → AI 文案）。</span>
+        <span class="hint">AI 会生成 3-5 套方案（目标角色、关键词、地区、利润/需求/知名度、渠道、风险），关键词自动补齐“采购/招标/RFP”等买方意图词并排除百科/论文/同行页面，选一套即可一键开搜。需要先配置 AI 密钥（设置 → AI 文案）。</span>
       </div>
       <div id="strategy-plans" style="margin-top:14px"></div>
     </div>
@@ -1331,6 +1331,7 @@ function renderPlans(plans) {
         <button class="btn primary sm" data-use="${i}">🚀 使用此方案搜索</button>
       </div>
       <div style="margin-top:6px">🎯 目标客户：${esc(p.target_customers)}</div>
+      ${p.buyer_role ? `<div class="sub" style="margin-top:2px">👤 目标角色：${esc(p.buyer_role)}</div>` : ""}
       <div class="sub" style="margin-top:4px">关键词：${(p.keywords || []).map((k) => `<span class="tag-chip">${esc(k)}</span>`).join("")}</div>
       <div class="sub">地区：${(p.markets || []).map((m) => `<span class="tag-chip">${esc(m)}</span>`).join("") || "—"}</div>
       <div style="margin-top:6px">
@@ -1340,6 +1341,8 @@ function renderPlans(plans) {
         ${p.cooperation ? `<span class="type-chip" style="margin-left:12px">${esc(p.cooperation)}</span>` : ""}
       </div>
       ${p.strategy ? `<div class="hint" style="margin-top:6px">💡 ${esc(p.strategy)}</div>` : ""}
+      ${p.channels && p.channels.length ? `<div class="hint" style="margin-top:6px">📡 渠道：${p.channels.map((c) => `<span class="tag-chip">${esc(c)}</span>`).join("")}</div>` : ""}
+      ${p.risks && p.risks.length ? `<div class="hint" style="margin-top:6px">⚠️ 风险：${esc(p.risks.join("；"))}</div>` : ""}
     </div>`).join("") + `</div>`;
   $("#plans-toggle").onclick = () => {
     const body = $("#plans-body");

@@ -36,6 +36,12 @@ STRONG_INTENT = [
     "RFP", "RFQ", "procurement manager", "tender notice", "request for proposal",
     "request for quotation", "invitation to bid",
 ]
+
+# 关键词必须包含的买方意图词（AI 方案生成后用来自动补齐）
+INTENT_REQUIRED_CN = ("采购", "招标", "询价", "求购", "需求", "项目", "工程", "批发", "经销商", "代理", "供应商", "采购经理")
+INTENT_REQUIRED_EN = ("buyer", "purchase", "procurement", "tender", "rfq", "sourcing", "inquiry",
+                      "wholesale", "distributor", "dealer", "contractor", "import", "supplier")
+PLAN_NOISE_WORDS = ("百科", "论文", "新闻", "资讯", "黄页", "知乎", "博客", "高校", "大学", "学院", "期刊", "学报")
 # 供应商/同行信号（出现则降权）
 SUPPLIER_WORDS = ["厂家直供", "厂家直销", "现货供应", "批发价", "出厂价", "价格优惠", "量大从优",
                   "supplier", "manufacturer", "wholesale price", "factory price", "export",
@@ -182,6 +188,23 @@ def expand_keywords(keyword):
     if kw in SYNONYMS:
         return [kw] + SYNONYMS[kw]
     return [kw]
+
+
+def polish_plan_keywords(keywords, markets):
+    """清洗 AI 方案关键词：去噪音、自动补齐买方意图词、去重。"""
+    overseas = any(re.search(r"[a-zA-Z]{2,}", m or "") for m in (markets or []))
+    out = []
+    for raw in keywords or []:
+        k = str(raw).strip()
+        if len(k) < 2:
+            continue
+        if any(n in k for n in PLAN_NOISE_WORDS):
+            continue
+        if not any(w in k.lower() for w in (INTENT_REQUIRED_EN if overseas else INTENT_REQUIRED_CN)):
+            k = k + (" buyer" if overseas else " 采购")
+        if k not in out:
+            out.append(k)
+    return out[:8]
 
 
 def search_bing(query, count=5):

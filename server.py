@@ -452,20 +452,25 @@ def _strategy_worker(data, settings):
     task_progress("strategy", stage="AI 生成中")
     industry = settings.get("industry", "") or "通用"
     system = (
-        f"你是一名资深 B2B 获客策略顾问，当前服务行业：{industry}。"
-        "你擅长为任意行业设计可执行的客户开发方案。"
+        f"你是一名资深 B2B 获客策略顾问，当前服务行业：{industry}。我们是卖家，目标是为我们找到有真实采购意向的买家。"
         "根据用户的业务描述，设计 3-5 套不同的获客方案，覆盖不同客户类型、地区和利润组合。"
         '只输出一个 JSON 对象，不要输出任何其他内容，格式：'
-        '{"plans":[{"title":"方案标题","target_customers":"目标客户描述","keywords":["关键词1","关键词2"],'
+        '{"plans":[{"title":"方案标题","buyer_role":"目标买方角色（如采购经理/总包/集成商/分销商）",'
+        '"target_customers":"目标客户描述","keywords":["关键词1","关键词2"],'
         '"markets":["地区1","地区2"],"profit":1到5的整数,"brand":1到5的整数,"demand":1到5的整数,'
-        '"strategy":"获客策略建议","cooperation":"合作模式"}]}'
+        '"strategy":"获客策略建议","cooperation":"合作模式","channels":["获客渠道1","获客渠道2"],'
+        '"risks":["风险提示1","风险提示2"]}]}'
+        "关键词规则：每条必须是【产品/场景词 + 买方意图词】的组合，例如“WDM 采购公告”“光传输扩容 项目方”"
+        "“data center fiber procurement”；禁止只写产品名词，禁止包含百科/论文/新闻/知乎/高校等无效词；"
+        "海外市场的关键词用英文意图词（buyer/purchase/procurement/tender/RFP）。"
     )
     user = (
         f"公司：{settings.get('company_name', '')}\n"
         f"主营产品：{settings.get('product_name', '')}\n"
         f"业务描述：{desc}\n\n"
         "请生成方案。关键词请给出可直接用于搜索引擎的短语（每套 5-8 个，海外市场用英文）；"
-        "利润/知名度/需求量用 1-5 整数表示（5 最高）。"
+        "利润/知名度/需求量用 1-5 整数表示（5 最高）；channels 给出 2-4 个可执行获客渠道（如展会/B2B平台/社群/邮件）；"
+        "risks 给出 1-3 条风险提示（如竞争激烈/资质门槛/账期）。"
     )
     text, err = ai.generate_copy(
         settings.get("openai_api_key"),
@@ -491,16 +496,21 @@ def _strategy_worker(data, settings):
                 demand = int(p.get("demand", 3) or 3)
             except Exception:
                 profit = brand = demand = 3
+            markets_list = [str(x).strip() for x in (p.get("markets") or []) if str(x).strip()][:4]
+            keywords = buyer.polish_plan_keywords(p.get("keywords"), markets_list)
             plans.append({
                 "title": str(p.get("title", "获客方案"))[:60],
+                "buyer_role": str(p.get("buyer_role", ""))[:60],
                 "target_customers": str(p.get("target_customers", ""))[:200],
-                "keywords": [str(k).strip() for k in (p.get("keywords") or []) if str(k).strip()][:8],
-                "markets": [str(x).strip() for x in (p.get("markets") or []) if str(x).strip()][:4],
+                "keywords": keywords,
+                "markets": markets_list,
                 "profit": min(5, max(1, profit)),
                 "brand": min(5, max(1, brand)),
                 "demand": min(5, max(1, demand)),
                 "strategy": str(p.get("strategy", ""))[:300],
                 "cooperation": str(p.get("cooperation", ""))[:120],
+                "channels": [str(c).strip() for c in (p.get("channels") or []) if str(c).strip()][:4],
+                "risks": [str(r).strip() for r in (p.get("risks") or []) if str(r).strip()][:3],
             })
         if not plans:
             task_finish("strategy", "失败", "AI 没有生成有效方案，请重试")
