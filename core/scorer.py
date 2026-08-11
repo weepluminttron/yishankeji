@@ -50,8 +50,9 @@ def ai_score(settings, lead):
     api_key = settings.get("openai_api_key", "")
     if not api_key:
         return None, "未配置 AI 密钥"
+    industry = settings.get("industry", "") or "通用"
     system = (
-        "你是一名资深的光纤通信行业销售顾问，擅长判断潜在客户的采购意向和成交可能性。"
+        f"你是一名资深{industry}行业销售顾问，擅长判断潜在客户的采购意向和成交可能性。"
         "只输出一行 JSON，格式：{\"score\": 0-10的整数, \"reason\": \"一句话理由\"}，不要输出任何其他内容。"
     )
     user = (

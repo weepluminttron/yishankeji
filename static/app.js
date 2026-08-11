@@ -100,7 +100,7 @@ function showLogin(msg) {
     <div class="login-mask">
       <div class="login-box">
         <div class="login-logo">🛰️</div>
-        <div class="login-title">光纤行业获客助手</div>
+        <div class="login-title">AI 获客助手</div>
         <div class="login-sub">请输入访问密码</div>
         ${msg ? `<div class="login-err">${esc(msg)}</div>` : ""}
         <input class="input full" type="password" id="login-pw" placeholder="访问密码" autocomplete="current-password">
@@ -184,11 +184,25 @@ async function renderDashboard() {
       <div><span class="who">${esc(r.name)}</span> <span class="tag-chip">${esc(r.type)}</span></div>
       <div class="when">${badge(r.status)}</div>
     </div>`).join("") || `<div class="empty">今天没有到期跟进，保持领先 🎉</div>`;
-  const recent = s.recent.map((r) => `
-    <div class="mini-row clickable" onclick="openLeadDetail(${r.id})">
-      <div><span class="who">${esc(r.name)}</span><div class="when">${esc(r.phone || r.email || "无联系方式")}</div></div>
-      <div class="when">${fmtDate(r.created_at)}</div>
-    </div>`).join("") || `<div class="empty">还没有线索，去“线索采集”添加第一批客户吧</div>`;
+  const recent = s.recent.map((r) => {
+    const tag = r.score >= 7 ? '<span class="tag-chip" style="background:#ffe9ec;color:#c62828">🔥高意向</span>'
+      : r.score >= 4 ? '<span class="tag-chip" style="background:#fff8e1;color:#b26a00">🟡中意向</span>'
+      : '<span class="tag-chip">⚪低意向</span>';
+    const contact = (r.phone || r.email)
+      ? '<span class="tag-chip" style="background:#e8f5e9;color:#2e7d32">📞已获取</span>'
+      : '<span class="tag-chip" style="background:#fdecea;color:#c62828">⚠️无联系方式</span>';
+    return `
+      <div class="mini-row">
+        <div class="clickable" style="flex:1;min-width:0" onclick="openLeadDetail(${r.id})">
+          <span class="who">${esc(r.name)}</span> ${tag} ${contact}
+          <div class="when">${esc(r.phone || r.email || "无联系方式")}</div>
+        </div>
+        <div style="display:flex;gap:4px">
+          <button class="btn sm" title="发邮件" onclick="sendMailTo(${r.id})">📧</button>
+          <button class="btn sm" title="添加备注/查看" onclick="openLeadDetail(${r.id})">📝</button>
+        </div>
+      </div>`;
+  }).join("") || `<div class="empty">还没有线索，去“线索采集”添加第一批客户吧</div>`;
   const types = s.top_types.map((t) => `${esc(t.type)} ${t.count}`).join(" · ") || "—";
   const maxSrc = Math.max(1, ...(s.source_counts || []).map((x) => x.count));
   const sourceBars = (s.source_counts || []).map((x) => `
@@ -229,18 +243,49 @@ async function renderDashboard() {
         </div>
       </div>
     </div>` : "";
+  const highIntent = (s.score_dist && s.score_dist["高（7-10分）"]) || 0;
+  const funnelBars = state.meta.statuses.map((st) => {
+    const c = sc[st] || 0;
+    const pct = Math.round(c / Math.max(1, s.total) * 100);
+    return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+      <span style="min-width:64px;font-size:12px">${esc(st)}</span>
+      <div style="flex:1;height:10px;background:var(--line);border-radius:5px;overflow:hidden">
+        <i style="display:block;height:100%;width:${pct}%;background:var(--brand-grad)"></i>
+      </div>
+      <b style="min-width:24px;font-size:12px">${c}</b>
+      ${st === "跟进中" && c === 0 ? `<button class="btn sm" onclick="openLeadForm('跟进中')">＋ 一键创建跟进</button>` : ""}
+    </div>`;
+  }).join("");
   el.innerHTML = `
     <div class="page-title">工作台</div>
     <div class="page-sub">高频操作都在上面：找客户 → 管客户 → 触达客户${s.total ? ` · 数据截至 ${esc(s.today)}` : ""}</div>
-    <div class="action-grid">
-      <div class="action-btn primary" onclick="go('buyer')"><span class="ico">🤖</span>AI 获客方案</div>
-      <div class="action-btn" onclick="openLeadForm()"><span class="ico">➕</span>新增客户</div>
-      <div class="action-btn" onclick="setCollectTab('map');go('collect')"><span class="ico">🗺️</span>地图获客</div>
-      <div class="action-btn" onclick="setCollectTab('import');go('collect')"><span class="ico">📥</span>批量导入</div>
-      <div class="action-btn" onclick="setOutreachTab('email');go('outreach')"><span class="ico">📧</span>邮件触达</div>
-      <div class="action-btn" onclick="setOutreachTab('sequence');go('outreach')"><span class="ico">⏰</span>跟进序列</div>
-      <div class="action-btn" onclick="scoreAllFromHome()"><span class="ico">✨</span>全量 AI 评分</div>
-      <div class="action-btn" onclick="go('leads')"><span class="ico">📇</span>客户列表</div>
+    <div class="card" style="background:linear-gradient(135deg,#0e7dd6,#00b4d8);color:#fff;border:none;padding:20px 22px">
+      <h3 style="color:#fff;margin-bottom:6px">🤖 AI 获客向导</h3>
+      <p style="opacity:.92;margin-bottom:10px;font-size:13px">输入一句话描述您的业务（不限行业），AI 为您生成高利润、高转化的获客组合方案</p>
+      <textarea class="textarea" id="home-strategy" style="width:100%;background:rgba(255,255,255,.95);color:#1f2d3d" placeholder="例如：我们做高端光纤设备，想找欧洲数据中心总包商，利润空间大、对方有一定知名度…"></textarea>
+      <button class="btn" id="home-strategy-btn" style="margin-top:10px;background:#fff;color:#0e7dd6;font-weight:700">🤖 AI 生成获客方案</button>
+    </div>
+    <div class="action-group">
+      <div class="action-group-title">📥 客户获取</div>
+      <div class="action-grid">
+        <div class="action-btn" onclick="setCollectTab('map');go('collect')"><span class="ico">🗺️</span>地图获客</div>
+        <div class="action-btn" onclick="setCollectTab('import');go('collect')"><span class="ico">📥</span>批量导入</div>
+      </div>
+    </div>
+    <div class="action-group">
+      <div class="action-group-title">📇 客户管理</div>
+      <div class="action-grid">
+        <div class="action-btn primary" onclick="openLeadForm()"><span class="ico">➕</span>新增客户</div>
+        <div class="action-btn" onclick="go('leads')"><span class="ico">📇</span>客户列表</div>
+        <div class="action-btn" onclick="scoreAllFromHome()"><span class="ico">✨</span>全量 AI 评分</div>
+      </div>
+    </div>
+    <div class="action-group">
+      <div class="action-group-title">📣 主动触达</div>
+      <div class="action-grid">
+        <div class="action-btn" onclick="setOutreachTab('email');go('outreach')"><span class="ico">📧</span>邮件触达</div>
+        <div class="action-btn" onclick="setOutreachTab('sequence');go('outreach')"><span class="ico">⏰</span>跟进序列</div>
+      </div>
     </div>
     ${onboarding}
     <div class="stat-grid">
@@ -249,7 +294,11 @@ async function renderDashboard() {
       <div class="stat-card"><div class="label">已成交</div><div class="num accent green">${sc["已成交"] || 0}</div></div>
       <div class="stat-card"><div class="label">今日需跟进</div><div class="num accent orange">${s.due_reminders.length}</div></div>
     </div>
-    <div class="card"><h3>客户阶段分布</h3><div class="pipeline">${pipe}</div></div>
+    <div class="card">
+      <h3>客户阶段漏斗</h3>
+      ${s.total ? `<div style="margin-bottom:10px;padding:10px;background:#e8f5e9;border-radius:8px;font-size:13px">系统评估共有 <b style="color:var(--green)">${highIntent} 个高意向客户</b>${highIntent ? "，建议今日优先跟进" : "，建议先去获取更多线索"}</div>` : ""}
+      ${funnelBars}
+    </div>
     <div class="two-col">
       <div class="card"><h3>今日到期跟进${s.due_reminders.length ? `（${s.due_reminders.length}）` : ""}</h3><div class="mini-list">${due}</div></div>
       <div class="card"><h3>最新线索</h3><div class="mini-list">${recent}</div></div>
@@ -259,6 +308,23 @@ async function renderDashboard() {
       <div class="card"><h3>线索来源分布</h3>${sourceBars}</div>
       <div class="card"><h3>AI 评分分布</h3>${scoreBars}</div>
     </div>`;
+  $("#home-strategy-btn").onclick = () => {
+    const desc = $("#home-strategy").value.trim();
+    if (!desc) return toast("请先描述您的业务", "err");
+    state.pendingStrategy = desc;
+    go("buyer");
+  };
+}
+
+async function sendMailTo(id) {
+  try {
+    const lead = await api("/api/leads/" + id);
+    if (!lead.email) return toast("该客户没有邮箱", "err");
+    state.recipients = state.recipients.filter((x) => x.id !== id).concat({ id: lead.id, name: lead.name, email: lead.email, phone: lead.phone });
+    setOutreachTab("email");
+    go("outreach");
+    toast("已加入邮件收件人", "ok");
+  } catch (e) { toast(e.message, "err"); }
 }
 
 function setCollectTab(tab) { state.collectTab = tab; }
@@ -557,7 +623,7 @@ function leadFormHtml(lead = {}) {
     </div>`;
 }
 
-function openLeadForm(id) {
+function openLeadForm(id, presetStatus) {
   if (id) {
     api("/api/leads/" + id).then((lead) => {
       openModal(leadFormHtml(lead));
@@ -565,6 +631,7 @@ function openLeadForm(id) {
     });
   } else {
     openModal(leadFormHtml());
+    if (presetStatus) $("#f-status").value = presetStatus;
     $("#save-lead").onclick = () => saveLead();
   }
 }
@@ -1144,6 +1211,11 @@ async function renderBuyer() {
     } catch (e) { toast(e.message, "err"); }
     finally { btn.disabled = false; btn.textContent = "🤖 AI 生成获客方案"; }
   };
+  if (state.pendingStrategy) {
+    $("#strategy-desc").value = state.pendingStrategy;
+    state.pendingStrategy = "";
+    $("#strategy-gen").click();
+  }
 }
 
 async function pollStrategy() {
@@ -1869,6 +1941,7 @@ async function renderSettings() {
       <div class="form-grid">
         <div class="field"><label>公司名称</label><input class="input full" id="s-company" value="${esc(s.company_name)}"></div>
         <div class="field"><label>主营产品</label><input class="input full" id="s-product" value="${esc(s.product_name)}"></div>
+        <div class="field"><label>行业（AI 评分与方案按此行业调整）</label><input class="input full" id="s-industry" placeholder="如：光纤通信 / 机械 / 跨境电商" value="${esc(s.industry || "光纤通信")}"></div>
         <div class="field"><label>发件人姓名（显示名）</label><input class="input full" id="s-sender" placeholder="如：张三（销售经理）" value="${esc(s.sender_name)}"></div>
         <div class="field"><label>访问密码（部署到公网后必填）</label><input class="input full" type="password" id="s-accesspw" placeholder="留空表示不修改" autocomplete="new-password"></div>
       </div>
@@ -1984,6 +2057,7 @@ async function renderSettings() {
       await api("/api/settings", { method: "POST", body: { settings: {
         company_name: $("#s-company").value.trim(),
         product_name: $("#s-product").value.trim(),
+        industry: $("#s-industry").value.trim(),
         sender_name: $("#s-sender").value.trim(),
         smtp_host: $("#s-host").value.trim(),
         smtp_port: port,

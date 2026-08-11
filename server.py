@@ -450,8 +450,10 @@ def _strategy_worker(data, settings):
     """后台线程：AI 生成获客方案。"""
     desc = str(data.get("description", "")).strip()
     task_progress("strategy", stage="AI 生成中")
+    industry = settings.get("industry", "") or "通用"
     system = (
-        "你是一名资深 B2B 获客策略顾问，擅长为任意行业设计可执行的客户开发方案。"
+        f"你是一名资深 B2B 获客策略顾问，当前服务行业：{industry}。"
+        "你擅长为任意行业设计可执行的客户开发方案。"
         "根据用户的业务描述，设计 3-5 套不同的获客方案，覆盖不同客户类型、地区和利润组合。"
         '只输出一个 JSON 对象，不要输出任何其他内容，格式：'
         '{"plans":[{"title":"方案标题","target_customers":"目标客户描述","keywords":["关键词1","关键词2"],'
@@ -1133,10 +1135,12 @@ class Handler(BaseHTTPRequestHandler):
             settings = db.get_settings()
             if not settings.get("openai_api_key"):
                 return send_json(self, {"ok": False, "msg": "还没有配置 AI 密钥（在“设置”里填写 OpenAI API Key）"}, 400)
+            industry = settings.get("industry", "") or "通用"
+            system_prompt = f"目标行业：{industry}。\n" + str(data.get("system", ""))
             cache_key = llm_cache.make_key(
                 settings.get("openai_model"),
                 settings.get("openai_api_base"),
-                data.get("system", ""),
+                system_prompt,
                 data.get("user", ""),
             )
             cached = llm_cache.cache_get(cache_key)
@@ -1145,7 +1149,7 @@ class Handler(BaseHTTPRequestHandler):
             text, err = ai.generate_copy(
                 settings.get("openai_api_key"),
                 settings.get("openai_model"),
-                data.get("system", ""),
+                system_prompt,
                 data.get("user", ""),
                 settings.get("openai_api_base", ""),
             )
@@ -1289,8 +1293,9 @@ class Handler(BaseHTTPRequestHandler):
             settings = db.get_settings()
             if not settings.get("openai_api_key"):
                 return send_json(self, {"ok": False, "msg": "未配置 AI 密钥，请先到“设置”填写"}, 400)
+            industry = settings.get("industry", "") or "通用"
             system = (
-                "你是一名光纤通信行业的资深运营，擅长写自然、不硬广的社媒引流话术。"
+                f"你是一名{industry}行业的资深运营，擅长写自然、不硬广的社媒引流话术。"
                 "话术要简短口语化，符合平台语境，不要虚构电话和微信号。"
             )
             user = f"场景：{scenario}\n主营产品：{settings.get('product_name','')}\n公司：{settings.get('company_name','')}\n请生成 {count} 条不同的话术，每行一条。"

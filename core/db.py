@@ -504,6 +504,9 @@ def summary():
                 score_dist["中（4-6分）"] += 1
             else:
                 score_dist["低（0-3分）"] += 1
+        no_contact = conn.execute(
+            "SELECT COUNT(*) FROM leads WHERE (phone = '' OR phone IS NULL) AND (email = '' OR email IS NULL)"
+        ).fetchone()[0]
         recent = conn.execute(
             "SELECT * FROM leads ORDER BY id DESC LIMIT 6"
         ).fetchall()
@@ -515,6 +518,7 @@ def summary():
             "top_types": [{"type": r["type"], "count": r["c"]} for r in top_types],
             "source_counts": [{"source": r["source"], "count": r["c"]} for r in source_counts],
             "score_dist": score_dist,
+            "no_contact": no_contact,
             "recent": [dict(r) for r in recent],
             "today": today,
         }
@@ -531,6 +535,7 @@ def get_settings():
         conn.close()
     defaults = {
         "company_name": "一善科技",
+        "industry": "光纤通信",
         "product_name": "光纤光缆及配套产品",
         "sender_name": "",
         "smtp_host": "",
@@ -567,7 +572,7 @@ def get_settings():
 
 def save_settings(values):
     allowed = [
-        "company_name", "product_name", "sender_name", "smtp_host", "smtp_port", "smtp_ssl",
+        "company_name", "industry", "product_name", "sender_name", "smtp_host", "smtp_port", "smtp_ssl",
         "smtp_user", "smtp_password", "openai_api_key", "openai_model", "openai_api_base", "sms_notice",
         "notify_webhook",
         "auto_login_trusted",

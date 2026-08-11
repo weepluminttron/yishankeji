@@ -102,6 +102,9 @@ body {
 
 /* ---------- 高频操作 ---------- */
 .action-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 14px; }
+.action-group { background: #f6f9fd; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; margin-bottom: 14px; }
+.action-group-title { font-size: 13px; font-weight: 700; color: var(--muted); margin-bottom: 10px; }
+.action-group .action-grid { margin-bottom: 0; }
 .action-btn {
   display: flex;
   flex-direction: column;
