@@ -1228,13 +1228,17 @@ async function renderBuyer() {
   $("#strategy-gen").onclick = async () => {
     const desc = $("#strategy-desc").value.trim();
     if (!desc) return toast("请先描述你的业务和客户需求", "err");
+    // 立即清掉上一次的方案，避免残留/闪烁
+    $("#strategy-plans").innerHTML = `<div class="empty"><div class="ico">🤖</div>AI 正在生成新方案…（进度看右上角任务栏）</div>`;
     const btn = $("#strategy-gen");
     btn.disabled = true; btn.textContent = "启动中…";
     try {
       await api("/api/buyer/strategy", { method: "POST", body: { description: desc } });
-      $("#strategy-plans").innerHTML = `<div class="empty"><div class="ico">🤖</div>AI 正在生成方案…（约 20-40 秒，进度看右上角任务栏）</div>`;
       pollStrategy();
-    } catch (e) { toast(e.message, "err"); }
+    } catch (e) {
+      toast(e.message, "err");
+      $("#strategy-plans").innerHTML = `<div class="empty"><div class="ico">⚠️</div>${esc(e.message)}</div>`;
+    }
     finally { btn.disabled = false; btn.textContent = "🤖 AI 生成获客方案"; }
   };
   if (state.pendingStrategy) {
@@ -1246,9 +1250,11 @@ async function renderBuyer() {
   // 恢复 AI 方案任务状态（切走再回来不丢）
   api("/api/buyer/strategy").then((d) => {
     const t = d.task || {};
+    // 如果是刚发起的新一轮生成，跳过旧方案渲染，避免闪烁
+    if (state.pendingStrategy) return;
     if (t.status === "运行中") {
       $("#strategy-plans").innerHTML = `<div class="empty"><div class="ico">⏳</div>${esc(t.stage || "AI 生成中")}…（进度看右上角任务栏）</div>`;
-      pollStrategy();
+      if (!strategyPolling) pollStrategy();
     } else if (t.status === "成功" && t.result && t.result.plans) {
       renderPlans(t.result.plans);
     } else if (t.status === "失败") {
@@ -1268,7 +1274,9 @@ async function renderBuyer() {
   }).catch(() => {});
 }
 
+let strategyPolling = false;
 async function pollStrategy() {
+  strategyPolling = true;
   try {
     const d = await api("/api/buyer/strategy");
     const t = d.task || {};
@@ -1282,7 +1290,8 @@ async function pollStrategy() {
     } else {
       $("#strategy-plans").innerHTML = `<div class="empty"><div class="ico">⚠️</div>${esc(t.message || "生成失败，请重试")}</div>`;
     }
-  } catch (e) { /* 忽略 */ }
+    strategyPolling = false;
+  } catch (e) { strategyPolling = false; }
 }
 
 function renderPlans(plans) {
