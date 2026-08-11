@@ -190,6 +190,24 @@ async function renderDashboard() {
       <div class="when">${fmtDate(r.created_at)}</div>
     </div>`).join("") || `<div class="empty">还没有线索，去“线索采集”添加第一批客户吧</div>`;
   const types = s.top_types.map((t) => `${esc(t.type)} ${t.count}`).join(" · ") || "—";
+  const maxSrc = Math.max(1, ...(s.source_counts || []).map((x) => x.count));
+  const sourceBars = (s.source_counts || []).map((x) => `
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+      <span style="min-width:90px;font-size:12px">${esc(x.source)}</span>
+      <div style="flex:1;height:8px;background:var(--line);border-radius:4px;overflow:hidden">
+        <i style="display:block;height:100%;width:${Math.round(x.count / maxSrc * 100)}%;background:var(--brand-grad)"></i>
+      </div>
+      <b style="font-size:12px;min-width:24px">${x.count}</b>
+    </div>`).join("") || `<div class="empty">暂无数据</div>`;
+  const totalScore = Math.max(1, s.total);
+  const scoreBars = Object.entries(s.score_dist || {}).map(([k, v]) => `
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+      <span style="min-width:90px;font-size:12px">${esc(k)}</span>
+      <div style="flex:1;height:8px;background:var(--line);border-radius:4px;overflow:hidden">
+        <i style="display:block;height:100%;width:${Math.round(v / totalScore * 100)}%;background:var(--brand-2)"></i>
+      </div>
+      <b style="font-size:12px;min-width:24px">${v}</b>
+    </div>`).join("");
   const onboarding = s.total === 0 ? `
     <div class="card">
       <h3>🚀 三步开始获客</h3>
@@ -236,7 +254,11 @@ async function renderDashboard() {
       <div class="card"><h3>今日到期跟进${s.due_reminders.length ? `（${s.due_reminders.length}）` : ""}</h3><div class="mini-list">${due}</div></div>
       <div class="card"><h3>最新线索</h3><div class="mini-list">${recent}</div></div>
     </div>
-    <div class="card"><h3>客户类型占比</h3><div>${types}</div></div>`;
+    <div class="card"><h3>客户类型占比</h3><div>${types}</div></div>
+    <div class="two-col">
+      <div class="card"><h3>线索来源分布</h3>${sourceBars}</div>
+      <div class="card"><h3>AI 评分分布</h3>${scoreBars}</div>
+    </div>`;
 }
 
 function setCollectTab(tab) { state.collectTab = tab; }
@@ -605,6 +627,7 @@ async function openLeadDetail(id) {
       <button class="btn sm" id="d-edit">编辑</button>
       <button class="btn sm" id="d-mail">发邮件</button>
       <button class="btn sm" id="d-sample">📦 寄样品</button>
+      <button class="btn sm" id="d-analyze">🤖 AI 客户分析</button>
       <button class="btn sm" id="d-score">🎯 AI 评分</button>
       <button class="btn sm danger" id="d-del">删除</button>
     </div>
@@ -649,6 +672,12 @@ async function openLeadDetail(id) {
       await api("/api/leads/sample", { method: "POST", body: { id } });
       toast("已记录寄样，7天后自动提醒跟进", "ok");
       closeModal(); openLeadDetail(id);
+    } catch (e) { toast(e.message, "err"); }
+  };
+  $("#d-analyze").onclick = async () => {
+    try {
+      await api("/api/leads/analyze", { method: "POST", body: { id } });
+      toast("AI 客户分析已启动，完成后自动写入跟进记录（进度看右上角任务栏）", "ok");
     } catch (e) { toast(e.message, "err"); }
   };
   $("#d-del").onclick = () => { closeModal(); deleteLead(id); };
@@ -704,10 +733,14 @@ async function renderCollect() {
         <div class="field"><label>或者直接粘贴网页源代码（高级用法）</label>
           <textarea class="textarea full" id="crawl-html" placeholder="如果网页无法直接打开，可复制页面源码粘贴到这里"></textarea>
         </div>
-        <button class="btn primary" id="crawl-btn">🕸️ 开始采集</button>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn primary" id="crawl-btn">🕸️ 开始采集</button>
+          <button class="btn" id="ai-extract-btn">✨ AI 智能提取</button>
+        </div>
         <div class="hint" style="margin-top:8px">采集器会从页面里提取电话号码，并自动匹配附近的公司名称。部分网站有验证码、登录墙或反爬措施，采集不到时请换一个页面，或改用 Excel 导入。</div>
       </div>
       <div class="card" id="crawl-result"><div class="empty"><div class="ico">🕸️</div>还没有采集结果</div></div>
+      <div class="card" id="ai-extract-result" style="display:none"></div>
     </div>
     <div class="sub-panel" data-group="collect" data-name="auto" style="display:none">
       <div class="card">
@@ -859,6 +892,51 @@ async function renderCollect() {
     } finally {
       btn.disabled = false; btn.textContent = "🕸️ 开始采集";
     }
+  };
+
+  $("#ai-extract-btn").onclick = async () => {
+    const btn = $("#ai-extract-btn");
+    btn.disabled = true; btn.textContent = "AI 提取中…";
+    try {
+      const res = await api("/api/crawl/ai_extract", { method: "POST", body: { url: $("#crawl-url").value.trim(), html: $("#crawl-html").value.trim() } });
+      const box = $("#ai-extract-result");
+      if (!res.ai) {
+        state.candidates = res.extracted || [];
+        renderCandidates();
+        box.style.display = "none";
+        toast(res.msg || "规则提取完成", "ok");
+        return;
+      }
+      const e = res.extracted || {};
+      const signal = e.buyer_signal === "高" ? '<span class="badge sc-high">采购意向：高</span>'
+        : e.buyer_signal === "中" ? '<span class="badge sc-mid">采购意向：中</span>'
+        : '<span class="badge sc-low">采购意向：低</span>';
+      box.style.display = "";
+      box.innerHTML = `
+        <h3>AI 智能提取结果 ${signal}</h3>
+        <div class="detail-grid" style="margin-top:10px">
+          <div class="item"><div class="k">公司/主体</div><div class="v">${esc(e.company || "—")}</div></div>
+          <div class="item"><div class="k">联系人</div><div class="v">${esc(e.contact || "—")}</div></div>
+          <div class="item"><div class="k">电话</div><div class="v">${esc(e.phone || "—")}</div></div>
+          <div class="item"><div class="k">邮箱</div><div class="v">${esc(e.email || "—")}</div></div>
+          <div class="item"><div class="k">地址</div><div class="v">${esc(e.address || "—")}</div></div>
+          <div class="item"><div class="k">标签</div><div class="v">${esc(e.tags || "—")}</div></div>
+          <div class="item" style="grid-column:1/-1"><div class="k">简介</div><div class="v">${esc(e.summary || "—")}</div></div>
+        </div>
+        <button class="btn primary" id="ai-extract-add">＋ 添加为线索</button>`;
+      $("#ai-extract-add").onclick = async () => {
+        const lead = {
+          name: e.company || "未命名",
+          contact: e.contact, phone: e.phone, email: e.email,
+          address: e.address, tags: e.tags || "网页采集",
+          note: (e.summary ? "简介：" + e.summary + "\n" : "") + "采购意向：" + (e.buyer_signal || "待定") + "；来源网页：" + $("#crawl-url").value,
+          source: "网页采集",
+        };
+        const res = await api("/api/leads/bulk", { method: "POST", body: { leads: [lead], source: "网页采集" } });
+        toast(res.added.length ? "已添加线索" : "已存在重复，未重复添加", res.added.length ? "ok" : "err");
+      };
+    } catch (err) { toast(err.message, "err"); }
+    finally { btn.disabled = false; btn.textContent = "✨ AI 智能提取"; }
   };
 
   // 定时自动采集
@@ -1339,6 +1417,7 @@ async function renderOutreach() {
         <div class="form-grid">
           <div class="field"><label>文案场景</label><select class="select full" id="ai-scene">
             <option>开发信（邮件）</option><option>短信</option><option>微信/朋友圈</option><option>报价跟进</option>
+            <option>社媒帖子（含话题标签）</option>
             <option>技术科普文章</option><option>B2B平台发布文案</option><option>外贸开发信（英文）</option>
           </select></div>
           <div class="field"><label>目标客户</label><select class="select full" id="ai-audience">
@@ -1348,6 +1427,9 @@ async function renderOutreach() {
           <div class="field"><label>语气风格</label><select class="select full" id="ai-tone">
             <option>正式专业</option><option>亲切友好</option><option>简洁直接</option><option>突出优惠</option>
           </select></div>
+          <div class="field" style="grid-column:1/-1"><label>参考内容（选填：粘贴文章/链接正文，AI 会基于它生成）</label>
+            <textarea class="textarea full" id="ai-ref" style="min-height:80px" placeholder="粘贴行业文章、产品介绍或客户留言…"></textarea>
+          </div>
         </div>
         <div class="toolbar" style="margin-top:4px">
           <button class="btn primary" id="ai-gen">✨ AI 生成</button>
@@ -1458,10 +1540,14 @@ async function renderOutreach() {
     btn.disabled = true;
     try {
       const scene = $("#ai-scene").value, audience = $("#ai-audience").value,
-        product = $("#ai-product").value, tone = $("#ai-tone").value;
+        product = $("#ai-product").value, tone = $("#ai-tone").value,
+        ref = $("#ai-ref").value.trim();
+      let extra = "";
+      if (scene.includes("话题标签")) extra = "文末给出 3-5 个相关话题标签（#开头）。";
+      if (ref) extra += "\n请基于以下参考内容创作：\n" + ref.slice(0, 2000);
       const res = await api("/api/ai", { method: "POST", body: {
         system: "你是一名资深的光纤通信行业销售顾问，擅长写简洁、得体、有转化力的中文营销文案。",
-        user: `场景：${scene}\n主营产品：${product}\n目标客户：${audience}\n语气：${tone}\n\n请生成一份可直接使用的文案。如果是邮件/开发信，请包含“主题：”和正文两部分；如果是短信，控制在70字以内；如果是朋友圈，控制在150字以内。用“{{公司}}”“{{联系人}}”“{{称呼}}”“{{地区}}”“{{产品}}”“{{我方公司}}”“{{自己}}”作为占位符，不要虚构具体电话。`,
+        user: `场景：${scene}\n主营产品：${product}\n目标客户：${audience}\n语气：${tone}\n${extra}\n\n请生成一份可直接使用的文案。如果是邮件/开发信，请包含“主题：”和正文两部分；如果是短信，控制在70字以内；如果是朋友圈或社媒帖子，控制在200字以内。用“{{公司}}”“{{联系人}}”“{{称呼}}”“{{地区}}”“{{产品}}”“{{我方公司}}”“{{自己}}”作为占位符，不要虚构具体电话。`,
       }});
       state.aiText = res.text;
       $("#ai-result").textContent = res.text;

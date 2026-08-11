@@ -492,6 +492,18 @@ def summary():
         top_types = conn.execute(
             "SELECT type, COUNT(*) c FROM leads GROUP BY type ORDER BY c DESC LIMIT 5"
         ).fetchall()
+        source_counts = conn.execute(
+            "SELECT source, COUNT(*) c FROM leads GROUP BY source ORDER BY c DESC"
+        ).fetchall()
+        score_dist = {"高（7-10分）": 0, "中（4-6分）": 0, "低（0-3分）": 0}
+        for r in conn.execute("SELECT score FROM leads"):
+            s = r["score"] or 0
+            if s >= 7:
+                score_dist["高（7-10分）"] += 1
+            elif s >= 4:
+                score_dist["中（4-6分）"] += 1
+            else:
+                score_dist["低（0-3分）"] += 1
         recent = conn.execute(
             "SELECT * FROM leads ORDER BY id DESC LIMIT 6"
         ).fetchall()
@@ -501,6 +513,8 @@ def summary():
             "new_week": new_week,
             "due_reminders": [dict(r) for r in due],
             "top_types": [{"type": r["type"], "count": r["c"]} for r in top_types],
+            "source_counts": [{"source": r["source"], "count": r["c"]} for r in source_counts],
+            "score_dist": score_dist,
             "recent": [dict(r) for r in recent],
             "today": today,
         }

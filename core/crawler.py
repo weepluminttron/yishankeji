@@ -17,16 +17,29 @@ CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 
 
 def fetch_page(url, timeout=15):
-    req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept-Language": "zh-CN,zh;q=0.9"})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        raw = resp.read()
-    # 尝试按编码解码
+    """抓取网页；直接访问失败时自动降级到 Jina Reader（fetchrouter 思路）。"""
+    direct_err = None
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept-Language": "zh-CN,zh;q=0.9"})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read()
+            final = resp.geturl() or url
+    except Exception as e:
+        direct_err = e
+        try:
+            jina_url = "https://r.jina.ai/" + url
+            jreq = urllib.request.Request(jina_url, headers={"User-Agent": UA, "Accept": "text/plain"})
+            with urllib.request.urlopen(jreq, timeout=timeout + 15) as jresp:
+                raw = jresp.read()
+                final = url
+        except Exception:
+            raise direct_err
     for enc in ("utf-8", "gb18030", "gbk"):
         try:
-            return raw.decode(enc), resp.geturl() or url
+            return raw.decode(enc), final
         except UnicodeDecodeError:
             continue
-    return raw.decode("utf-8", errors="replace"), resp.geturl() or url
+    return raw.decode("utf-8", errors="replace"), final
 
 
 def _clean_text(t):

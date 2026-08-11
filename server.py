@@ -84,6 +84,23 @@ def task_finish(task_id, status, message=""):
 def task_snapshot(task_id):
     return dict(_tasks.get(task_id) or {})
 
+
+def parse_ai_json(text):
+    """解析 AI 返回的 JSON：兼容裸 JSON 和 OpenAI choices 外层封装。"""
+    m = re.search(r"\{.*\}", text, re.S)
+    if not m:
+        return None
+    try:
+        parsed = json.loads(m.group(0))
+    except Exception:
+        return None
+    if isinstance(parsed, dict) and "choices" in parsed:
+        try:
+            parsed = json.loads(parsed["choices"][0]["message"]["content"])
+        except Exception:
+            pass
+    return parsed
+
 SOCIAL_COPY = {
     "抖音评论引流": [
         "请问这款光缆支持室外直埋吗？我们最近正好有项目在找供应商，方便聊聊吗？",
@@ -459,12 +476,11 @@ def _strategy_worker(data, settings):
         task_finish("strategy", "失败", err)
         return
     task_progress("strategy", stage="解析方案")
-    m = re.search(r"\{.*\}", text, re.S)
-    if not m:
-        task_finish("strategy", "失败", "AI 返回格式无法解析，请重试")
-        return
     try:
-        parsed = json.loads(m.group(0))
+        parsed = parse_ai_json(text)
+        if parsed is None:
+            task_finish("strategy", "失败", "AI 返回格式无法解析，请重试")
+            return
         plans = []
         for p in (parsed.get("plans") or [])[:5]:
             try:
@@ -491,6 +507,44 @@ def _strategy_worker(data, settings):
         task_finish("strategy", "成功", f"生成 {len(plans)} 套方案")
     except Exception as e:
         task_finish("strategy", "失败", f"方案解析失败：{e}")
+
+
+def _analyze_worker(lead_id):
+    """后台线程：AI 客户分析。"""
+    task_id = f"analyze_{lead_id}"
+    lead = db.get_lead(lead_id)
+    if not lead:
+        task_finish(task_id, "失败", "线索不存在")
+        return
+    settings = db.get_settings()
+    info = (
+        f"公司：{lead.get('name', '')}\n联系人：{lead.get('contact', '')}\n"
+        f"电话：{lead.get('phone', '')}\n邮箱：{lead.get('email', '')}\n"
+        f"地区：{lead.get('region', '')}\n类型：{lead.get('type', '')}\n"
+        f"来源：{lead.get('source', '')}\n标签：{lead.get('tags', '')}\n"
+        f"地址：{lead.get('address', '')}\n备注：{lead.get('note', '')}\n"
+    )
+    task_progress(task_id, stage="AI 分析中")
+    system = (
+        "你是资深 B2B 销售顾问，擅长分析客户线索并给出可执行跟进方案。"
+        "输出简洁的中文分析，分四段：1.客户画像 2.可能需求 3.跟进策略 4.开场话术（一句话）。"
+        "不要虚构信息，不确定的写“待核实”。"
+    )
+    user = f"客户线索信息：\n{info}\n\n请分析。"
+    text, err = ai.generate_copy(
+        settings.get("openai_api_key"),
+        settings.get("openai_model"),
+        system,
+        user,
+        settings.get("openai_api_base", ""),
+    )
+    if err:
+        task_finish(task_id, "失败", err)
+        return
+    db.add_note(lead_id, "🤖 AI 客户分析：\n" + text)
+    db.add_event(lead_id, "AI 客户分析", "分析完成，已写入跟进记录")
+    _tasks[task_id]["result"] = {"text": text}
+    task_finish(task_id, "成功", "分析已写入该客户的跟进记录")
 
 
 def find_duplicates():
@@ -1007,6 +1061,21 @@ class Handler(BaseHTTPRequestHandler):
                 return send_json(self, {"ok": False, "msg": "参数不完整"}, 400)
             db.merge_leads(keep_id, remove_ids)
             return send_json(self, {"ok": True})
+        if api == "leads" and len(parts) > 2 and parts[2] == "analyze":
+            data = read_json_body(self)
+            lead_id = safe_int(data.get("id"))
+            lead = db.get_lead(lead_id)
+            if not lead:
+                return send_json(self, {"ok": False, "msg": "线索不存在"}, 404)
+            settings = db.get_settings()
+            if not settings.get("openai_api_key"):
+                return send_json(self, {"ok": False, "msg": "AI 客户分析需要配置 AI 密钥（设置 → AI 文案）"}, 400)
+            task_id = f"analyze_{lead_id}"
+            if _tasks.get(task_id, {}).get("status") == "运行中":
+                return send_json(self, {"ok": False, "msg": "已有分析任务在运行，请等待完成"}, 400)
+            task_start(task_id, f"AI 客户分析：{str(lead.get('name', ''))[:20]}")
+            threading.Thread(target=_analyze_worker, args=(lead_id,), daemon=True).start()
+            return send_json(self, {"ok": True, "msg": "AI 客户分析任务已启动"})
         if api == "leads" and len(parts) > 2:
             lead_id = safe_int(parts[2])
             if not lead_id:
@@ -1047,6 +1116,8 @@ class Handler(BaseHTTPRequestHandler):
             data = read_json_body(self)
             result = db.bulk_add(data.get("candidates", []), source="网页采集")
             return send_json(self, {"ok": True, **result})
+        if api == "crawl" and len(parts) > 2 and parts[2] == "ai_extract":
+            return self._crawl_ai_extract()
         if api == "crawl":
             data = read_json_body(self)
             candidates, err = crawler.crawl(
@@ -1156,6 +1227,58 @@ class Handler(BaseHTTPRequestHandler):
         task_start("strategy", "AI 获客方案生成")
         threading.Thread(target=_strategy_worker, args=(data, settings), daemon=True).start()
         return send_json(self, {"ok": True, "msg": "方案生成任务已启动", "task": task_snapshot("strategy")})
+
+    def _crawl_ai_extract(self):
+        data = read_json_body(self)
+        url = str(data.get("url", "")).strip()
+        html_text = str(data.get("html", "")).strip()
+        if not url and not html_text:
+            return send_json(self, {"ok": False, "msg": "请填写网址或粘贴页面内容"}, 400)
+        settings = db.get_settings()
+        if html_text:
+            page_text = re.sub(r"<script.*?</script>|<style.*?</style>", " ", html_text, flags=re.S | re.I)
+            page_text = re.sub(r"<[^>]+>", " ", page_text)
+            page_text = re.sub(r"\s+", " ", page_text)[:4000]
+        else:
+            try:
+                raw_text, _ = crawler.fetch_page(url, timeout=12)
+                page_text = re.sub(r"<script.*?</script>|<style.*?</style>", " ", raw_text, flags=re.S | re.I)
+                page_text = re.sub(r"<[^>]+>", " ", page_text)
+                page_text = re.sub(r"\s+", " ", page_text)[:4000]
+            except Exception as e:
+                return send_json(self, {"ok": False, "msg": f"抓取失败：{e}"}, 400)
+        if not settings.get("openai_api_key"):
+            try:
+                src = html_text if html_text else crawler.fetch_page(url, timeout=12)[0]
+                cands = crawler.extract_candidates(src, url or "")
+                return send_json(self, {"ok": True, "ai": False, "msg": "未配置 AI 密钥，已用规则提取", "extracted": cands[:5]})
+            except Exception as e:
+                return send_json(self, {"ok": False, "msg": f"提取失败：{e}"}, 400)
+        system = (
+            "你是信息提取助手。从网页文本中提取公司/主体信息，只输出一个 JSON 对象："
+            '{"company":"公司或主体名称","contact":"联系人","phone":"电话","email":"邮箱",'
+            '"address":"地址","tags":"关键词标签，逗号分隔","summary":"一句话简介",'
+            '"buyer_signal":"高/中/低"}。没有的字段填空字符串。'
+        )
+        user = f"网址：{url}\n网页文本：\n{page_text}\n\n请提取信息。"
+        text, err = ai.generate_copy(
+            settings.get("openai_api_key"),
+            settings.get("openai_model"),
+            system,
+            user,
+            settings.get("openai_api_base", ""),
+        )
+        if err:
+            return send_json(self, {"ok": False, "msg": err}, 400)
+        try:
+            extracted = parse_ai_json(text)
+            if extracted is None:
+                return send_json(self, {"ok": False, "msg": "AI 返回格式无法解析，请重试"}, 400)
+            for k in ("company", "contact", "phone", "email", "address", "tags", "summary", "buyer_signal"):
+                extracted[k] = str(extracted.get(k, "")).strip()
+            return send_json(self, {"ok": True, "ai": True, "extracted": extracted})
+        except Exception as e:
+            return send_json(self, {"ok": False, "msg": f"解析失败：{e}"}, 400)
 
     def _social_copy(self, data):
         scenario = data.get("scenario", "抖音评论引流")
