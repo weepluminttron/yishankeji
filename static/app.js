@@ -57,7 +57,7 @@ async function pollTasks() {
     if (running.length) {
       bar.innerHTML = running.map((t) => {
         const pct = t.total ? Math.min(100, Math.round((t.done / t.total) * 100)) : null;
-        return `<div class="task-chip" onclick="openTaskPanel()">
+        return `<div class="task-chip" data-id="${esc(t.id)}" onclick="taskChipClick(this)">
           <span class="t-label">${esc(t.label)}</span>
           <span class="t-stage">${esc(t.stage || "")}${t.total ? ` ${t.done}/${t.total}` : ""}</span>
           ${pct !== null ? `<span class="t-prog"><i style="width:${pct}%"></i></span>` : ""}
@@ -93,6 +93,11 @@ function openTaskPanel() {
         : `<div class="empty">暂无任务</div>`}
       <div class="modal-foot"><button class="btn" onclick="closeModal()">关闭</button></div>`, "wide");
   }).catch(() => {});
+}
+
+function taskChipClick(el) {
+  if (el.dataset.id === "strategy") { go("buyer"); return; }
+  openTaskPanel();
 }
 
 function showLogin(msg) {
@@ -476,6 +481,14 @@ async function renderLeads() {
     });
   };
   loadLeadList();
+
+  // 恢复全量评分任务进度（切走再回来不丢）
+  api("/api/leads/score_all").then((d) => {
+    if (d.job && d.job.running) {
+      $("#score-all-status").textContent = `⏳ 正在AI评分：${d.job.done}/${d.job.total || "计算中"}${d.job.current ? "（" + d.job.current + "）" : ""}`;
+      pollScore();
+    }
+  }).catch(() => {});
 
   $("#view-list").onclick = () => {
     $("#view-list").classList.add("primary");
@@ -1048,6 +1061,19 @@ async function renderCollect() {
   };
   loadAuto();
   activateSubTab("collect", state.collectTab || "import");
+  if (state.collectTab === "map") {
+    api("/api/map").then((d) => {
+      const job = d.job || {};
+      if (job.running) {
+        $("#map-result").innerHTML = `<div class="empty"><div class="ico">🗺️</div>${esc(job.stage || "正在搜索地图客户")}…（进度看右上角任务栏）</div>`;
+        pollMapJob();
+      } else if (job.result && job.result.length) {
+        renderMapResult(job.result);
+      } else if (job.message) {
+        $("#map-result").innerHTML = `<div class="empty"><div class="ico">⚠️</div>${esc(job.message)}</div>`;
+      }
+    }).catch(() => {});
+  }
 }
 
 function renderCandidates() {
@@ -1216,6 +1242,30 @@ async function renderBuyer() {
     state.pendingStrategy = "";
     $("#strategy-gen").click();
   }
+
+  // 恢复 AI 方案任务状态（切走再回来不丢）
+  api("/api/buyer/strategy").then((d) => {
+    const t = d.task || {};
+    if (t.status === "运行中") {
+      $("#strategy-plans").innerHTML = `<div class="empty"><div class="ico">⏳</div>${esc(t.stage || "AI 生成中")}…（进度看右上角任务栏）</div>`;
+      pollStrategy();
+    } else if (t.status === "成功" && t.result && t.result.plans) {
+      renderPlans(t.result.plans);
+    } else if (t.status === "失败") {
+      $("#strategy-plans").innerHTML = `<div class="empty"><div class="ico">⚠️</div>${esc(t.message || "生成失败，请重试")}</div>`;
+    }
+  }).catch(() => {});
+
+  // 恢复买家发现搜索任务状态
+  api("/api/buyer").then((d) => {
+    const job = d.job || {};
+    if (job.running) {
+      $("#buyer-result").innerHTML = `<div class="empty"><div class="ico">⏳</div>${esc(job.stage || "正在搜索并分析买家线索")}…（进度看右上角任务栏）</div>`;
+      pollBuyerJob();
+    } else if (job.result) {
+      renderBuyerResult(job.result);
+    }
+  }).catch(() => {});
 }
 
 async function pollStrategy() {
@@ -1305,6 +1355,11 @@ async function pollMapJob() {
       $("#map-result").innerHTML = `<div class="empty">没有找到结果，试试换个关键词或城市</div>`;
       return;
     }
+    renderMapResult(list);
+  } catch (e) { /* 忽略 */ }
+}
+
+function renderMapResult(list) {
     $("#map-result").innerHTML = `
       <h3>找到 ${list.length} 家公司</h3>
       <div style="margin:10px 0;display:flex;gap:8px;align-items:center">
@@ -1326,7 +1381,6 @@ async function pollMapJob() {
       toast(`已添加 ${res.added.length} 条，跳过重复 ${res.duplicates.length} 条`, "ok");
       $("#map-result").innerHTML = `<div class="empty"><div class="ico">✅</div>已处理，去“客户线索”查看</div>`;
     };
-  } catch (e) { /* 忽略 */ }
 }
 
 function renderBuyerResult(res) {
@@ -1600,10 +1654,13 @@ async function renderOutreach() {
         $("#mail-result").innerHTML = `<div class="empty"><div class="ico">⚠️</div>${esc(job.message || "发送任务已结束")}</div>`;
         return;
       }
-      const errs = (r.errors || []).map((e) => `<li>${esc(e.name)}：${esc(e.msg)}</li>`).join("");
-      $("#mail-result").innerHTML = `<h3>发送结果</h3><p style="margin-top:8px">成功 <b style="color:var(--green)">${r.sent}</b> 封，失败 <b style="color:var(--red)">${r.failed}</b> 封。</p>${errs ? `<ul style="margin:8px 0 0 18px;color:var(--red)">${errs}</ul>` : ""}`;
-      toast(`已发送 ${r.sent} 封`, r.sent ? "ok" : "err");
+      renderMailResult(r);
     } catch (e) { /* 忽略轮询错误 */ }
+  }
+  function renderMailResult(r) {
+    const errs = (r.errors || []).map((e) => `<li>${esc(e.name)}：${esc(e.msg)}</li>`).join("");
+    $("#mail-result").innerHTML = `<h3>发送结果</h3><p style="margin-top:8px">成功 <b style="color:var(--green)">${r.sent}</b> 封，失败 <b style="color:var(--red)">${r.failed}</b> 封。</p>${errs ? `<ul style="margin:8px 0 0 18px;color:var(--red)">${errs}</ul>` : ""}`;
+    toast(`已发送 ${r.sent} 封`, r.sent ? "ok" : "err");
   }
 
   // AI 文案
@@ -1817,6 +1874,16 @@ async function renderOutreach() {
   };
   loadSeqList();
   activateSubTab("outreach", state.outreachTab || "email");
+  // 恢复邮件发送任务状态（切走再回来不丢）
+  api("/api/mail/status").then((d) => {
+    const job = d.job || {};
+    if (job.running) {
+      $("#mail-result").innerHTML = `<div class="empty"><div class="ico">📧</div>正在发送…（后台进行中，进度看右上角任务栏）</div>`;
+      pollMailJob();
+    } else if (job.result) {
+      renderMailResult(job.result);
+    }
+  }).catch(() => {});
 }
 
 function personalize(tpl, lead, settings) {
