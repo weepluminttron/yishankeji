@@ -37,7 +37,19 @@ function toast(msg, type = "") {
 }
 
 function openModal(html, cls = "") {
-  $("#modal-root").innerHTML = `<div class="modal-mask" data-close="1"><div class="modal ${cls}" data-stop="1">${html}</div></div>`;
+  // 拆分弹窗：头部/底部固定，中间内容独立滚动（关闭按钮始终可见）
+  let head = "", foot = "", body = html;
+  const hm = html.match(/^(<div class="modal-head">[\s\S]*?<\/div>)/);
+  if (hm) {
+    head = hm[1];
+    body = html.slice(hm[1].length);
+  }
+  const fm = body.match(/(<div class="modal-foot">[\s\S]*?<\/div>)\s*$/);
+  if (fm) {
+    foot = fm[1];
+    body = body.slice(0, fm.index);
+  }
+  $("#modal-root").innerHTML = `<div class="modal-mask" data-close="1"><div class="modal ${cls}" data-stop="1">${head}<div class="modal-body">${body}</div>${foot}</div></div>`;
   const mask = $(".modal-mask");
   mask.addEventListener("click", (e) => {
     if (e.target.closest("[data-stop]")) return;
