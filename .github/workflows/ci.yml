@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  lint-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Syntax check (compileall)
+        # 仅做语法编译校验，不执行业务逻辑、不联网
+        run: python -m compileall -q core server.py scripts
+
+      - name: Validate Docker build
+        run: |
+          docker compose config
+          docker build -t yishankeji:ci .
