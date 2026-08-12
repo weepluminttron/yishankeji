@@ -369,6 +369,16 @@ def bulk_add(leads, source="批量导入"):
                 errors.append({"row": i, "msg": err, "name": raw.get("name")})
         else:
             added.append(lead)
+            if raw.get("score") is not None:
+                try:
+                    set_lead_score(
+                        lead["id"],
+                        max(0, min(10, int(raw["score"]))),
+                        str(raw.get("score_reason") or ""),
+                        ai=True,
+                    )
+                except Exception:
+                    pass
     return {"added": added, "duplicates": duplicates, "errors": errors}
 
 

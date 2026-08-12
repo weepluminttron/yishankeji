@@ -1226,11 +1226,13 @@ class Handler(BaseHTTPRequestHandler):
                     leads, err = importer.parse_wechat(tmp_path)
                 elif kind == "map":
                     leads, err = importer.parse_map(tmp_path)
+                elif kind == "workbuddy":
+                    leads, err = importer.parse_workbuddy(tmp_path)
                 else:
                     leads, err = importer.parse_file(tmp_path, filename)
                 if err:
                     return send_json(self, {"ok": False, "msg": err}, 400)
-                source = {"social": "社媒评论", "wechat": "微信记录"}.get(kind, "Excel导入")
+                source = {"social": "社媒评论", "wechat": "微信记录", "workbuddy": "WorkBuddy拓客"}.get(kind, "Excel导入")
                 result = db.bulk_add(leads, source=source)
                 auto_score_if_enabled()
                 return send_json(self, {"ok": True, "total": len(leads), **result})

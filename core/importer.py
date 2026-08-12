@@ -2,6 +2,7 @@
 """Excel / CSV 导入导出与模板生成。"""
 import csv
 import io
+import json
 import os
 import re
 
@@ -115,6 +116,128 @@ def parse_map(path):
             "note": note,
         })
     return leads, None
+
+
+def _wb_type(t):
+    """把 WorkBuddy 客户类型映射到工具内置类型。"""
+    t = t or ""
+    if "运营商" in t or "ISP" in t:
+        return "运营商"
+    if "集成商" in t:
+        return "集成商"
+    if "分销" in t or "渠道" in t:
+        return "分销商"
+    if "项目业主" in t:
+        return "终端客户"
+    if "厂" in t or "模块" in t or "设备" in t:
+        return "代工厂"
+    return "其他"
+
+
+def _wb_first(value):
+    """从 “a / b / c” 或 “a、b” 里取第一个有效值。"""
+    if not value:
+        return ""
+    for sep in ("/", "、", ";", "；", "\n", " "):
+        for part in str(value).split(sep):
+            part = part.strip()
+            if part:
+                return part
+    return str(value).strip()
+
+
+def _wb_tier(total):
+    if total >= 85:
+        return "S"
+    if total >= 75:
+        return "A"
+    if total >= 60:
+        return "B"
+    return "C"
+
+
+def parse_workbuddy(path):
+    """解析 WorkBuddy 拓客清单（meta + leads 数组 JSON）→ 线索列表。
+
+    保留 WorkBuddy 的匹配度+体量评分（0-100 → 0-10）与 S/A/B/C 分级标签，
+    并在备注里写入切入产品、采购信号、最佳触达窗口、联系人与信息来源。
+    """
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+    except Exception as e:
+        return [], f"JSON 解析失败：{e}"
+    leads = raw.get("leads") if isinstance(raw, dict) else raw
+    if not isinstance(leads, list):
+        return [], "文件里没有找到 leads 列表"
+    out = []
+    for x in leads:
+        if not isinstance(x, dict):
+            continue
+        name = str(x.get("name") or "").strip()
+        if not name:
+            continue
+        contact = x.get("contact") or {}
+        people = [str(p).strip() for p in (x.get("people") or []) if str(p).strip()]
+        person = _wb_first(people[0]) if people else ""
+        if person and len(person.split()) >= 2:
+            person = person.split()[-1]
+        try:
+            fit = int(x.get("fit") or 0)
+            comp = int(x.get("comp") or 0)
+        except Exception:
+            fit = comp = 0
+        total = fit + comp
+        tier = _wb_tier(total)
+        wtype = _wb_type(x.get("type", ""))
+        entry = "；".join(str(e).strip() for e in (x.get("entry") or []) if str(e).strip())
+        specs = "；".join(str(s).strip() for s in (x.get("specs") or []) if str(s).strip())
+        note_parts = []
+        if x.get("type"):
+            note_parts.append(f"【类型】{x.get('type')}")
+        if entry:
+            note_parts.append(f"【切入】{entry}")
+        if specs:
+            note_parts.append(f"【产能/重点】{specs}")
+        if x.get("signal"):
+            note_parts.append(f"【采购信号】{x.get('signal')}")
+        if x.get("window"):
+            note_parts.append(f"【最佳窗口】{x.get('window')}")
+        if people:
+            note_parts.append(f"【联系人】{'；'.join(people)}")
+        if x.get("note"):
+            note_parts.append(f"【简介】{x.get('note')}")
+        if x.get("source"):
+            note_parts.append(f"【信息来源】{x.get('source')}")
+        tags = ",".join(
+            t for t in (
+                "WorkBuddy",
+                tier + "级",
+                str(x.get("type") or "").split("/")[0].strip(),
+                "新拓客" if x.get("isNew") else "",
+            ) if t
+        )
+        out.append({
+            "name": name,
+            "contact": person,
+            "phone": _wb_first(contact.get("tel")),
+            "email": _wb_first(contact.get("mail")),
+            "region": str(x.get("city") or x.get("region") or "").strip(),
+            "type": wtype,
+            "source": "WorkBuddy拓客",
+            "tags": tags,
+            "address": str(contact.get("addr") or "").strip(),
+            "note": "\n".join(note_parts)[:2000],
+            "score": max(0, min(10, round(total / 10))),
+            "score_reason": (
+                f"WorkBuddy：匹配度{fit}+体量{comp}={total}（{tier}级）；"
+                f"{str(x.get('window') or x.get('signal') or '')[:80]}"
+            ),
+            "ai_scored": 1,
+        })
+    if not out:
+        return [], "没有解析到有效线索"
+    return out, None
 
 
 def build_social_template_xlsx():

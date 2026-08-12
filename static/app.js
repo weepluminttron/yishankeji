@@ -966,6 +966,15 @@ async function renderCollect() {
           <div class="hint">表头请使用：公司名称、联系人、电话、邮箱、地区、客户类型、状态、来源、标签、备注、地址。导入时会自动按“电话/公司名”去重，重复的不再入库。</div>
         </div>
       </div>
+      <div class="card">
+        <h3>📦 WorkBuddy 拓客清单导入</h3>
+        <div class="drop-zone" id="wb-zone">
+          <div class="big">上传 WorkBuddy 导出的 leads.json</div>
+          <div>自动映射公司/电话/邮箱/地区/类型/标签，保留匹配度+体量评分与 S/A/B/C 分级</div>
+        </div>
+        <input type="file" id="wb-file" accept=".json" style="display:none">
+        <div class="hint" style="margin-top:10px">支持 WorkBuddy 拓客清单 JSON（含 meta + leads 数组）。导入后评分直接采用 WorkBuddy 结果并写入备注里的“切入产品 / 采购信号 / 最佳窗口 / 联系人”。</div>
+      </div>
       <div class="card" id="import-result"></div>
     </div>
     <div class="sub-panel" data-group="collect" data-name="crawl" style="display:none">
@@ -1084,6 +1093,14 @@ async function renderCollect() {
   dz.ondragleave = () => dz.classList.remove("over");
   dz.ondrop = (e) => { e.preventDefault(); dz.classList.remove("over"); if (e.dataTransfer.files[0]) uploadFile(e.dataTransfer.files[0], "", "#import-result"); };
   fileInput.onchange = () => { if (fileInput.files[0]) uploadFile(fileInput.files[0], "", "#import-result"); };
+
+  // WorkBuddy 拓客清单导入
+  const wbZone = $("#wb-zone"), wbInput = $("#wb-file");
+  wbZone.onclick = () => wbInput.click();
+  wbZone.ondragover = (e) => { e.preventDefault(); wbZone.classList.add("over"); };
+  wbZone.ondragleave = () => wbZone.classList.remove("over");
+  wbZone.ondrop = (e) => { e.preventDefault(); wbZone.classList.remove("over"); if (e.dataTransfer.files[0]) uploadFile(e.dataTransfer.files[0], "workbuddy", "#import-result"); };
+  wbInput.onchange = () => { if (wbInput.files[0]) uploadFile(wbInput.files[0], "workbuddy", "#import-result"); };
 
   // 社媒评论导入
   const sZone = $("#social-zone"), sInput = $("#social-file");
