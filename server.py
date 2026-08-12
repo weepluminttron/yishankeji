@@ -75,7 +75,12 @@ def task_finish(task_id, status, message=""):
     t = _tasks.get(task_id)
     if not t:
         return
-    t.update(status=status, message=message, finished=time.strftime("%Y-%m-%d %H:%M:%S"))
+    t.update(
+        status=status,
+        message=message,
+        finished=time.strftime("%Y-%m-%d %H:%M:%S"),
+        finished_ts=int(time.time()),
+    )
     finished = [k for k, v in _tasks.items() if v["status"] != "运行中"]
     for k in sorted(finished, key=lambda x: _tasks[x]["finished"], reverse=True)[20:]:
         _tasks.pop(k, None)

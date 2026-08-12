@@ -64,14 +64,24 @@ async function pollTasks() {
   try {
     const d = await api("/api/tasks");
     const tasks = d.tasks || [];
-    const running = tasks.filter((t) => t.status === "运行中");
+    const nowTs = Date.now();
+    // 运行中的任务 + 最近 30 秒内完成的任务都显示，避免“一闪而过”
+    const visible = tasks.filter((t) => {
+      if (t.status === "运行中") return true;
+      return t.finished_ts && nowTs - t.finished_ts * 1000 < 30000;
+    });
     const bar = $("#task-bar");
-    if (running.length) {
-      bar.innerHTML = running.map((t) => {
+    if (visible.length) {
+      bar.innerHTML = visible.map((t) => {
         const pct = t.total ? Math.min(100, Math.round((t.done / t.total) * 100)) : null;
-        return `<div class="task-chip" data-id="${esc(t.id)}" onclick="taskChipClick(this)">
+        const running = t.status === "运行中";
+        const cls = running ? "" : t.status === "成功" ? "t-done" : "t-fail";
+        const icon = running ? "⏳" : t.status === "成功" ? "✅" : "⚠️";
+        const stage = running ? (t.stage || "运行中") + (t.total ? ` ${t.done}/${t.total}` : "") : (t.message || t.status);
+        return `<div class="task-chip ${cls}" data-id="${esc(t.id)}" onclick="taskChipClick(this)">
+          <span class="t-icon">${icon}</span>
           <span class="t-label">${esc(t.label)}</span>
-          <span class="t-stage">${esc(t.stage || "")}${t.total ? ` ${t.done}/${t.total}` : ""}</span>
+          <span class="t-stage">${esc(stage)}</span>
           ${pct !== null ? `<span class="t-prog"><i style="width:${pct}%"></i></span>` : ""}
         </div>`;
       }).join("");
