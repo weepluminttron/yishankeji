@@ -51,12 +51,18 @@ def ai_score(settings, lead):
     if not api_key:
         return None, "未配置 AI 密钥"
     industry = settings.get("industry", "") or "通用"
+    company = settings.get("company_name", "") or "我方公司"
+    products = settings.get("product_name", "") or "我们的产品"
     system = (
-        f"你是一名资深{industry}行业销售顾问，擅长判断潜在客户的采购意向和成交可能性。"
-        "只输出一行 JSON，格式：{\"score\": 0-10的整数, \"reason\": \"一句话理由\"}，不要输出任何其他内容。"
+        f"你是{industry}行业的资深销售分析师，服务于{company}，擅长判断潜在客户的采购意向和成交可能性。"
+        "结合我方主营产品，输出一行 JSON，格式："
+        '{"score": 0到10的整数, "reason": "一句话结论", "points": ["2到3条具体判断依据"]}，'
+        "points 必须基于线索真实信息（如采购意向、联系方式完整度、规模/需求信号、匹配度），禁止编造。"
+        "不要输出任何其他内容。"
     )
     user = (
-        f"请评估以下客户线索的跟进价值：\n"
+        f"我方主营产品：{products}\n"
+        f"请评估以下客户线索的跟进价值，并给出具体依据：\n"
         f"公司：{lead.get('name','')}\n"
         f"联系人：{lead.get('contact','')}\n"
         f"电话：{lead.get('phone','')}\n"
@@ -83,7 +89,8 @@ def ai_score(settings, lead):
     try:
         data = json.loads(m.group(0))
         score = max(0, min(10, int(data.get("score", 0))))
-        reason = str(data.get("reason", "")).strip()
+        points = [str(p).strip() for p in (data.get("points") or []) if str(p).strip()]
+        reason = "；".join(points) if points else str(data.get("reason", "")).strip()
         return score, reason
     except Exception as e:
         return None, f"AI 返回解析失败：{e}"

@@ -41,7 +41,10 @@ STRONG_INTENT = [
 INTENT_REQUIRED_CN = ("采购", "招标", "询价", "求购", "需求", "项目", "工程", "批发", "经销商", "代理", "供应商", "采购经理")
 INTENT_REQUIRED_EN = ("buyer", "purchase", "procurement", "tender", "rfq", "sourcing", "inquiry",
                       "wholesale", "distributor", "dealer", "contractor", "import", "supplier")
-PLAN_NOISE_WORDS = ("百科", "论文", "新闻", "资讯", "黄页", "知乎", "博客", "高校", "大学", "学院", "期刊", "学报")
+PLAN_NOISE_WORDS = (
+    "百科", "论文", "新闻", "资讯", "黄页", "知乎", "博客", "高校", "大学", "学院", "期刊", "学报",
+    "招聘", "求职", "文库", "大会", "展会", "论坛", "行业资讯", "教程",
+)
 # 供应商/同行信号（出现则降权）
 SUPPLIER_WORDS = ["厂家直供", "厂家直销", "现货供应", "批发价", "出厂价", "价格优惠", "量大从优",
                   "supplier", "manufacturer", "wholesale price", "factory price", "export",
@@ -50,7 +53,8 @@ SUPPLIER_WORDS = ["厂家直供", "厂家直销", "现货供应", "批发价", "
 # 纯噪音站点信号（直接过滤）
 NOISE_WORDS = ["黄页", "百科", "招聘", "求职", "文库", "下载", "登录", "注册", "论坛", "博客",
                "新闻", "资讯", "峰会", "大会", "展会", "知道", "问答", "教程", "视频", "小说",
-               "论文", "期刊", "高校", "大学", "学院", "学术", "学报"]
+               "论文", "期刊", "高校", "大学", "学院", "学术", "学报",
+               "企业库", "名录", "大全", "厂商名录", "公司库", "联系方式大全"]
 
 BLOCKED_DOMAINS = (
     "alibaba.com", "made-in-china.com", "1688.com", "taobao.com", "tmall.com", "jd.com",
@@ -63,6 +67,7 @@ BLOCKED_DOMAINS = (
     "csdn.net", "cnblogs.com", "juejin.cn", "segmentfault.com", "51cto.com", "oschina.net",
     "infoq.cn", "eefocus.com", "elecfans.com", "21ic.com", "zhipin.com", "liepin.com",
     "51job.com", "c114.com.cn",
+    "gongchang.com", "11467.com", "ofweek.com", "cnpp.com",
 )
 
 WEBMAILS = {"qq.com", "163.com", "126.com", "gmail.com", "outlook.com", "hotmail.com",
@@ -208,7 +213,7 @@ def polish_plan_keywords(keywords, markets):
             k = k + (" buyer" if use_en else " 采购")
         if k not in out:
             out.append(k)
-    return out[:8]
+    return out[:12]
 
 
 def search_bing(query, count=5):
@@ -518,23 +523,38 @@ def _to_candidate(contact, title, snippet, keyword, market, page_text):
     return cand
 
 
-def ai_filter(settings, candidates):
-    """AI 精筛：让大模型判断每条线索是否为潜在买家。失败时静默返回 None。"""
+def ai_filter(settings, candidates, context=""):
+    """AI 精筛：结合业务描述判断每条线索是否为潜在买家，并给出评分与依据。
+    失败时静默返回 None（不阻塞主流程）。"""
     if not candidates or not settings or not settings.get("openai_api_key"):
         return None
     from core import ai
     rows = []
     for i, c in enumerate(candidates):
         rows.append(f"{i}|{c.get('name','')[:30]}|{c.get('website','')}|{c.get('email','')}|{c.get('snippet','')[:80]}")
+    industry = settings.get("industry", "") or "通用"
+    company = settings.get("company_name", "") or "我方公司"
+    products = settings.get("product_name", "") or "我们的产品"
+    desc = str(context or "").strip() or f"我们主营{products}，想找有采购意向的客户。"
     system = (
-        "你是光纤通信行业的采购线索评估专家。判断每条线索是【潜在买家】还是【供应商/同行/无关内容】。"
-        '只输出一行 JSON 数组，元素格式：{"i":序号,"buyer":true或false,"score":0-10,"reason":"一句话"}，不要输出其他内容。'
+        f"你是{industry}行业的资深采购线索分析师，服务对象是{company}。"
+        "结合下面的【业务与理想客户描述】判断每条线索是【潜在买家】还是【供应商/同行/无关内容】。"
+        "只输出一行 JSON 数组，元素格式："
+        '{"i":序号,"buyer":true或false,"score":0到10的整数,"reason":"一句话结论",'
+        '"points":["2到3条具体判断依据，如采购意向、规模信号、匹配度"]}，'
+        "不要输出任何其他内容。reason 和 points 必须基于线索本身的真实信息，禁止编造。"
+    )
+    user = (
+        f"【业务与理想客户描述】\n{desc}\n\n"
+        f"【我方主营】{products}\n\n"
+        "【线索列表】\n" + "\n".join(rows) + "\n\n"
+        "请逐条评估。"
     )
     text, err = ai.generate_copy(
         settings.get("openai_api_key"),
         settings.get("openai_model", "gpt-4o-mini"),
         system,
-        "线索列表：\n" + "\n".join(rows),
+        user,
         settings.get("openai_api_base", ""),
     )
     if err:
@@ -554,7 +574,7 @@ def ai_filter(settings, candidates):
         return None
 
 
-def run(keywords, markets=None, max_results=6, urls=None, use_ai=False, settings=None, progress=None):
+def run(keywords, markets=None, max_results=6, urls=None, use_ai=False, settings=None, progress=None, context=""):
     """执行一次买家发现，返回 {candidates, errors, filtered}。"""
     if isinstance(keywords, str):
         keywords = [k.strip() for k in keywords.splitlines() if k.strip()]
@@ -564,14 +584,14 @@ def run(keywords, markets=None, max_results=6, urls=None, use_ai=False, settings
         markets = [m.strip() for m in markets.splitlines() if m.strip()]
     else:
         markets = [str(m).strip() for m in (markets or []) if str(m).strip()]
-    keywords = keywords[:5]
+    keywords = keywords[:10]
     markets = markets[:5]
     expanded = []
     for kw in keywords:
         for e in expand_keywords(kw):
             if e not in expanded:
                 expanded.append(e)
-    keywords = expanded[:6]
+    keywords = expanded[:12]
     errors = []
     filtered = 0
     seen = set()
@@ -644,7 +664,7 @@ def run(keywords, markets=None, max_results=6, urls=None, use_ai=False, settings
     if use_ai:
         if progress:
             progress({"stage": "AI 智能筛选", "done": 0, "total": len(candidates)})
-        ai_map = ai_filter(settings, candidates)
+        ai_map = ai_filter(settings, candidates, context)
         if ai_map:
             keep = []
             for i, c in enumerate(candidates):

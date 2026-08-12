@@ -188,6 +188,7 @@ const state = {
   collectTab: "import",
   outreachTab: "email",
   recipients: [], // 主动触达选择的收件人
+  buyerContext: "", // 最近一次 AI 业务描述（用于 AI 智能筛选）
 };
 
 /* ---------- 导航 ---------- */
@@ -342,6 +343,7 @@ async function renderDashboard() {
   $("#home-strategy-btn").onclick = () => {
     const desc = $("#home-strategy").value.trim();
     if (!desc) return toast("请先描述您的业务", "err");
+    state.buyerContext = desc;
     state.pendingStrategy = desc;
     go("buyer");
   };
@@ -598,7 +600,7 @@ async function loadLeadList() {
       <td><span class="type-chip">${esc(r.type)}</span></td>
       <td>${badge(r.status)}</td>
       <td>${(r.tags || "").split(",").filter(Boolean).map((t) => `<span class="tag-chip">${esc(t)}</span>`).join("")}</td>
-      <td>${scoreBadge(r.score)}</td>
+      <td>${scoreBadge(r.score)}${r.score_reason ? `<div class="sub" style="max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.score_reason)}">${esc(r.score_reason)}</div>` : ""}</td>
       <td>${fmtDate(r.updated_at)}</td>
       <td><div class="row-actions">
         <button class="btn sm" onclick="openLeadDetail(${r.id})">查看</button>
@@ -1275,7 +1277,7 @@ async function renderBuyer() {
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <button class="btn primary" id="buyer-run">🔍 开始发现买家</button>
         <label style="display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" id="buyer-ai"> AI 智能筛选（需要 API Key）</label>
-        <span class="hint">自动扩展相关词（如 光缆→光纤光缆/通信光缆），按采购/招标/求购/报价多角度搜索，过滤噪音后评分 0-10 分</span>
+        <span class="hint">AI 会结合上方的业务描述判断每条线索像不像你的买家（不限行业）并给出依据；未填描述时按“设置 → 行业”判断</span>
       </div>
     </div>
     <div class="card" id="buyer-result"><div class="empty"><div class="ico">🎯</div>搜索结果显示在这里</div></div>`;
@@ -1290,6 +1292,7 @@ async function renderBuyer() {
         max_results: $("#buyer-max").value,
         urls: $("#buyer-urls").value.trim(),
         use_ai: $("#buyer-ai").checked,
+        context: state.buyerContext || $("#strategy-desc").value.trim(),
       } });
       $("#buyer-result").innerHTML = `<div class="empty"><div class="ico">⏳</div>搜索任务已启动，正在后台进行…（页面可继续操作）</div>`;
       pollBuyerJob();
@@ -1315,6 +1318,7 @@ async function renderBuyer() {
   $("#strategy-gen").onclick = async () => {
     const desc = $("#strategy-desc").value.trim();
     if (!desc) return toast("请先描述你的业务和客户需求", "err");
+    state.buyerContext = desc;
     // 立即清掉上一次的方案，避免残留/闪烁
     $("#strategy-plans").innerHTML = `<div class="empty"><div class="ico">🤖</div>AI 正在生成新方案…（进度看右上角任务栏）</div>`;
     const btn = $("#strategy-gen");

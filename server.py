@@ -332,6 +332,7 @@ def _buyer_worker(data):
             use_ai=bool(data.get("use_ai")),
             settings=settings,
             progress=cb,
+            context=data.get("context", ""),
         )
         _buyer_job.update(running=False, result=result, message="")
         task_finish("buyer", "成功", f"发现 {len(result.get('candidates', []))} 条线索")
@@ -473,7 +474,7 @@ def _strategy_worker(data, settings):
         f"公司：{settings.get('company_name', '')}\n"
         f"主营产品：{settings.get('product_name', '')}\n"
         f"业务描述：{desc}\n\n"
-        "请生成方案。关键词请给出可直接用于搜索引擎的短语（每套 5-8 个，海外市场用英文）；"
+        "请生成方案。关键词请给出可直接用于搜索引擎的短语（每套 8-12 个，尽量覆盖不同场景和地区，海外市场用英文）；"
         "利润/知名度/需求量用 1-5 整数表示（5 最高）；channels 给出 2-4 个可执行获客渠道（如展会/B2B平台/社群/邮件）；"
         "risks 给出 1-3 条风险提示（如竞争激烈/资质门槛/账期）。"
     )
