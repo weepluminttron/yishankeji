@@ -136,6 +136,14 @@ def init_db():
             conn.execute("ALTER TABLE leads ADD COLUMN score_reason TEXT DEFAULT ''")
         if "ai_scored" not in cols:
             conn.execute("ALTER TABLE leads ADD COLUMN ai_scored INTEGER DEFAULT 0")
+        # 意向识别 / 用户画像 / 转化追踪（v2 获客增强）
+        for col in ("intent_stage", "intent_json", "first_touch_at", "last_touch_at", "converted_at"):
+            if col not in cols:
+                conn.execute(f"ALTER TABLE leads ADD COLUMN {col} TEXT DEFAULT ''")
+        conn.commit()
+        # 索引：提升按意向阶段 / 成交时间的聚合查询速度
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_leads_intent ON leads(intent_stage)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_leads_converted ON leads(converted_at)")
         conn.commit()
     finally:
         conn.close()
@@ -377,9 +385,11 @@ def bulk_status(ids, status):
                 continue
             changed.append((lid, row["status"]))
         if changed:
+            conv = now() if status == "已成交" else ""
             conn.executemany(
-                "UPDATE leads SET status = ?, updated_at = ? WHERE id = ?",
-                [(status, ts, lid) for lid, _ in changed],
+                "UPDATE leads SET status = ?, updated_at = ?, "
+                "converted_at = CASE WHEN ? = '已成交' THEN ? ELSE converted_at END WHERE id = ?",
+                [(status, ts, status, conv, lid) for lid, _ in changed],
             )
             conn.commit()
     finally:
@@ -396,8 +406,8 @@ def mark_contacted(lead_id, contact_type="", note=""):
         if not lead:
             return
         conn.execute(
-            "UPDATE leads SET last_contacted = ?, contact_count = contact_count + 1, updated_at = ? WHERE id = ?",
-            (today_str(), now(), lead_id),
+            "UPDATE leads SET last_contacted = ?, last_touch_at = ?, contact_count = contact_count + 1, updated_at = ? WHERE id = ?",
+            (today_str(), today_str(), now(), lead_id),
         )
         conn.commit()
         detail = f"{contact_type}触达" if contact_type else "记录一次触达"
@@ -434,6 +444,97 @@ def list_unscored_leads(limit=2000):
             "SELECT * FROM leads WHERE ai_scored = 0 ORDER BY id LIMIT ?", (limit,)
         ).fetchall()
         return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def set_intent(lead_id, stage, intent_json=""):
+    """写入意向阶段与结构化画像（intent_json 为字符串，调用方负责序列化）。"""
+    conn = get_conn()
+    try:
+        conn.execute(
+            "UPDATE leads SET intent_stage = ?, intent_json = ?, updated_at = ? WHERE id = ?",
+            (stage or "", intent_json or "", now(), lead_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_intent(lead_id):
+    conn = get_conn()
+    try:
+        row = conn.execute(
+            "SELECT intent_stage, intent_json FROM leads WHERE id = ?", (lead_id,)
+        ).fetchone()
+        return dict(row) if row else {"intent_stage": "", "intent_json": ""}
+    finally:
+        conn.close()
+
+
+def list_intent_pending(limit=200):
+    """返回尚未做过意向分级的线索（intent_stage 为空）。"""
+    conn = get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM leads WHERE (intent_stage IS NULL OR intent_stage = '') "
+            "AND status NOT IN ('已成交', '无效') ORDER BY id LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def list_auto_touch_candidates(limit=200):
+    """返回可自动首触的线索：未成交/未无效、还没有首触记录，按评分优先。"""
+    conn = get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM leads WHERE status IN ('新线索', '待联系') "
+            "AND (first_touch_at IS NULL OR first_touch_at = '') "
+            "ORDER BY score DESC, updated_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def has_pending_scheduled_mail(lead_id):
+    """该线索是否已有待发送（排队中）的自动/手动触达邮件。"""
+    conn = get_conn()
+    try:
+        return conn.execute(
+            "SELECT 1 FROM scheduled_mails WHERE lead_id = ? AND status = '待发送'",
+            (lead_id,),
+        ).fetchone() is not None
+    finally:
+        conn.close()
+
+
+def mark_first_touch(lead_id, channel=""):
+    """记录首次触达时间（自动触达引擎排程发出后调用）。"""
+    conn = get_conn()
+    try:
+        conn.execute(
+            "UPDATE leads SET first_touch_at = ?, last_touch_at = ?, updated_at = ? WHERE id = ?",
+            (today_str(), today_str(), now(), lead_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def mark_converted(lead_id):
+    """线索成交：写成交时间，并把状态置为已成交（去重保护）。"""
+    conn = get_conn()
+    try:
+        conn.execute(
+            "UPDATE leads SET converted_at = ?, status = '已成交', updated_at = ? WHERE id = ?",
+            (now(), now(), lead_id),
+        )
+        conn.commit()
     finally:
         conn.close()
 
@@ -573,6 +674,13 @@ def get_settings():
         "auto_crawl_interval": "0",
         "last_auto_crawl": "",
         "auto_ai_score": "1",
+        # ---- v2 获客增强：意向识别 / 自动触达 ----
+        "auto_intent_enabled": "1",   # 新线索入库后自动做意向分级
+        "auto_intent_use_ai": "0",    # 意向分级是否调用 AI（默认规则，省费用）
+        "auto_touch_enabled": "0",    # 自动首触总开关（默认关闭，需手动开启）
+        "auto_touch_score": "7",      # 触发自动首触的最低评分
+        "auto_touch_delay": "1",      # 入库后延迟几天再首触
+        "auto_touch_channel": "email",  # 首触渠道：email / sms
     }
     merged = dict(defaults)
     merged.update(saved)
@@ -593,6 +701,8 @@ def save_settings(values):
         "access_password", "lp_enabled", "lp_title", "lp_subtitle", "lp_cta",
         "lp_phone", "lp_thanks", "auto_crawl_urls", "auto_crawl_interval",
         "last_auto_crawl",
+        "auto_intent_enabled", "auto_intent_use_ai",
+        "auto_touch_enabled", "auto_touch_score", "auto_touch_delay", "auto_touch_channel",
     ]
     conn = get_conn()
     try:

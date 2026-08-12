@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>获客分析看板</title>
+<style>
+  body { font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; margin: 0; background: #f5f7fa; color: #1f2937; }
+  header { background: #0f172a; color: #fff; padding: 14px 20px; display: flex; align-items: center; gap: 12px; }
+  header a { color: #93c5fd; text-decoration: none; font-size: 13px; margin-left: auto; }
+  .wrap { max-width: 1080px; margin: 18px auto; padding: 0 16px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+  .card { background: #fff; border-radius: 12px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+  .kpi { font-size: 26px; font-weight: 700; }
+  .kpi small { font-size: 13px; color: #6b7280; font-weight: 400; }
+  h2 { font-size: 16px; margin: 26px 0 10px; }
+  table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+  th, td { padding: 9px 12px; text-align: left; font-size: 13px; border-bottom: 1px solid #f1f5f9; }
+  th { background: #f8fafc; color: #475569; }
+  .bar { height: 8px; background: #e2e8f0; border-radius: 4px; overflow: hidden; }
+  .bar > i { display: block; height: 100%; background: #2563eb; }
+  .hot { color: #dc2626; font-weight: 600; }
+  .note { color: #6b7280; font-size: 12px; padding: 10px 2px; }
+  .funnel { display: flex; flex-direction: column; gap: 6px; }
+  .step { display: flex; align-items: center; gap: 10px; }
+  .step .lbl { width: 90px; font-size: 13px; }
+  .step .bar { flex: 1; }
+  .step .num { width: 70px; text-align: right; font-size: 13px; }
+</style>
+</head>
+<body>
+<header>
+  <strong>📊 获客分析看板</strong>
+  <span style="font-size:12px;color:#94a3b8;" id="gen"></span>
+  <a href="/">← 返回管理后台</a>
+</header>
+<div class="wrap">
+  <div class="grid" id="kpis"></div>
+
+  <h2>转化漏斗</h2>
+  <div class="card"><div class="funnel" id="funnel"></div></div>
+
+  <h2>分来源转化率</h2>
+  <table id="src"><thead><tr><th>来源</th><th>线索量</th><th>成交</th><th>转化率</th></tr></thead><tbody></tbody></table>
+
+  <h2>分意向阶段转化率</h2>
+  <table id="intent"><thead><tr><th>意向阶段</th><th>线索量</th><th>成交</th><th>转化率</th></tr></thead><tbody></tbody></table>
+
+  <h2>触达效果</h2>
+  <table id="touch"><thead><tr><th>分组</th><th>线索量</th><th>成交</th><th>成交率</th></tr></thead><tbody></tbody></table>
+
+  <h2>🔥 高意向待跟进</h2>
+  <table id="hot"><thead><tr><th>ID</th><th>公司</th><th>评分</th><th>意向</th><th>建议动作</th><th>状态</th></tr></thead><tbody></tbody></table>
+
+  <p class="note" id="msg"></p>
+</div>
+<script>
+function pct(n, d){ return d ? (n / d * 100).toFixed(1) + '%' : '0%'; }
+function bar(v, max){ var w = max ? Math.max(2, v / max * 100) : 0; return '<div class="bar"><i style="width:'+w+'%"></i></div>'; }
+function rows(tb, arr){ var b = tb.querySelector('tbody'); b.innerHTML = arr.map(function(r){ return '<tr>'+r+'</tr>'; }).join(''); }
+
+fetch('/api/analytics').then(function(r){ return r.json(); }).then(function(d){
+  if(!d.ok){ document.getElementById('msg').textContent = '加载失败：' + (d.msg || '请先在管理后台登录'); return; }
+  var f = d.funnel;
+  document.getElementById('gen').textContent = '生成于 ' + d.generated_at;
+  document.getElementById('kpis').innerHTML = [
+    ['总线索', f.total], ['已联系', f.contacted], ['跟进中', f.following],
+    ['已成交', f.won], ['总转化率', f.conversion_rate + '%']
+  ].map(function(k){ return '<div class="card"><div class="kpi">'+k[1]+' <small>'+k[0]+'</small></div></div>'; }).join('');
+
+  var maxv = Math.max(f.total, 1);
+  document.getElementById('funnel').innerHTML = [
+    ['总线索', f.total], ['已联系', f.contacted], ['跟进中', f.following], ['已成交', f.won]
+  ].map(function(s){ return '<div class="step"><span class="lbl">'+s[0]+'</span>'+bar(s[1], maxv)+'<span class="num">'+s[1]+'</span></div>'; }).join('');
+
+  rows(document.getElementById('src'), d.by_source.map(function(s){
+    return '<td>'+s.source+'</td><td>'+s.total+'</td><td>'+s.won+'</td><td>'+s.rate+'%</td>';
+  }));
+  rows(document.getElementById('intent'), d.by_intent.map(function(s){
+    return '<td>'+s.stage+'</td><td>'+s.total+'</td><td>'+s.won+'</td><td>'+s.rate+'%</td>';
+  }));
+  var t = d.touch_effect;
+  rows(document.getElementById('touch'), [
+    ['已触达', t.touched.total, t.touched.won, t.touched.rate],
+    ['未触达', t.untouched.total, t.untouched.won, t.untouched.rate],
+    ['多次触达(≥3)', t.multi_touch.total, t.multi_touch.won, t.multi_touch.rate]
+  ].map(function(s){ return '<td>'+s[0]+'</td><td>'+s[1]+'</td><td>'+s[2]+'</td><td>'+s[3]+'%</td>'; }));
+
+  rows(document.getElementById('hot'), d.hot_leads.map(function(h){
+    return '<td>'+h.id+'</td><td>'+h.name+'</td><td>'+h.score+'</td><td class="hot">'+h.intent_stage+'</td><td>'+h.next_action+'</td><td>'+h.status+'</td>';
+  }));
+}).catch(function(e){ document.getElementById('msg').textContent = '请求异常：' + e; });
+</script>
+</body>
+</html>

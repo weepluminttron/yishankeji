@@ -25,6 +25,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from core import ai, buyer, company_api, company_intel, crawler, db, followup, importer, llm_cache, mailer, mapsearch, notify, scorer
+from core import intent as intent_mod, analytics as analytics_mod, automation as automation_mod, log_helper
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
@@ -44,6 +45,7 @@ _score_job = {
 _buyer_job = {"running": False, "message": "", "started": "", "result": None}
 _mail_job = {"running": False, "message": "", "started": "", "result": None}
 _map_job = {"running": False, "message": "", "started": "", "result": None}
+_touch_job = {"running": False, "message": "", "enrolled": 0, "skipped": 0, "last_run": ""}
 _login_attempts = {}
 _tasks = {}
 
@@ -443,6 +445,8 @@ def _mail_sequence_loop():
                         db.update_scheduled_mail(m["id"], "成功")
                         db.add_mail_log(m["lead_id"], lead["name"], lead["email"], subj, body, "成功")
                         db.mark_contacted(m["lead_id"])
+                        if not lead.get("first_touch_at"):
+                            db.mark_first_touch(m["lead_id"], "email")
                     else:
                         db.update_scheduled_mail(m["id"], "失败", err)
                         db.add_mail_log(m["lead_id"], lead["name"], lead["email"], subj, body, "失败", err)
@@ -842,6 +846,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._serve_static("/".join(parts[1:]))
         if parts[0] == "manifest.json":
             return self._serve_static("manifest.json")
+        if parts[0].endswith(".html") and os.path.isfile(os.path.join(STATIC_DIR, parts[0])):
+            return self._serve_static(parts[0])
         if parts[0] == "sw.js":
             self.send_response(200)
             self.send_header("Service-Worker-Allowed", "/")
@@ -984,6 +990,35 @@ class Handler(BaseHTTPRequestHandler):
                 "statuses": db.STATUSES,
                 "types": db.TYPES,
                 "tags": db.DEFAULT_TAGS,
+                "intent_stages": intent_mod.STAGES,
+            })
+        if api == "analytics":
+            return send_json(self, {"ok": True, **analytics_mod.overview()})
+        if api == "intent" and len(parts) > 2 and parts[2] == "analyze":
+            lead_id = safe_int(qs.get("lead_id", [""])[0] or "")
+            lead = db.get_lead(lead_id) if lead_id else None
+            if not lead:
+                return send_json(self, {"ok": False, "msg": "线索不存在"}, 404)
+            use_ai = qs.get("use_ai", [""])[0] in ("1", "true")
+            it = intent_mod.classify(lead, db.get_settings(), use_ai=use_ai)
+            return send_json(self, {
+                "ok": True,
+                "intent": it,
+                "profile": intent_mod.enrich_profile(lead, it),
+            })
+        if api == "automation":
+            s = db.get_settings()
+            return send_json(self, {
+                "ok": True,
+                "enabled": s.get("auto_touch_enabled") == "1",
+                "settings": {
+                    "auto_touch_enabled": s.get("auto_touch_enabled", "0"),
+                    "auto_touch_score": s.get("auto_touch_score", "7"),
+                    "auto_touch_delay": s.get("auto_touch_delay", "1"),
+                    "auto_touch_channel": s.get("auto_touch_channel", "email"),
+                    "auto_intent_enabled": s.get("auto_intent_enabled", "1"),
+                },
+                "job": dict(_touch_job),
             })
         return send_json(self, {"ok": False, "msg": "接口不存在"}, 404)
 
@@ -1275,6 +1310,33 @@ class Handler(BaseHTTPRequestHandler):
         if api == "mail":
             data = read_json_body(self)
             return self._start_mails(data)
+        if api == "automation" and len(parts) > 2 and parts[2] == "run":
+            if _touch_job.get("running"):
+                return send_json(self, {"ok": False, "msg": "自动触达任务正在运行"}, 400)
+            _touch_job.update(running=True, enrolled=0, skipped=0, message="", last_run=time.strftime("%Y-%m-%d %H:%M:%S"))
+
+            def _run():
+                try:
+                    stats = automation_mod.process_pending(db.get_settings(), limit=50)
+                    _touch_job.update(enrolled=stats.get("enrolled", 0), skipped=stats.get("skipped", 0),
+                                     message="处理完成")
+                except Exception as e:
+                    _touch_job.update(message="失败：" + str(e))
+                    log_helper.log_error("手动自动触达失败：" + traceback.format_exc())
+                finally:
+                    _touch_job.update(running=False)
+            threading.Thread(target=_run, daemon=True).start()
+            return send_json(self, {"ok": True, "msg": "已启动自动触达巡检"})
+        if api == "leads" and len(parts) > 2 and parts[2] == "intent":
+            data = read_json_body(self)
+            lead_id = safe_int(data.get("id"))
+            lead = db.get_lead(lead_id)
+            if not lead:
+                return send_json(self, {"ok": False, "msg": "线索不存在"}, 404)
+            use_ai = bool(data.get("use_ai"))
+            it = intent_mod.classify(lead, db.get_settings(), use_ai=use_ai)
+            db.set_intent(lead_id, it["stage"], "")
+            return send_json(self, {"ok": True, "intent": it, "profile": intent_mod.enrich_profile(lead, it)})
         return send_json(self, {"ok": False, "msg": "接口不存在"}, 404)
 
     def _route_put(self):
@@ -1565,6 +1627,27 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+def _set_lead_intent(lead_id, use_ai=False):
+    """为新/更新线索写入意向分级（规则默认，可选 AI）。失败静默。"""
+    try:
+        lead = db.get_lead(lead_id)
+        if not lead:
+            return
+        settings = db.get_settings()
+        if use_ai and settings.get("auto_intent_use_ai") == "1" and settings.get("openai_api_key"):
+            it = intent_mod.classify(lead, settings, use_ai=True)
+        else:
+            it = intent_mod.rule_intent(lead)
+        db.set_intent(lead_id, it["stage"], "")
+        # 高意向线索打标签，便于看板与筛选
+        if it.get("hot") and "高意向" not in (lead.get("tags") or ""):
+            tags = (lead.get("tags") or "").strip()
+            new_tags = (tags + ",高意向").strip(",") if tags else "高意向"
+            db.update_lead(lead_id, {"tags": new_tags})
+    except Exception:
+        log_helper.log_error("意向分级失败：" + traceback.format_exc())
+
+
     def _lp_submit(self):
         data = read_json_body(self)
         if data.get("website"):  # 蜜罐：机器人填写的隐藏字段
@@ -1606,6 +1689,7 @@ class Handler(BaseHTTPRequestHandler):
                 args=(s.get("notify_webhook"), "🎉 官网收到新客户留资", notify.lead_notice_text(lead)),
                 daemon=True,
             ).start()
+        _set_lead_intent(lead["id"])
         auto_score_if_enabled()
         return send_json(self, {"ok": True, "thanks": s.get("lp_thanks", "")})
 
@@ -1618,6 +1702,7 @@ def main():
     server = ThreadingHTTPServer((host, port), Handler)
     threading.Thread(target=_auto_crawl_loop, daemon=True).start()
     threading.Thread(target=_mail_sequence_loop, daemon=True).start()
+    threading.Thread(target=automation_mod.auto_touch_loop, daemon=True).start()
 
     def _handle_stop(sig, frame):
         print("\n收到停止信号，正在安全关闭...")

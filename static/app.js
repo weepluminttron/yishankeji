@@ -199,7 +199,10 @@ function go(page) {
   const renderer = { dashboard: renderDashboard, leads: renderLeads, collect: renderCollect, buyer: renderBuyer, outreach: renderOutreach, logs: renderLogs, settings: renderSettings }[page];
   if (renderer) renderer();
 }
-$$(".nav-item").forEach((b) => b.addEventListener("click", () => go(b.dataset.page)));
+$$(".nav-item").forEach((b) => b.addEventListener("click", () => {
+  if (b.dataset.page) go(b.dataset.page);
+  else if (b.dataset.href) location.href = b.dataset.href;
+}));
 
 /* ---------- 工作台 ---------- */
 async function renderDashboard() {
