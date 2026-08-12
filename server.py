@@ -24,7 +24,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from core import ai, buyer, crawler, db, importer, llm_cache, mailer, mapsearch, notify, scorer
+from core import ai, buyer, company_api, crawler, db, importer, llm_cache, mailer, mapsearch, notify, scorer
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
@@ -559,6 +559,52 @@ def _analyze_worker(lead_id):
     task_finish(task_id, "成功", "分析已写入该客户的跟进记录")
 
 
+def _company_note_text(info):
+    rows = [
+        ("公司名称", info.get("company", "")),
+        ("统一社会信用代码", info.get("credit_code", "")),
+        ("法定代表人", info.get("legal_person", "")),
+        ("注册资本", info.get("reg_capital", "")),
+        ("成立时间", info.get("estiblish_time", "")),
+        ("经营状态", info.get("reg_status", "")),
+        ("地址", info.get("address", "")),
+        ("联系电话", info.get("phone", "")),
+        ("邮箱", info.get("email", "")),
+    ]
+    return "\n".join(f"{k}：{v}" for k, v in rows if v)
+
+
+def _company_worker(task_id, keyword, lead_id, provider):
+    """后台线程：企查查 / 天眼查 工商信息查询。"""
+    task_start(task_id, f"工商信息查询：{str(keyword)[:20]}")
+    task_progress(task_id, stage="正在查询工商信息")
+    try:
+        settings = db.get_settings()
+        info = company_api.query_company(settings, keyword, provider=provider or "auto")
+        _tasks[task_id]["result"] = info
+        if lead_id:
+            lead = db.get_lead(lead_id)
+            if not lead:
+                task_finish(task_id, "失败", "线索不存在")
+                return
+            db.add_note(lead_id, "🏢 工商信息（" + info.get("source", "") + "）：\n" + _company_note_text(info))
+            db.add_event(lead_id, "查工商信息", f"已通过 {info.get('source', '')} 查询并写入跟进记录")
+            # 补充客户资料：只填空缺字段，不覆盖已有信息
+            fill = {}
+            if not lead.get("phone") and info.get("phone"):
+                fill["phone"] = info["phone"]
+            if not lead.get("email") and info.get("email"):
+                fill["email"] = info["email"]
+            if not lead.get("address") and info.get("address"):
+                fill["address"] = info["address"]
+            if fill:
+                db.update_lead(lead_id, fill)
+        task_finish(task_id, "成功", "查询完成，结果已展示并写入跟进记录")
+    except Exception as e:
+        log_error("工商信息查询失败：" + traceback.format_exc())
+        task_finish(task_id, "失败", str(e))
+
+
 def find_duplicates():
     """按电话/公司名找出重复线索分组。"""
     leads = db.all_leads({})[:2000]
@@ -983,6 +1029,29 @@ class Handler(BaseHTTPRequestHandler):
             if not ok:
                 return send_json(self, {"ok": False, "msg": msg}, 400)
             return send_json(self, {"ok": True, "msg": msg, "job": dict(_map_job)})
+        if api == "company" and len(parts) > 2 and parts[2] == "lookup":
+            data = read_json_body(self)
+            keyword = str(data.get("keyword", "")).strip()
+            lead_id = safe_int(data.get("lead_id"))
+            provider = str(data.get("provider", "auto") or "auto").strip().lower()
+            if not keyword:
+                return send_json(self, {"ok": False, "msg": "请输入公司名称"}, 400)
+            if provider not in ("auto", "qcc", "tyc"):
+                provider = "auto"
+            settings = db.get_settings()
+            if not (settings.get("qcc_app_key") or settings.get("tyc_token")):
+                return send_json(
+                    self,
+                    {"ok": False, "msg": "还未配置工商查询密钥，请到“设置 → 工商信息查询”填写企查查或天眼查密钥"},
+                    400,
+                )
+            if lead_id and not db.get_lead(lead_id):
+                return send_json(self, {"ok": False, "msg": "线索不存在"}, 404)
+            task_id = f"company_{lead_id or 'q'}_{int(time.time() * 1000)}"
+            threading.Thread(
+                target=_company_worker, args=(task_id, keyword, lead_id, provider), daemon=True
+            ).start()
+            return send_json(self, {"ok": True, "task_id": task_id, "msg": "工商查询已启动，进度看右上角任务栏"})
         if api == "sequences" and len(parts) > 2 and parts[2] == "schedule":
             data = read_json_body(self)
             lead_ids = data.get("lead_ids", [])

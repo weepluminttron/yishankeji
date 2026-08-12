@@ -724,6 +724,7 @@ async function openLeadDetail(id) {
       <button class="btn sm" id="d-mail">发邮件</button>
       <button class="btn sm" id="d-sample">📦 寄样品</button>
       <button class="btn sm" id="d-analyze">🤖 AI 客户分析</button>
+      <button class="btn sm" id="d-company">🏢 查工商</button>
       <button class="btn sm" id="d-score">🎯 AI 评分</button>
       <button class="btn sm danger" id="d-del">删除</button>
     </div>
@@ -776,6 +777,16 @@ async function openLeadDetail(id) {
       toast("AI 客户分析已启动，完成后自动写入跟进记录（进度看右上角任务栏）", "ok");
     } catch (e) { toast(e.message, "err"); }
   };
+  $("#d-company").onclick = async () => {
+    const btn = $("#d-company");
+    btn.disabled = true; btn.textContent = "查询中…";
+    try {
+      const r = await api("/api/company/lookup", { method: "POST", body: { keyword: lead.name, lead_id: id } });
+      toast("工商查询已启动，完成后自动写入跟进记录（进度看右上角任务栏）", "ok");
+      pollCompanyTask(r.task_id, () => { closeModal(); openLeadDetail(id); });
+    } catch (e) { toast(e.message, "err"); }
+    finally { btn.disabled = false; btn.textContent = "🏢 查工商"; }
+  };
   $("#d-del").onclick = () => { closeModal(); deleteLead(id); };
   $("#d-note-btn").onclick = async () => {
     const v = $("#d-note-input").value.trim();
@@ -783,6 +794,43 @@ async function openLeadDetail(id) {
     await api(`/api/leads/${id}/notes`, { method: "POST", body: { content: v } });
     closeModal(); openLeadDetail(id);
   };
+}
+
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+async function pollCompanyTask(taskId, onDone) {
+  for (let i = 0; i < 60; i++) {
+    await sleep(1200);
+    try {
+      const d = await api("/api/tasks");
+      const t = (d.tasks || []).find((x) => x.id === taskId);
+      if (!t) return;
+      if (t.status === "成功" && t.result) {
+        showCompanyInfo(t.result);
+        if (onDone) setTimeout(onDone, 600);
+        return;
+      }
+      if (t.status === "失败") {
+        toast("工商查询失败：" + (t.message || "请检查密钥和公司名称"), "err");
+        return;
+      }
+    } catch (e) { return; }
+  }
+}
+
+function showCompanyInfo(info) {
+  const rows = [
+    ["来源", info.source], ["公司名称", info.company], ["统一社会信用代码", info.credit_code],
+    ["法定代表人", info.legal_person], ["注册资本", info.reg_capital], ["成立时间", info.estiblish_time],
+    ["经营状态", info.reg_status], ["地址", info.address], ["联系电话", info.phone], ["邮箱", info.email],
+  ].filter(([, v]) => v);
+  openModal(`
+    <div class="modal-head"><h2>🏢 工商信息（${esc(info.source || "")}）</h2><button class="close-x" onclick="closeModal()">×</button></div>
+    <div class="detail-grid">${rows.map(([k, v]) => `<div class="item"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`).join("")}</div>
+    <div class="hint" style="margin-top:10px">信息已自动写入该客户的跟进记录；客户资料里空缺的电话/邮箱/地址也已自动补充。</div>
+    <div class="modal-foot"><button class="btn primary" onclick="closeModal()">好的</button></div>`, "wide");
 }
 
 /* ---------- 线索采集 ---------- */
@@ -2129,6 +2177,15 @@ async function renderSettings() {
       <div class="hint">高德 Key 免费申请：lbs.amap.com → 应用管理 → 创建应用（Web 服务）。选“谷歌地图”则复用你已填的 SerpAPI Key，可搜海外公司；谷歌地图接口每次最多 20 条。</div>
     </div>
     <div class="card">
+      <h3>🏢 工商信息查询（企查查 + 天眼查）</h3>
+      <div class="form-grid">
+        <div class="field"><label>企查查 AppKey</label><input class="input full" type="password" id="s-qcc-app" placeholder="openapi.qcc.com 申请的 AppKey" value="${esc(s.qcc_app_key)}"></div>
+        <div class="field"><label>企查查 SecretKey</label><input class="input full" type="password" id="s-qcc-secret" placeholder="openapi.qcc.com 申请的 SecretKey" value="${esc(s.qcc_secret_key)}"></div>
+        <div class="field" style="grid-column:1/-1"><label>天眼查 Token</label><input class="input full" type="password" id="s-tyc-token" placeholder="open.tianyancha.com 申请的 Token" value="${esc(s.tyc_token)}"></div>
+      </div>
+      <div class="hint">至少配置一家（推荐两家都配）：客户详情页点“🏢 查工商”会优先用已配置的一家，失败自动切换另一家。申请地址：企查查开放平台 openapi.qcc.com、天眼查开放平台 open.tianyancha.com。密钥只保存在你自己的服务器。</div>
+    </div>
+    <div class="card">
       <h3>📱 短信服务商备注</h3>
       <div class="field"><input class="input full" id="s-sms" placeholder="如：阿里云短信，群发平台：xxx" value="${esc(s.sms_notice)}"></div>
     </div>
@@ -2190,6 +2247,9 @@ async function renderSettings() {
         search_engine_id: $("#s-search-cx").value.trim(),
         map_api_key: $("#s-map-key").value.trim(),
         map_provider: $("#s-map-provider").value,
+        qcc_app_key: $("#s-qcc-app").value.trim(),
+        qcc_secret_key: $("#s-qcc-secret").value.trim(),
+        tyc_token: $("#s-tyc-token").value.trim(),
       } } });
       toast("设置已保存", "ok");
     } catch (e) { toast(e.message, "err"); }
