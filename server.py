@@ -24,7 +24,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from core import ai, buyer, company_api, crawler, db, importer, llm_cache, mailer, mapsearch, notify, scorer
+from core import ai, buyer, company_api, company_intel, crawler, db, followup, importer, llm_cache, mailer, mapsearch, notify, scorer
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
@@ -1030,6 +1030,10 @@ class Handler(BaseHTTPRequestHandler):
             if not ok:
                 return send_json(self, {"ok": False, "msg": msg}, 400)
             return send_json(self, {"ok": True, "msg": msg, "job": dict(_buyer_job)})
+        if api == "ai" and len(parts) > 2 and parts[2] == "followup":
+            return self._ai_followup()
+        if api == "ai" and len(parts) > 2 and parts[2] == "company_intel":
+            return self._ai_company_intel()
         if api == "map":
             data = read_json_body(self)
             ok, msg = start_map_job(data)
@@ -1369,6 +1373,49 @@ class Handler(BaseHTTPRequestHandler):
             return send_json(self, {"ok": True, "ai": True, "extracted": extracted})
         except Exception as e:
             return send_json(self, {"ok": False, "msg": f"解析失败：{e}"}, 400)
+
+    def _ai_followup(self):
+        """AI 生成个性化首触内容（邮件/短信/开场话术）。"""
+        data = read_json_body(self)
+        lead_id = safe_int(data.get("lead_id"))
+        kind = str(data.get("kind", "email") or "email").strip().lower()
+        if kind not in ("email", "sms", "opening"):
+            return send_json(self, {"ok": False, "msg": "kind 仅支持 email/sms/opening"}, 400)
+        lead = db.get_lead(lead_id) if lead_id else None
+        if not lead:
+            return send_json(self, {"ok": False, "msg": "线索不存在"}, 404)
+        settings = db.get_settings()
+        if not settings.get("openai_api_key"):
+            return send_json(self, {"ok": False, "msg": "AI 生成需要配置 AI 密钥（“设置 → AI 文案”）"}, 400)
+        if kind == "email":
+            res, err = followup.gen_email(lead, settings)
+            if err:
+                return send_json(self, {"ok": False, "msg": err}, 400)
+            return send_json(self, {"ok": True, "kind": "email", "subject": res["subject"], "body": res["body"]})
+        if kind == "sms":
+            res, err = followup.gen_sms(lead, settings)
+            if err:
+                return send_json(self, {"ok": False, "msg": err}, 400)
+            return send_json(self, {"ok": True, "kind": "sms", "text": res})
+        res, err = followup.gen_opening(lead, settings)
+        if err:
+            return send_json(self, {"ok": False, "msg": err}, 400)
+        return send_json(self, {"ok": True, "kind": "opening", "text": res})
+
+    def _ai_company_intel(self):
+        """AI 公司背景速览。"""
+        data = read_json_body(self)
+        company = str(data.get("company", "")).strip()
+        region = str(data.get("region", "")).strip()
+        if not company:
+            return send_json(self, {"ok": False, "msg": "请填写公司名称"}, 400)
+        settings = db.get_settings()
+        if not settings.get("openai_api_key"):
+            return send_json(self, {"ok": False, "msg": "AI 公司背景速览需要配置 AI 密钥（“设置 → AI 文案”）"}, 400)
+        info, err = company_intel.brief(company, settings, region)
+        if err:
+            return send_json(self, {"ok": False, "msg": err}, 400)
+        return send_json(self, {"ok": True, "intel": info})
 
     def _social_copy(self, data):
         scenario = data.get("scenario", "抖音评论引流")

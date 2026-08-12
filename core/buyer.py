@@ -517,6 +517,7 @@ def _to_candidate(contact, title, snippet, keyword, market, page_text):
         "wechat": ",".join(contact["wechat"][:3]),
         "snippet": snippet[:200],
         "note": (title + "。" + snippet)[:300],
+        "next_action": "",
     }
     score, reason = _score_candidate(cand, page_text)
     cand["score"] = score
@@ -542,8 +543,9 @@ def ai_filter(settings, candidates, context=""):
         "结合下面的【业务与理想客户描述】判断每条线索是【潜在买家】还是【供应商/同行/无关内容】。"
         "只输出一行 JSON 数组，元素格式："
         '{"i":序号,"buyer":true或false,"score":0到10的整数,"reason":"一句话结论",'
-        '"points":["2到3条具体判断依据，如采购意向、规模信号、匹配度"]}，'
-        "不要输出任何其他内容。reason 和 points 必须基于线索本身的真实信息，禁止编造。"
+        '"points":["2到3条具体判断依据，如采购意向、规模信号、匹配度"],'
+        '"next_action":"针对该线索的下一步动作建议（如：电话确认采购预算 / 发样品报价单 / 加微信发案例，20字内）"}，'
+        "不要输出任何其他内容。reason、points、next_action 必须基于线索本身的真实信息，禁止编造。"
     )
     user = (
         f"【业务与理想客户描述】\n{desc}\n\n"
@@ -569,6 +571,9 @@ def ai_filter(settings, candidates, context=""):
         for item in data:
             i = int(item.get("i", -1))
             if 0 <= i < len(candidates):
+                # 兼容字段缺失：next_action 不存在时置空
+                if "next_action" not in item or not str(item.get("next_action", "")).strip():
+                    item["next_action"] = ""
                 result[i] = item
         return result
     except Exception:
@@ -683,8 +688,17 @@ def run(keywords, markets=None, max_results=6, urls=None, use_ai=False, settings
                         pass
                 if item.get("reason"):
                     c["score_reason"] = c.get("score_reason", "") + "；AI：" + str(item["reason"])[:60]
+                c["next_action"] = str(item.get("next_action") or "").strip()
                 keep.append(c)
             candidates = keep
+
+    # 把 AI 给出的下一步动作建议回写到候选（供前端展示 / 落库到 note）
+    for c in candidates:
+        c.setdefault("next_action", "")
+        na = (c.get("next_action") or "").strip()
+        if na:
+            c["note"] = (c.get("note", "") or "").rstrip("；") + f"；AI建议：{na}"[:200]
+            c["score_reason"] = (c.get("score_reason", "") or "").rstrip("；") + f"；AI建议：{na}"
 
     # 招标平台共享邮箱/电话去重：同一联系方式只保留在最高分候选上
     from collections import Counter

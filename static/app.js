@@ -750,8 +750,11 @@ async function openLeadDetail(id) {
       <button class="btn sm" id="d-analyze">🤖 AI 客户分析</button>
       <button class="btn sm" id="d-company">🏢 查工商</button>
       <button class="btn sm" id="d-score">🎯 AI 评分</button>
+      <button class="btn sm" id="d-ai-followup">✍️ AI 跟进</button>
+      <button class="btn sm" id="d-ai-intel">🔍 公司背景</button>
       <button class="btn sm danger" id="d-del">删除</button>
     </div>
+    <div id="d-ai-box" style="display:none;margin-bottom:14px;background:rgba(59,130,246,.06);border:1px solid rgba(59,130,246,.25);border-radius:10px;padding:12px"></div>
     <h3 style="margin-bottom:8px">记录一次联系</h3>
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px">
       <select class="select" id="d-contact-type">
@@ -810,6 +813,47 @@ async function openLeadDetail(id) {
       pollCompanyTask(r.task_id, () => { closeModal(); openLeadDetail(id); });
     } catch (e) { toast(e.message, "err"); }
     finally { btn.disabled = false; btn.textContent = "🏢 查工商"; }
+  };
+  $("#d-ai-followup").onclick = async () => {
+    const box = $("#d-ai-box");
+    box.style.display = "block";
+    box.innerHTML = `<div class="sub">✍️ AI 正在按该线索画像生成跟进内容…</div>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button class="btn sm" data-k="email">📧 邮件</button>
+        <button class="btn sm" data-k="sms">💬 短信</button>
+        <button class="btn sm" data-k="opening">💡 开场话术</button>
+      </div>
+      <div id="d-ai-out" style="margin-top:10px;white-space:pre-wrap"></div>`;
+    box.querySelectorAll("button[data-k]").forEach((b) => {
+      b.onclick = async () => {
+        const out = $("#d-ai-out");
+        out.textContent = "生成中…";
+        try {
+          const r = await api("/api/ai/followup", { method: "POST", body: { lead_id: id, kind: b.dataset.k } });
+          if (r.kind === "email") {
+            out.innerHTML = `<b>主题：</b>${esc(r.subject)}\n\n${esc(r.body)}\n\n<button class="btn sm" onclick="navigator.clipboard.writeText(${JSON.stringify(r.subject + "\n\n" + r.body)})">复制</button>`;
+          } else {
+            out.innerHTML = `${esc(r.text)}\n\n<button class="btn sm" onclick="navigator.clipboard.writeText(${JSON.stringify(r.text)})">复制</button>`;
+          }
+        } catch (e) { out.textContent = "生成失败：" + e.message; }
+      };
+    });
+  };
+  $("#d-ai-intel").onclick = async () => {
+    const box = $("#d-ai-box");
+    box.style.display = "block";
+    box.innerHTML = `<div class="sub">🔍 AI 正在联网分析「${esc(lead.name)}」背景…</div><div id="d-ai-out" style="margin-top:10px"></div>`;
+    try {
+      const r = await api("/api/ai/company_intel", { method: "POST", body: { company: lead.name, region: lead.region } });
+      const i = r.intel;
+      box.querySelector("#d-ai-out").innerHTML = `
+        <div class="mini-row"><span>规模</span><b>${esc(i.scale)}</b></div>
+        <div class="mini-row"><span>匹配度</span><b>${esc(i.match)}</b> <span class="sub">${esc(i.match_reason)}</span></div>
+        <div class="mini-row"><span>采购信号</span><b>${esc(i.signal)}</b></div>
+        <div class="mini-row"><span>主营</span><b>${esc(i.business)}</b></div>
+        <div class="mini-row" style="grid-column:1/-1"><span>简介</span><b>${esc(i.summary)}</b></div>
+        ${i.inferred ? '<div class="sub" style="color:#f59e0b">⚠ 未能联网核实，以上为基于名称推断，仅供参考</div>' : ''}`;
+    } catch (e) { box.querySelector("#d-ai-out").textContent = "分析失败：" + e.message; }
   };
   $("#d-del").onclick = () => { closeModal(); deleteLead(id); };
   $("#d-note-btn").onclick = async () => {
@@ -1523,7 +1567,7 @@ function renderBuyerResult(res) {
           <td>${esc(c.email || "—")}</td>
           <td>${esc(c.phone || "—")}</td>
           <td>${scoreBadge(c.score)}</td>
-          <td class="sub" style="max-width:260px">${esc(c.score_reason || "")}${c.snippet ? `<div style="margin-top:3px;color:var(--muted)">${esc(c.snippet.slice(0, 120))}</div>` : ""}</td>
+          <td class="sub" style="max-width:260px">${esc(c.score_reason || "")}${c.next_action ? `<div style="margin-top:4px;color:var(--blue)">👉 ${esc(c.next_action)}</div>` : ""}${c.snippet ? `<div style="margin-top:3px;color:var(--muted)">${esc(c.snippet.slice(0, 120))}</div>` : ""}</td>
         </tr>`).join("")}
       </tbody></table></div>
       ${errs ? `<div style="margin-top:10px;color:var(--orange);font-size:12px">部分页面抓取失败：<ul style="margin:4px 0 0 18px">${errs}</ul></div>` : ""}`;
