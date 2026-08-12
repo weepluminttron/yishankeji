@@ -1616,7 +1616,7 @@ function renderBuyerResult(res) {
           <td>${esc(c.email || "—")}</td>
           <td>${esc(c.phone || "—")}</td>
           <td>${scoreBadge(c.score)}</td>
-          <td class="sub" style="max-width:260px">${esc(c.score_reason || "")}${c.next_action ? `<div style="margin-top:4px;color:var(--blue)">👉 ${esc(c.next_action)}</div>` : ""}${c.snippet ? `<div style="margin-top:3px;color:var(--muted)">${esc(c.snippet.slice(0, 120))}</div>` : ""}</td>
+          <td class="sub" style="max-width:280px">${c.tier ? `<span class="tag-chip" style="background:${c.tier === "S" ? "#ffe9ec;color:#c62828" : c.tier === "A" ? "#fff8e1;color:#b26a00" : "#f1f5f9;color:#475569"}">${esc(c.tier)}级</span> ` : ""}${esc(c.score_reason || "")}${c.next_action ? `<div style="margin-top:4px;color:var(--blue)">👉 ${esc(c.next_action)}</div>` : ""}${c.snippet ? `<div style="margin-top:3px;color:var(--muted)">${esc(c.snippet.slice(0, 120))}</div>` : ""}</td>
         </tr>`).join("")}
       </tbody></table></div>
       ${errs ? `<div style="margin-top:10px;color:var(--orange);font-size:12px">部分页面抓取失败：<ul style="margin:4px 0 0 18px">${errs}</ul></div>` : ""}`;

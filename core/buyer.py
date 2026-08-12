@@ -18,7 +18,7 @@ from collections import Counter
 from lxml import html as lh
 
 from core.crawler import _clean_text, fetch_page
-from core.scorer import rule_score
+from core.scorer import fit_comp_score, rule_score, tier_of
 
 EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+\.[A-Za-z]{2,}")
 MOBILE_RE = re.compile(r"(?<!\d)1[3-9]\d{9}(?!\d)")
@@ -523,6 +523,12 @@ def _to_candidate(contact, title, snippet, keyword, market, page_text):
     score, reason = _score_candidate(cand, page_text)
     cand["score"] = score
     cand["score_reason"] = reason
+    # WorkBuddy 式双维度：匹配度 + 实力 → S/A/B/C 等级
+    fc = fit_comp_score(cand)
+    cand["fit"] = fc["fit"]
+    cand["comp"] = fc["comp"]
+    cand["tier"] = fc["tier"]
+    cand["tags"] = ",".join(t for t in [keyword, fc["tier"] + "级"] if t)
     return cand
 
 
@@ -545,6 +551,8 @@ def ai_filter(settings, candidates, context=""):
         "只输出一行 JSON 数组，元素格式："
         '{"i":序号,"buyer":true或false,"score":0到10的整数,"reason":"一句话结论",'
         '"points":["2到3条具体判断依据，如采购意向、规模信号、匹配度"],'
+        '"fit":0到50的整数（品类/规格/定制匹配度）,'
+        '"comp":0到50的整数（体量/层级/活跃度/可持续性）,'
         '"next_action":"针对该线索的下一步动作建议（如：电话确认采购预算 / 发样品报价单 / 加微信发案例，20字内）"}，'
         "不要输出任何其他内容。reason、points、next_action 必须基于线索本身的真实信息，禁止编造。"
     )
@@ -690,6 +698,15 @@ def run(keywords, markets=None, max_results=6, urls=None, use_ai=False, settings
                 if item.get("reason"):
                     c["score_reason"] = c.get("score_reason", "") + "；AI：" + str(item["reason"])[:60]
                 c["next_action"] = str(item.get("next_action") or "").strip()
+                # AI 给出的匹配度/实力双维度（缺失时保留规则值）
+                try:
+                    if item.get("fit") is not None:
+                        c["fit"] = max(0, min(50, int(item["fit"])))
+                    if item.get("comp") is not None:
+                        c["comp"] = max(0, min(50, int(item["comp"])))
+                    c["tier"] = tier_of(int(c.get("fit", 0)) + int(c.get("comp", 0)))
+                except Exception:
+                    pass
                 keep.append(c)
             candidates = keep
 
@@ -700,6 +717,14 @@ def run(keywords, markets=None, max_results=6, urls=None, use_ai=False, settings
         if na:
             c["note"] = (c.get("note", "") or "").rstrip("；") + f"；AI建议：{na}"[:200]
             c["score_reason"] = (c.get("score_reason", "") or "").rstrip("；") + f"；AI建议：{na}"
+        # 补充双维度等级信息，便于排序与前端展示
+        c.setdefault("fit", 0)
+        c.setdefault("comp", 0)
+        c.setdefault("tier", tier_of(int(c.get("fit", 0)) + int(c.get("comp", 0))))
+        c["score_reason"] = (
+            (c.get("score_reason", "") or "").rstrip("；")
+            + f"；{c['tier']}级（匹配{c.get('fit', 0)}+实力{c.get('comp', 0)}）"
+        )
 
     # 招标平台共享邮箱/电话去重：同一联系方式只保留在最高分候选上
     email_counts = Counter(c.get("email", "") for c in candidates if c.get("email"))
@@ -714,7 +739,8 @@ def run(keywords, markets=None, max_results=6, urls=None, use_ai=False, settings
             c["score"] = max(0, c["score"] - 2)
             c["score_reason"] = (c.get("score_reason", "") + "；该电话为招标平台共享").strip("；")
 
-    candidates.sort(key=lambda c: c["score"], reverse=True)
+    tier_order = {"S": 0, "A": 1, "B": 2, "C": 3}
+    candidates.sort(key=lambda c: (tier_order.get(c.get("tier", ""), 9), -int(c.get("score", 0))))
     dropped_low = 0
     keep = []
     for c in candidates:

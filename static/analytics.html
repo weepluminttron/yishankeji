@@ -103,6 +103,12 @@
   <h2>触达效果</h2>
   <table id="touch"><thead><tr><th>分组</th><th>线索量</th><th>成交</th><th>成交率</th></tr></thead><tbody></tbody></table>
 
+  <h2>WorkBuddy 等级分布（S/A/B/C）</h2>
+  <table id="tier"><thead><tr><th>等级</th><th>线索量</th><th>成交</th><th>转化率</th></tr></thead><tbody></tbody></table>
+
+  <h2>⭐ S/A 级优先跟进</h2>
+  <table id="tierleads"><thead><tr><th>ID</th><th>公司</th><th>评分</th><th>等级</th><th>意向</th><th>建议动作</th><th>状态</th></tr></thead><tbody></tbody></table>
+
   <h2>🔥 高意向待跟进</h2>
   <table id="hot"><thead><tr><th>ID</th><th>公司</th><th>评分</th><th>意向</th><th>建议动作</th><th>状态</th></tr></thead><tbody></tbody></table>
 
@@ -143,6 +149,16 @@ fetch('/api/analytics').then(function(r){ return r.json(); }).then(function(d){
   rows(document.getElementById('hot'), d.hot_leads.map(function(h){
     return '<td>'+h.id+'</td><td>'+h.name+'</td><td>'+h.score+'</td><td class="hot">'+h.intent_stage+'</td><td>'+h.next_action+'</td><td>'+h.status+'</td>';
   }));
+
+  var tiers = d.by_tier || [];
+  rows(document.getElementById('tier'), tiers.length ? tiers.map(function(s){
+    return '<td>'+(s.tier === 'S' ? '<span class="hot">S 级</span>' : s.tier + ' 级')+'</td><td>'+s.total+'</td><td>'+s.won+'</td><td>'+s.rate+'%</td>';
+  }) : ['<td colspan="4" class="note">暂无 WorkBuddy 线索，可在“线索采集 → 批量导入”上传拓客清单</td>']);
+
+  var tleads = d.tier_leads || [];
+  rows(document.getElementById('tierleads'), tleads.length ? tleads.map(function(h){
+    return '<td>'+h.id+'</td><td>'+h.name+'</td><td>'+h.score+'</td><td class="hot">'+h.tier+' 级</td><td>'+h.intent_stage+'</td><td>'+h.next_action+'</td><td>'+h.status+'</td>';
+  }) : ['<td colspan="7" class="note">暂无 S/A 级待跟进线索</td>']);
 }).catch(function(e){ document.getElementById('msg').textContent = '请求异常：' + e; });
 </script>
 </body>

@@ -148,6 +148,60 @@ def hot_leads(limit=20):
         conn.close()
 
 
+def by_tier():
+    """WorkBuddy 拓客等级分布（S/A/B/C）：线索量、成交量、转化率。"""
+    conn = db.get_conn()
+    try:
+        out = []
+        for tier in ("S级", "A级", "B级", "C级"):
+            row = conn.execute(
+                "SELECT COUNT(*) c, SUM(CASE WHEN status='已成交' THEN 1 ELSE 0 END) w "
+                "FROM leads WHERE (',' || tags || ',') LIKE ?",
+                (f"%,{tier},%",),
+            ).fetchone()
+            c = row["c"] or 0
+            w = row["w"] or 0
+            out.append({
+                "tier": tier.replace("级", ""),
+                "total": c,
+                "won": w,
+                "rate": round(w / c * 100, 1) if c else 0.0,
+            })
+        return out
+    finally:
+        conn.close()
+
+
+def tier_leads(limit=20):
+    """S/A 级 WorkBuddy 待跟进线索（含意向阶段与建议动作）。"""
+    conn = db.get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM leads WHERE status NOT IN ('已成交','无效') "
+            "AND ((',' || tags || ',') LIKE '%,S级,%' OR (',' || tags || ',') LIKE '%,A级,%') "
+            "ORDER BY score DESC, updated_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        out = []
+        for r in rows:
+            lead = dict(r)
+            it = _intent.rule_intent(lead)
+            tags = "," + (lead.get("tags") or "") + ","
+            tier = next((t for t in ("S级", "A级", "B级", "C级") if "," + t + "," in tags), "")
+            out.append({
+                "id": lead["id"],
+                "name": lead["name"],
+                "score": lead["score"],
+                "tier": tier.replace("级", ""),
+                "intent_stage": lead.get("intent_stage") or it["stage"],
+                "next_action": it["next_action"],
+                "status": lead["status"],
+            })
+        return out
+    finally:
+        conn.close()
+
+
 def overview():
     """汇总：供 /api/analytics 一次性返回。"""
     return {
@@ -156,5 +210,7 @@ def overview():
         "by_intent": by_intent(),
         "touch_effect": touch_effect(),
         "hot_leads": hot_leads(),
+        "by_tier": by_tier(),
+        "tier_leads": tier_leads(),
         "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }

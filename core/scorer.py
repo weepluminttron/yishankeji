@@ -7,6 +7,111 @@ _EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+\.[\w.]+")
 _MOBILE_RE = re.compile(r"(?<!\d)1[3-9]\d{9}(?!\d)")
 _LANDLINE_RE = re.compile(r"(?<!\d)0\d{2,3}-?\d{7,8}(?!\d)")
 
+# ---- WorkBuddy 式双维度评分：匹配度 fit（0-50）+ 实力 comp（0-50）----
+TIER_RULES = [("S", 85), ("A", 75), ("B", 60), ("C", 0)]
+
+_FIT_STRONG = [
+    "玻璃管", "毛细管", "准直器", "z-block", "zblock", "滤光片", "隔离器", "环形器",
+    "透镜", "套管", "镀膜", "陶瓷插芯", "ferrule", "玻璃", "毛管", "光引擎", "cpo",
+]
+_FIT_MID = [
+    "dwdm", "cwdm", "fwdm", "oadm", "波分", "wdm", "光模块", "光器件", "无源",
+    "mux", "demux", "光缆", "跳线", "尾纤", "配线", "odf", "收发器", "硅光", "光芯片",
+]
+_FIT_WEAK = ["光通信", "通信", "光学", "光电", "光纤"]
+_SPEC_WORDS = [
+    "通道", "芯数", "波长", "nm", "尺寸", "公差", "型号", "规格", "产能",
+    "万件", "万个", "db", "1550", "1310", "850", "96芯", "48芯", "1.6t", "800g", "400g",
+    "定制", "图纸",
+]
+_CUSTOM_WORDS = ["定制", "认证", "样品", "送样", "测试", "准入", "图纸", "验厂", "方案"]
+_COMP_SCALE = [
+    "营收", "净利", "资本开支", "注册资本", "亿元", "万元", "亿", "规模", "头部",
+    "行业领先", "龙头", "上市", "市值", "预增", "增长", "业绩",
+]
+_COMP_LEVEL = [
+    "运营商", "云厂", "英伟达", "nvidia", "lumentum", "coherent", "旭创", "光迅",
+    "华为", "中兴", "tier-1", "tier1", "头部客户", "上市公司", "证券", "董秘",
+]
+_COMP_ACTIVE = [
+    "扩产", "新建", "基地", "招标", "中标", "环评", "定增", "投产", "在建",
+    "项目", "订单", "公告", "产能扩张", "海外基地", "泰国", "同步", "新产线",
+    "规划", "下半年",
+]
+_COMP_KEEP = ["长期", "框架", "复购", "持续", "年度", "批量", "多基地", "集采", "框架协议"]
+
+
+def tier_of(total):
+    """0-100 综合分 → S/A/B/C 等级。"""
+    for name, minimum in TIER_RULES:
+        if total >= minimum:
+            return name
+    return "C"
+
+
+def fit_comp_score(lead):
+    """WorkBuddy 式双维度评分：匹配度 + 实力，返回 {fit, comp, total, tier, reasons}。"""
+    note = str(lead.get("note") or "").lower()
+    tags = str(lead.get("tags") or "").lower()
+    name = str(lead.get("name") or "").lower()
+    text = note + " " + tags + " " + name
+
+    fit = 4
+    fit_reasons = []
+    strong = sum(text.count(w) for w in _FIT_STRONG)
+    if strong:
+        fit += min(28, strong * 4)
+        fit_reasons.append(f"品类直接命中×{strong}")
+    mid = sum(text.count(w) for w in _FIT_MID)
+    if mid:
+        fit += min(12, mid * 2)
+        fit_reasons.append(f"相关品类×{mid}")
+    weak = sum(text.count(w) for w in _FIT_WEAK)
+    if weak:
+        fit += min(8, weak * 2)
+        fit_reasons.append(f"行业相关×{weak}")
+    spec = sum(text.count(w) for w in _SPEC_WORDS)
+    if spec:
+        fit += min(15, spec * 4)
+        fit_reasons.append(f"规格/数量明确×{spec}")
+    custom = sum(text.count(w) for w in _CUSTOM_WORDS)
+    if custom:
+        fit += min(15, custom * 4)
+        fit_reasons.append(f"定制/认证/送样信号×{custom}")
+    fit = min(50, fit)
+
+    comp = 0
+    comp_reasons = []
+    scale = sum(text.count(w) for w in _COMP_SCALE)
+    if scale:
+        comp += min(15, scale * 5)
+        comp_reasons.append(f"体量/财务信号×{scale}")
+    level = sum(text.count(w) for w in _COMP_LEVEL)
+    if level:
+        comp += min(15, level * 4)
+        comp_reasons.append(f"客户层级信号×{level}")
+    active = sum(text.count(w) for w in _COMP_ACTIVE)
+    if active:
+        comp += min(15, active * 3)
+        comp_reasons.append(f"扩产/项目活跃×{active}")
+    keep = sum(text.count(w) for w in _COMP_KEEP)
+    if keep:
+        comp += min(10, keep * 4)
+        comp_reasons.append(f"采购可持续×{keep}")
+    comp = min(50, comp)
+
+    total = fit + comp
+    return {
+        "fit": fit,
+        "comp": comp,
+        "total": total,
+        "tier": tier_of(total),
+        "reasons": {
+            "fit": fit_reasons,
+            "comp": comp_reasons,
+        },
+    }
+
 
 def rule_score(lead):
     """规则评分（0-10 分），快速过滤低质量线索。"""

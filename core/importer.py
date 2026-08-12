@@ -215,6 +215,7 @@ def parse_workbuddy(path):
                 tier + "级",
                 str(x.get("type") or "").split("/")[0].strip(),
                 "新拓客" if x.get("isNew") else "",
+                "已核验" if (contact.get("verified") is True) else "",
             ) if t
         )
         out.append({
