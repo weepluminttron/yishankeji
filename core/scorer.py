@@ -3,6 +3,10 @@
 import json
 import re
 
+_EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+\.[\w.]+")
+_MOBILE_RE = re.compile(r"(?<!\d)1[3-9]\d{9}(?!\d)")
+_LANDLINE_RE = re.compile(r"(?<!\d)0\d{2,3}-?\d{7,8}(?!\d)")
+
 
 def rule_score(lead):
     """规则评分（0-10 分），快速过滤低质量线索。"""
@@ -18,10 +22,10 @@ def rule_score(lead):
     if name and len(name) >= 4:
         score += 2
         reasons.append("有公司/主体名称")
-    if re.search(r"[\w.+-]+@[\w-]+\.[\w.]+", email):
+    if _EMAIL_RE.search(email):
         score += 3
         reasons.append("有邮箱")
-    if re.search(r"(?<!\d)1[3-9]\d{9}(?!\d)", phone) or re.search(r"(?<!\d)0\d{2,3}-?\d{7,8}(?!\d)", phone):
+    if _MOBILE_RE.search(phone) or _LANDLINE_RE.search(phone):
         score += 2
         reasons.append("有电话")
     if website and not any(

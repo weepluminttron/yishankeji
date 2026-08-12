@@ -7,6 +7,7 @@
 - 全部走 core.ai（带缓存+重试）；失败返回 (None, err)，不抛异常、不阻塞主流程。
 """
 import re
+import urllib.parse
 
 from core import ai, crawler
 
@@ -16,7 +17,7 @@ def _fetch_context(company, region=""):
     query = (company + " " + (region or "")).strip() + " 公司 官网 简介"
     try:
         html_text, _ = crawler.fetch_page(
-            "https://www.bing.com/search?q=" + __import__("urllib.parse").quote(query),
+            "https://www.bing.com/search?q=" + urllib.parse.quote(query),
             timeout=12,
         )
         text = re.sub(r"<script.*?</script>|<style.*?</style>", " ", html_text, flags=re.S | re.I)

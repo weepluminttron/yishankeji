@@ -9,6 +9,7 @@
 外部签名保持兼容：generate_copy 仍返回 (text, err)。
 """
 import json
+import re
 import time
 import urllib.error
 import urllib.request
@@ -95,7 +96,6 @@ def generate_json(api_key, model, system, user, api_base=None, use_cache=True, t
 
 def _extract_json(text):
     """从可能包含解释性文字的回复中提取 JSON（对象或数组）。"""
-    import re
     if not text:
         return None, "AI 返回为空"
     # 优先尝试整段解析

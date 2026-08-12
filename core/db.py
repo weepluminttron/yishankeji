@@ -370,20 +370,23 @@ def bulk_status(ids, status):
     conn = get_conn()
     try:
         ts = now()
+        changed = []
         for lid in ids:
-            lead = get_lead(lid)
-            if not lead or lead["status"] == status:
+            row = conn.execute("SELECT id, status FROM leads WHERE id = ?", (lid,)).fetchone()
+            if not row or row["status"] == status:
                 continue
-            conn.execute("UPDATE leads SET status = ?, updated_at = ? WHERE id = ?", (status, ts, lid))
-        conn.commit()
-        for lid in ids:
-            lead = get_lead(lid)
-            if not lead:
-                continue
-            add_event(lid, "状态变更", f"{lead['status']} → {status}")
-        return {"ok": True}
+            changed.append((lid, row["status"]))
+        if changed:
+            conn.executemany(
+                "UPDATE leads SET status = ?, updated_at = ? WHERE id = ?",
+                [(status, ts, lid) for lid, _ in changed],
+            )
+            conn.commit()
     finally:
         conn.close()
+    for lid, old_status in changed:
+        add_event(lid, "状态变更", f"{old_status} → {status}")
+    return {"ok": True}
 
 
 def mark_contacted(lead_id, contact_type="", note=""):
@@ -481,11 +484,9 @@ def summary():
     conn = get_conn()
     try:
         total = conn.execute("SELECT COUNT(*) FROM leads").fetchone()[0]
-        status_counts = {}
-        for s in STATUSES:
-            status_counts[s] = conn.execute(
-                "SELECT COUNT(*) FROM leads WHERE status = ?", (s,)
-            ).fetchone()[0]
+        status_counts = {s: 0 for s in STATUSES}
+        for s, c in conn.execute("SELECT status, COUNT(*) c FROM leads GROUP BY status"):
+            status_counts[s] = c
         week_ago = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
         new_week = conn.execute(
             "SELECT COUNT(*) FROM leads WHERE created_at >= ?", (week_ago,)
@@ -503,14 +504,12 @@ def summary():
             "SELECT source, COUNT(*) c FROM leads GROUP BY source ORDER BY c DESC"
         ).fetchall()
         score_dist = {"高（7-10分）": 0, "中（4-6分）": 0, "低（0-3分）": 0}
-        for r in conn.execute("SELECT score FROM leads"):
-            s = r["score"] or 0
-            if s >= 7:
-                score_dist["高（7-10分）"] += 1
-            elif s >= 4:
-                score_dist["中（4-6分）"] += 1
-            else:
-                score_dist["低（0-3分）"] += 1
+        bucket_map = {3: "高（7-10分）", 2: "中（4-6分）", 1: "低（0-3分）"}
+        for bucket, c in conn.execute(
+            "SELECT CASE WHEN score >= 7 THEN 3 WHEN score >= 4 THEN 2 ELSE 1 END AS b, "
+            "COUNT(*) c FROM leads GROUP BY b"
+        ):
+            score_dist[bucket_map[bucket]] = c
         no_contact = conn.execute(
             "SELECT COUNT(*) FROM leads WHERE (phone = '' OR phone IS NULL) AND (email = '' OR email IS NULL)"
         ).fetchone()[0]

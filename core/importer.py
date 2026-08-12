@@ -278,7 +278,7 @@ def _row_to_lead(row, header_index):
         key = HEADER_MAP.get(str(cell).strip())
         if not key:
             continue
-        val = row[idx].value if hasattr(row[idx], "value") else row[idx]
+        val = row[idx] if idx < len(row) else None
         if val is None:
             val = ""
         lead[key] = str(val).strip()

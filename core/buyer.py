@@ -13,6 +13,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections import Counter
 
 from lxml import html as lh
 
@@ -701,7 +702,6 @@ def run(keywords, markets=None, max_results=6, urls=None, use_ai=False, settings
             c["score_reason"] = (c.get("score_reason", "") or "").rstrip("；") + f"；AI建议：{na}"
 
     # 招标平台共享邮箱/电话去重：同一联系方式只保留在最高分候选上
-    from collections import Counter
     email_counts = Counter(c.get("email", "") for c in candidates if c.get("email"))
     phone_counts = Counter(c.get("phone", "") for c in candidates if c.get("phone"))
     for c in candidates:

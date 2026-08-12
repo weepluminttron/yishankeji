@@ -37,12 +37,13 @@ def cache_set(key, result):
             "ON CONFLICT(key) DO UPDATE SET result = excluded.result, ts = excluded.ts",
             (key, result, int(time.time())),
         )
-        # 防止无限膨胀：保留最近 500 条
-        conn.execute(
-            "DELETE FROM ai_cache WHERE key NOT IN "
-            "(SELECT key FROM ai_cache ORDER BY ts DESC LIMIT ?)",
-            (MAX_ENTRIES,),
-        )
+        # 防止无限膨胀：仅在超出容量时，保留最近 MAX_ENTRIES 条
+        if conn.execute("SELECT COUNT(*) FROM ai_cache").fetchone()[0] > MAX_ENTRIES:
+            conn.execute(
+                "DELETE FROM ai_cache WHERE key NOT IN "
+                "(SELECT key FROM ai_cache ORDER BY ts DESC LIMIT ?)",
+                (MAX_ENTRIES,),
+            )
         conn.commit()
     finally:
         conn.close()

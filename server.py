@@ -257,7 +257,6 @@ def _auto_crawl_loop():
                     due = True
                 else:
                     try:
-                        from datetime import datetime
                         lt = datetime.strptime(last, "%Y-%m-%d %H:%M:%S")
                         due = (datetime.now() - lt).total_seconds() >= interval * 3600
                     except Exception:
@@ -698,6 +697,9 @@ def parse_multipart(handler, field_name):
         return {}, "", None
     boundary = m.group(1).strip('"')
     length = int(handler.headers.get("Content-Length") or 0)
+    # 防御：限制上传体积，避免恶意 Content-Length 耗尽内存/磁盘
+    if length <= 0 or length > 100 * 1024 * 1024:
+        return {}, "", None
     raw = handler.rfile.read(length)
     sep = b"--" + boundary.encode()
     parts = raw.split(sep)
@@ -1598,7 +1600,6 @@ class Handler(BaseHTTPRequestHandler):
             if "重复" in err:
                 return send_json(self, {"ok": True})
             return send_json(self, {"ok": False, "msg": err}, 400)
-        s = db.get_settings()
         if s.get("notify_webhook"):
             threading.Thread(
                 target=notify.send_webhook,
