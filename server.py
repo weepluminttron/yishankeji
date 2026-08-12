@@ -1327,6 +1327,13 @@ class Handler(BaseHTTPRequestHandler):
                     _touch_job.update(running=False)
             threading.Thread(target=_run, daemon=True).start()
             return send_json(self, {"ok": True, "msg": "已启动自动触达巡检"})
+        if api == "automation" and len(parts) > 2 and parts[2] == "intent":
+            try:
+                done = automation_mod.ensure_intent(limit=500)
+                return send_json(self, {"ok": True, "done": done, "msg": f"已为 {done} 条线索完成意向分级"})
+            except Exception as e:
+                log_helper.log_error("手动意向分级失败：" + traceback.format_exc())
+                return send_json(self, {"ok": False, "msg": f"意向分级失败：{e}"}, 400)
         if api == "leads" and len(parts) > 2 and parts[2] == "intent":
             data = read_json_body(self)
             lead_id = safe_int(data.get("id"))

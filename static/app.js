@@ -322,6 +322,14 @@ async function renderDashboard() {
         <div class="action-btn" onclick="setOutreachTab('sequence');go('outreach')"><span class="ico">⏰</span>跟进序列</div>
       </div>
     </div>
+    <div class="action-group">
+      <div class="action-group-title">🚀 AI 获客增强</div>
+      <div class="action-grid">
+        <div class="action-btn" onclick="location.href='/analytics.html'"><span class="ico">📈</span>获客分析</div>
+        <div class="action-btn" id="home-intent-btn"><span class="ico">🧭</span>意向分级</div>
+        <div class="action-btn" id="home-touch-btn"><span class="ico">🤖</span>自动首触</div>
+      </div>
+    </div>
     ${onboarding}
     <div class="stat-grid">
       <div class="stat-card"><div class="label">全部线索</div><div class="num accent">${s.total}</div></div>
@@ -349,6 +357,27 @@ async function renderDashboard() {
     state.buyerContext = desc;
     state.pendingStrategy = desc;
     go("buyer");
+  };
+  $("#home-intent-btn").onclick = async () => {
+    const btn = $("#home-intent-btn");
+    btn.disabled = true; btn.style.opacity = ".6";
+    try {
+      const r = await api("/api/automation/intent", { method: "POST", body: {} });
+      toast(r.msg || "意向分级完成", "ok");
+    } catch (e) { toast(e.message, "err"); }
+    finally { btn.disabled = false; btn.style.opacity = ""; }
+  };
+  $("#home-touch-btn").onclick = async () => {
+    try {
+      const st = await api("/api/automation");
+      if (st.enabled !== true) {
+        toast("自动首触未开启，请先到“设置 → 自动首触”开启", "err");
+        go("settings");
+        return;
+      }
+      const r = await api("/api/automation/run", { method: "POST", body: {} });
+      toast(r.msg || "自动首触巡检已启动", "ok");
+    } catch (e) { toast(e.message, "err"); }
   };
 }
 
@@ -2220,6 +2249,32 @@ async function renderSettings() {
       <div class="hint">支持 OpenAI / DeepSeek / FastGPT 等兼容接口。开启“自动 AI 评分”后，新线索（落地页留资、导入、买家发现、定时采集）会后台自动评分，无需手动操作。</div>
     </div>
     <div class="card">
+      <h3>🤖 意向分级与自动首触（v2 获客增强）</h3>
+      <div class="form-grid">
+        <div class="field"><label>新线索自动意向分级</label>
+          <select class="select full" id="s-auto-intent">
+            <option value="1" ${(s.auto_intent_enabled || "1") === "1" ? "selected" : ""}>开启（推荐，规则判断不花钱）</option>
+            <option value="0" ${s.auto_intent_enabled === "0" ? "selected" : ""}>关闭</option>
+          </select>
+        </div>
+        <div class="field"><label>自动首触（新线索自动发首触邮件/短信）</label>
+          <select class="select full" id="s-auto-touch">
+            <option value="0" ${(s.auto_touch_enabled || "0") !== "1" ? "selected" : ""}>关闭（推荐先手动跟进）</option>
+            <option value="1" ${s.auto_touch_enabled === "1" ? "selected" : ""}>开启</option>
+          </select>
+        </div>
+        <div class="field"><label>首触最低评分（0-10）</label><input class="input full" type="number" min="0" max="10" id="s-auto-touch-score" value="${esc(s.auto_touch_score || "7")}"></div>
+        <div class="field"><label>入库后延迟天数</label><input class="input full" type="number" min="0" max="30" id="s-auto-touch-delay" value="${esc(s.auto_touch_delay || "1")}"></div>
+        <div class="field"><label>首触渠道</label>
+          <select class="select full" id="s-auto-touch-channel">
+            <option value="email" ${(s.auto_touch_channel || "email") === "email" ? "selected" : ""}>邮件（需配置 SMTP）</option>
+            <option value="sms" ${s.auto_touch_channel === "sms" ? "selected" : ""}>短信（需配置短信服务商）</option>
+          </select>
+        </div>
+      </div>
+      <div class="hint">自动首触开启后，评分达标、尚未触达的新线索会自动生成个性化邮件/短信并排程发送（走“跟进序列”同一发送机制）。正式开启前请确认 SMTP 已配置、阈值合理，避免打扰客户。</div>
+    </div>
+    <div class="card">
       <h3>🔎 搜索接口（买家发现用）</h3>
       <div class="form-grid">
         <div class="field"><label>搜索源</label>
@@ -2323,6 +2378,11 @@ async function renderSettings() {
         qcc_app_key: $("#s-qcc-app").value.trim(),
         qcc_secret_key: $("#s-qcc-secret").value.trim(),
         tyc_token: $("#s-tyc-token").value.trim(),
+        auto_intent_enabled: $("#s-auto-intent").value,
+        auto_touch_enabled: $("#s-auto-touch").value,
+        auto_touch_score: $("#s-auto-touch-score").value.trim() || "7",
+        auto_touch_delay: $("#s-auto-touch-delay").value.trim() || "1",
+        auto_touch_channel: $("#s-auto-touch-channel").value,
       } } });
       toast("设置已保存", "ok");
     } catch (e) { toast(e.message, "err"); }
