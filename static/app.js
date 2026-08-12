@@ -145,6 +145,7 @@ function showLogin(msg) {
       await api("/api/login", { method: "POST", body: { password: pw } });
       $("#login-root").innerHTML = "";
       $("#nav-logout").style.display = "block";
+      pollTasks();
       go("dashboard");
     } catch (e) {
       showLogin("密码不正确，请重试");
@@ -1343,6 +1344,29 @@ async function renderBuyer() {
       <div id="strategy-plans" style="margin-top:14px"></div>
     </div>
     <div class="card">
+      <h3>🧠 AI 获客引擎（条件驱动，自动迭代）</h3>
+      <div class="form-grid">
+        <div class="field" style="grid-column:1/-1"><label>主营产品（给 AI 判断用）</label><input class="input full" id="acq-products" placeholder="石英玻璃毛细管 / 光无源器件（准直器、滤光片、隔离器、透镜、套管）"></div>
+        <div class="field"><label>必中规格/品类（逗号分隔）*</label><input class="input full" id="acq-specs" placeholder="DWDM,WDM,玻璃管"></div>
+        <div class="field"><label>目标市场（逗号分隔）</label><input class="input full" id="acq-regions" placeholder="中国大陆,亚太,欧美,中东非洲拉美"></div>
+        <div class="field"><label>目标买方类型（逗号分隔）</label><input class="input full" id="acq-types" placeholder="光无源器件厂,光模块厂,系统集成商,近期招标扩容"></div>
+        <div class="field"><label>最低等级</label><select class="select full" id="acq-tier">
+          <option value="B">B 级及以上</option>
+          <option value="A">A 级及以上</option>
+          <option value="S">仅 S 级</option>
+          <option value="C">全部</option>
+        </select></div>
+        <div class="field"><label>目标客户数</label><input class="input full" type="number" min="1" max="100" id="acq-max" value="30"></div>
+        <div class="field" style="grid-column:1/-1"><label>排除词（逗号分隔）</label><input class="input full" id="acq-exclude" placeholder="自家企业,同行平台"></div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <button class="btn primary" id="acq-run">🚀 运行获客引擎</button>
+        <button class="btn" id="acq-import" disabled>📥 导入客户库</button>
+        <span class="hint">引擎按你的条件自动生成多渠道检索方案、发现并筛选买家、迭代补齐缺口；完成后可一键导入客户库（保留评分与等级）。</span>
+      </div>
+      <div id="acq-result" style="margin-top:12px"></div>
+    </div>
+    <div class="card">
       <h3>🔍 手动搜索（高级）</h3>
       <div class="hint" style="margin-bottom:10px">💡 技巧：关键词 = 产品词 + 买方动作（采购/招标/询价/项目），例如 “WDM 采购”、“波分复用设备 项目方”，比只写产品名精准得多。</div>
       <div class="form-grid">
@@ -1430,6 +1454,46 @@ async function renderBuyer() {
     state.pendingStrategy = "";
     $("#strategy-gen").click();
   }
+
+  // AI 获客引擎
+  $("#acq-run").onclick = async () => {
+    const specs = $("#acq-specs").value.trim();
+    if (!specs) return toast("请至少填写必中规格/品类", "err");
+    const conditions = {
+      industry: "光纤通信 / 光器件",
+      products: $("#acq-products").value.trim(),
+      specs,
+      regions: $("#acq-regions").value.trim(),
+      buyer_types: $("#acq-types").value.trim(),
+      min_tier: $("#acq-tier").value,
+      max_results: $("#acq-max").value || 30,
+      exclude: $("#acq-exclude").value.trim(),
+    };
+    try {
+      await api("/api/acquisition/run", { method: "POST", body: { conditions } });
+      $("#acq-result").innerHTML = `<div class="empty"><div class="ico">🧠</div>获客引擎已启动，正在发现并筛选买家…（进度看右上角任务栏）</div>`;
+      $("#acq-import").disabled = true;
+      pollAcquisition();
+    } catch (e) { toast(e.message, "err"); }
+  };
+  $("#acq-import").onclick = async () => {
+    try {
+      const r = await api("/api/acquisition/import", { method: "POST", body: {} });
+      toast(`已导入 ${r.added} 家，跳过重复 ${r.duplicates} 家`, "ok");
+      const box = $("#acq-result");
+      box.innerHTML += `<div class="hint" style="margin-top:8px">✅ 已导入 ${r.added} 家客户（跳过重复 ${r.duplicates} 家），去“客户线索”查看</div>`;
+    } catch (e) { toast(e.message, "err"); }
+  };
+  // 恢复获客引擎任务状态（切走再回来不丢）
+  api("/api/acquisition").then((d) => {
+    const job = d.job || {};
+    if (job.running) {
+      $("#acq-result").innerHTML = `<div class="empty"><div class="ico">🧠</div>${esc(job.stage || "正在运行")}…（进度看右上角任务栏）</div>`;
+      pollAcquisition();
+    } else if (job.result) {
+      renderAcqResult(job.result);
+    }
+  }).catch(() => {});
 
   // 恢复 AI 方案任务状态（切走再回来不丢）
   api("/api/buyer/strategy").then((d) => {
@@ -1541,6 +1605,44 @@ async function pollBuyerJob() {
     }
     renderBuyerResult(job.result || { candidates: [] });
   } catch (e) { /* 忽略 */ }
+}
+
+let acqPolling = false;
+async function pollAcquisition() {
+  if (acqPolling) return;
+  acqPolling = true;
+  try {
+    const d = await api("/api/acquisition");
+    const job = d.job || {};
+    if (job.running) {
+      $("#acq-result").innerHTML = `<div class="empty"><div class="ico">🧠</div>${esc(job.stage || "正在运行")}…（进度看右上角任务栏）</div>`;
+      setTimeout(pollAcquisition, 2000);
+      return;
+    }
+    acqPolling = false;
+    if (job.result) renderAcqResult(job.result);
+    else $("#acq-result").innerHTML = `<div class="empty"><div class="ico">⚠️</div>${esc(job.message || "运行失败，请重试")}</div>`;
+  } catch (e) { acqPolling = false; }
+}
+
+function renderAcqResult(res) {
+  const targets = res.targets || [];
+  const stats = res.stats || {};
+  const box = $("#acq-result");
+  if (!box) return;
+  const importBtn = $("#acq-import");
+  if (importBtn) importBtn.disabled = !targets.length;
+  const tiers = Object.entries(stats.by_tier || {}).map(([k, v]) => `${k}级 ${v}`).join(" / ") || "—";
+  box.innerHTML = `
+    <h3 style="margin:6px 0 8px">发现 ${targets.length} 家目标客户</h3>
+    <div class="hint" style="margin-bottom:8px">等级分布：${esc(tiers)} ｜ 已核验 ${stats.verified || 0} 家${res.final_gaps && res.final_gaps.length ? ` ｜ 剩余缺口：${esc(res.final_gaps.map((g) => g.join(":")).join("；"))}` : ""}</div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>等级</th><th>公司</th><th>区域</th><th>买方类型</th><th>命中规格</th><th>建议动作</th></tr></thead>
+      <tbody>${targets.slice(0, 30).map((t) => `
+        <tr><td>${esc(t.priority)}级</td><td><b>${esc(t.company)}</b>${t.email ? `<div class="sub">${esc(t.email)}</div>` : ""}</td>
+        <td>${esc(t.region)}</td><td>${esc(t.buyer_type)}</td><td class="sub">${esc((t.matched_conditions || []).join("、"))}</td>
+        <td class="sub">${esc(t.next_action || "")}</td></tr>`).join("")}</tbody>
+    </table></div>`;
 }
 
 async function pollMapJob() {

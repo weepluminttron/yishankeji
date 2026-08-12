@@ -25,7 +25,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from core import ai, buyer, company_api, company_intel, crawler, db, followup, importer, llm_cache, mailer, mapsearch, notify, scorer
-from core import intent as intent_mod, analytics as analytics_mod, automation as automation_mod, log_helper
+from core import intent as intent_mod, analytics as analytics_mod, automation as automation_mod, log_helper, acquisition
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
@@ -46,6 +46,7 @@ _buyer_job = {"running": False, "message": "", "started": "", "result": None}
 _mail_job = {"running": False, "message": "", "started": "", "result": None}
 _map_job = {"running": False, "message": "", "started": "", "result": None}
 _touch_job = {"running": False, "message": "", "enrolled": 0, "skipped": 0, "last_run": ""}
+_acq_job = {"running": False, "message": "", "stage": "", "started": "", "result": None}
 _login_attempts = {}
 _tasks = {}
 
@@ -351,6 +352,58 @@ def start_buyer_job(data):
     )
     threading.Thread(target=_buyer_worker, args=(data,), daemon=True).start()
     return True, "搜索任务已启动"
+
+
+def _acquisition_worker(conditions):
+    """后台线程：条件驱动的 AI 获客引擎（发现→筛选→迭代补缺口）。"""
+    task_start("acq", "AI 获客引擎")
+    _acq_job.update(running=True, result=None, message="", stage="准备中",
+                    started=time.strftime("%Y-%m-%d %H:%M:%S"))
+
+    def cb(p):
+        stage = p.get("stage", "")
+        _acq_job["stage"] = stage
+        task_progress("acq", stage=stage, message=stage)
+
+    try:
+        settings = db.get_settings()
+        result = acquisition.run_engine(conditions, settings=settings, max_rounds=3, progress=cb)
+        _acq_job.update(running=False, result=result, message="")
+        task_finish("acq", "成功", f"发现 {result['stats']['total']} 家目标客户")
+    except Exception as e:
+        _acq_job.update(running=False, result=None, message=str(e))
+        task_finish("acq", "失败", str(e))
+
+
+def _acq_target_to_lead(t):
+    """把获客引擎目标客户转为线索字段（保留评分与等级）。"""
+    type_map = {"近期招标扩容": "终端客户", "光模块厂": "代工厂", "光无源器件厂": "代工厂", "系统集成商": "集成商"}
+    tags = [x for x in ["AI获客", str(t.get("priority") or "") + "级"] + (t.get("matched_conditions") or []) if x]
+    note = "\n".join(x for x in [
+        f"【买方类型】{t.get('buyer_type', '')}",
+        f"【命中规格】{'、'.join(t.get('matched_conditions') or [])}",
+        f"【渠道】{t.get('channel_source', '')}",
+        f"【下一步】{t.get('next_action', '')}",
+        f"【官网】{t.get('website', '')}",
+        t.get("note") or "",
+    ] if x)[:2000]
+    return {
+        "name": t.get("company") or "未命名",
+        "contact": t.get("contact_name") or "",
+        "phone": t.get("phone") or "",
+        "email": t.get("email") or "",
+        "region": t.get("region") or "",
+        "type": type_map.get(t.get("buyer_type"), "其他"),
+        "source": "AI获客引擎",
+        "tags": ",".join(tags),
+        "note": note,
+        "score": max(0, min(10, round(int(t.get("total") or 0) / 10))),
+        "score_reason": (
+            f"AI获客引擎：匹配{t.get('fit', 0)}+实力{t.get('comp', 0)}={t.get('total', 0)}"
+            f"（{t.get('priority', '')}级）"
+        ),
+        "ai_scored": 1,
+    }
 
 
 def _mail_worker(lead_ids, subject_tpl, body_tpl):
@@ -1020,6 +1073,12 @@ class Handler(BaseHTTPRequestHandler):
                 },
                 "job": dict(_touch_job),
             })
+        if api == "acquisition":
+            return send_json(self, {
+                "ok": True,
+                "job": dict(_acq_job),
+                "task": task_snapshot("acq"),
+            })
         return send_json(self, {"ok": False, "msg": "接口不存在"}, 404)
 
     def _route_post(self):
@@ -1336,6 +1395,32 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 log_helper.log_error("手动意向分级失败：" + traceback.format_exc())
                 return send_json(self, {"ok": False, "msg": f"意向分级失败：{e}"}, 400)
+        if api == "acquisition" and len(parts) > 2 and parts[2] == "run":
+            data = read_json_body(self)
+            try:
+                conditions = acquisition.normalize_conditions(data.get("conditions") or {})
+            except ValueError as e:
+                return send_json(self, {"ok": False, "msg": str(e)}, 400)
+            if _acq_job.get("running"):
+                return send_json(self, {"ok": False, "msg": "获客引擎正在运行，请等待完成"}, 400)
+            _acq_job.update(running=True, result=None, message="", stage="准备中",
+                            started=time.strftime("%Y-%m-%d %H:%M:%S"))
+            threading.Thread(target=_acquisition_worker, args=(conditions,), daemon=True).start()
+            return send_json(self, {"ok": True, "msg": "获客引擎已启动（进度看右上角任务栏）", "job": dict(_acq_job)})
+        if api == "acquisition" and len(parts) > 2 and parts[2] == "import":
+            data = read_json_body(self)
+            targets = data.get("targets") or (_acq_job.get("result") or {}).get("targets") or []
+            if not targets:
+                return send_json(self, {"ok": False, "msg": "还没有可导入的目标清单，请先运行获客引擎"}, 400)
+            leads = [_acq_target_to_lead(t) for t in targets]
+            result = db.bulk_add(leads, source="AI获客引擎")
+            return send_json(self, {
+                "ok": True,
+                "total": len(leads),
+                "added": len(result.get("added", [])),
+                "duplicates": len(result.get("duplicates", [])),
+                "errors": result.get("errors", []),
+            })
         if api == "leads" and len(parts) > 2 and parts[2] == "intent":
             data = read_json_body(self)
             lead_id = safe_int(data.get("id"))
