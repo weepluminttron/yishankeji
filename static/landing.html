@@ -9,53 +9,84 @@
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
       font-family: "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
-      background: linear-gradient(160deg, #f4f9ff 0%, #e8f4ff 100%);
+      background:
+        radial-gradient(700px 380px at 100% 0%, rgba(0, 180, 216, 0.12), transparent 60%),
+        radial-gradient(600px 360px at 0% 100%, rgba(14, 125, 214, 0.12), transparent 55%),
+        linear-gradient(160deg, #f5f9ff 0%, #e9f4ff 100%);
+      background-attachment: fixed;
       min-height: 100vh;
       color: #1f2d3d;
+      -webkit-font-smoothing: antialiased;
     }
-    .wrap { max-width: 560px; margin: 0 auto; padding: 40px 18px 60px; }
+    .wrap { max-width: 560px; margin: 0 auto; padding: 44px 18px 64px; }
     .hero {
+      position: relative;
       background: linear-gradient(135deg, #0e7dd6, #00b4d8);
-      border-radius: 18px;
-      padding: 34px 26px;
+      border-radius: 22px;
+      padding: 38px 28px;
       color: #fff;
       text-align: center;
-      box-shadow: 0 14px 40px rgba(14, 125, 214, 0.3);
-      margin-bottom: 20px;
+      box-shadow: 0 18px 48px rgba(14, 125, 214, 0.32);
+      margin-bottom: 22px;
+      overflow: hidden;
     }
-    .hero .logo { font-size: 40px; margin-bottom: 10px; }
-    .hero h1 { font-size: 24px; line-height: 1.4; margin-bottom: 8px; }
-    .hero p { font-size: 14px; opacity: 0.92; line-height: 1.7; }
+    .hero::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(420px 200px at 85% -20%, rgba(255, 255, 255, 0.22), transparent 60%);
+      pointer-events: none;
+    }
+    .hero .logo {
+      font-size: 40px;
+      width: 76px; height: 76px;
+      margin: 0 auto 14px;
+      display: flex; align-items: center; justify-content: center;
+      border-radius: 22px;
+      background: rgba(255, 255, 255, 0.18);
+      backdrop-filter: blur(4px);
+    }
+    .hero h1 { font-size: 26px; line-height: 1.4; margin-bottom: 10px; font-weight: 800; letter-spacing: 0.3px; }
+    .hero p { font-size: 14px; opacity: 0.94; line-height: 1.8; }
     .card {
       background: #fff;
-      border-radius: 16px;
-      box-shadow: 0 8px 30px rgba(20, 40, 80, 0.08);
-      padding: 26px;
-      margin-bottom: 16px;
+      border-radius: 18px;
+      box-shadow: 0 10px 36px rgba(20, 40, 80, 0.1);
+      padding: 28px;
+      margin-bottom: 18px;
+      border: 1px solid #eef3f9;
     }
-    .feat { display: flex; gap: 12px; align-items: flex-start; margin-bottom: 12px; }
-    .feat .ico { font-size: 20px; flex-shrink: 0; }
+    .feat { display: flex; gap: 13px; align-items: flex-start; margin-bottom: 14px; }
+    .feat .ico {
+      font-size: 18px;
+      width: 38px; height: 38px;
+      flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+      border-radius: 11px;
+      background: linear-gradient(135deg, #eaf3fd, #e4f7fb);
+    }
     .feat b { font-size: 14px; }
-    .feat p { color: #5b6b81; font-size: 13px; line-height: 1.6; margin-top: 2px; }
-    .field { margin-bottom: 14px; }
-    .field label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 5px; }
+    .feat p { color: #5b6b81; font-size: 13px; line-height: 1.65; margin-top: 3px; }
+    .field { margin-bottom: 15px; }
+    .field label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px; color: #34465c; }
     .field input, .field textarea {
       width: 100%;
       border: 1px solid #dbe3ee;
-      border-radius: 10px;
-      padding: 11px 13px;
+      border-radius: 11px;
+      padding: 12px 14px;
       font-size: 14px;
       font-family: inherit;
       outline: none;
-      transition: border 0.15s, box-shadow 0.15s;
+      transition: border 0.16s, box-shadow 0.16s, background 0.16s;
       background: #fbfdff;
     }
+    .field input:hover, .field textarea:hover { border-color: #cdd8e6; }
     .field input:focus, .field textarea:focus {
       border-color: #0e7dd6;
-      box-shadow: 0 0 0 3px rgba(14, 125, 214, 0.12);
+      box-shadow: 0 0 0 4px rgba(14, 125, 214, 0.12);
       background: #fff;
     }
-    .field textarea { min-height: 80px; resize: vertical; }
+    .field textarea { min-height: 84px; resize: vertical; line-height: 1.6; }
     .btn {
       display: block;
       width: 100%;
@@ -64,22 +95,26 @@
       color: #fff;
       font-size: 16px;
       font-weight: 700;
-      border-radius: 10px;
-      padding: 13px;
+      border-radius: 12px;
+      padding: 14px;
       cursor: pointer;
-      box-shadow: 0 8px 20px rgba(14, 125, 214, 0.3);
+      box-shadow: 0 10px 24px rgba(14, 125, 214, 0.32);
+      transition: transform 0.16s, filter 0.16s, box-shadow 0.16s;
     }
-    .btn:hover { filter: brightness(1.06); }
-    .btn:disabled { opacity: 0.6; cursor: not-allowed; }
-    .tip { text-align: center; color: #7a8699; font-size: 12px; margin-top: 12px; line-height: 1.7; }
-    .err { color: #e05c5c; font-size: 13px; margin-bottom: 10px; display: none; }
+    .btn:hover { filter: brightness(1.07); transform: translateY(-1px); box-shadow: 0 14px 30px rgba(14, 125, 214, 0.4); }
+    .btn:active { transform: translateY(0); }
+    .btn:disabled { opacity: 0.6; cursor: not-allowed; transform: none; box-shadow: none; }
+    .tip { text-align: center; color: #7a8699; font-size: 12px; margin-top: 14px; line-height: 1.7; }
+    .err { color: #e05c5c; font-size: 13px; margin-bottom: 12px; display: none; background: #fdf1f0; border-radius: 10px; padding: 10px 12px; }
     .hp { position: absolute; left: -9999px; }
     .ok {
       text-align: center;
-      padding: 44px 20px;
+      padding: 48px 22px;
+      animation: okpop 0.3s cubic-bezier(0.2, 0.8, 0.3, 1);
     }
-    .ok .big { font-size: 44px; margin-bottom: 12px; }
-    .ok h2 { font-size: 20px; margin-bottom: 8px; }
+    @keyframes okpop { from { transform: scale(0.96); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+    .ok .big { font-size: 48px; margin-bottom: 14px; }
+    .ok h2 { font-size: 21px; margin-bottom: 10px; }
     .ok p { color: #5b6b81; font-size: 14px; line-height: 1.8; }
     .phone {
       display: block;
@@ -88,9 +123,12 @@
       font-size: 18px;
       font-weight: 700;
       text-decoration: none;
-      margin-top: 6px;
+      margin-top: 8px;
+      padding: 10px;
+      border-radius: 12px;
+      background: #eef6ff;
     }
-    footer { text-align: center; color: #9aa8bb; font-size: 12px; margin-top: 24px; }
+    footer { text-align: center; color: #9aa8bb; font-size: 12px; margin-top: 26px; }
   </style>
 </head>
 <body>
