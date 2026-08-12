@@ -732,6 +732,7 @@ def lead_filters(qs):
         "region": qs.get("region", [""])[0],
         "tag": qs.get("tag", [""])[0],
         "source": qs.get("source", [""])[0],
+        "sort": qs.get("sort", [""])[0],
     }
 
 

@@ -182,7 +182,7 @@ const state = {
   meta: { statuses: [], types: [], tags: [] },
   leads: {
     page: 1, size: 15, total: 0,
-    filters: { q: "", status: "", type: "", region: "", tag: "", source: "" },
+    filters: { q: "", status: "", type: "", region: "", tag: "", source: "", sort: "score_desc" },
     selected: new Set(),
   },
   collectTab: "import",
@@ -410,6 +410,13 @@ async function renderLeads() {
     <div style="display:flex;gap:8px;margin-bottom:10px">
       <button class="btn sm primary" id="view-list">☰ 列表视图</button>
       <button class="btn sm" id="view-kanban">🗂 看板视图</button>
+      <span style="flex:1"></span>
+      <select class="select" id="lead-sort" title="排序方式">
+        <option value="score_desc" ${(f.sort || "score_desc") === "score_desc" ? "selected" : ""}>按评分从高到低</option>
+        <option value="score_asc" ${f.sort === "score_asc" ? "selected" : ""}>按评分从低到高</option>
+        <option value="updated_desc" ${f.sort === "updated_desc" ? "selected" : ""}>按最近更新</option>
+        <option value="created_desc" ${f.sort === "created_desc" ? "selected" : ""}>按最新添加</option>
+      </select>
     </div>
     <div class="card"><div class="table-wrap" id="lead-table"></div><div class="pager" id="lead-pager"></div></div>
     <div class="card" id="lead-kanban" style="display:none"></div>`;
@@ -531,11 +538,16 @@ async function renderLeads() {
     $("#lead-kanban").style.display = "";
     renderKanban();
   };
+  $("#lead-sort").onchange = () => {
+    f.sort = $("#lead-sort").value;
+    state.leads.page = 1;
+    loadLeadList();
+  };
 }
 
 async function renderKanban() {
   const f = state.leads.filters;
-  const params = new URLSearchParams({ size: "300", q: f.q, type: f.type, region: f.region, tag: f.tag, source: f.source });
+  const params = new URLSearchParams({ size: "300", q: f.q, type: f.type, region: f.region, tag: f.tag, source: f.source, sort: f.sort || "score_desc" });
   const data = await api("/api/leads?" + params.toString());
   const byStatus = {};
   state.meta.statuses.forEach((s) => byStatus[s] = []);
@@ -572,7 +584,7 @@ async function renderKanban() {
 
 async function loadLeadList() {
   const f = state.leads.filters;
-  const params = new URLSearchParams({ page: state.leads.page, size: state.leads.size, q: f.q, status: f.status, type: f.type, region: f.region, tag: f.tag, source: f.source });
+  const params = new URLSearchParams({ page: state.leads.page, size: state.leads.size, q: f.q, status: f.status, type: f.type, region: f.region, tag: f.tag, source: f.source, sort: f.sort || "score_desc" });
   const data = await api("/api/leads?" + params.toString());
   state.leads.total = data.total;
   const sel = state.leads.selected;

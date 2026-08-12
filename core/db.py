@@ -294,7 +294,7 @@ def get_lead(lead_id):
         conn.close()
 
 
-def list_leads(page=1, size=20, q="", status="", type_="", region="", tag="", source=""):
+def list_leads(page=1, size=20, q="", status="", type_="", region="", tag="", source="", sort=""):
     conn = get_conn()
     try:
         where = []
@@ -321,8 +321,15 @@ def list_leads(page=1, size=20, q="", status="", type_="", region="", tag="", so
         where_sql = (" WHERE " + " AND ".join(where)) if where else ""
         total = conn.execute(f"SELECT COUNT(*) FROM leads{where_sql}", params).fetchone()[0]
         offset = max(0, (page - 1) * size)
+        order_map = {
+            "score_desc": "score DESC, updated_at DESC, id DESC",
+            "score_asc": "score ASC, updated_at DESC, id DESC",
+            "updated_desc": "updated_at DESC, id DESC",
+            "created_desc": "created_at DESC, id DESC",
+        }
+        order_sql = order_map.get(sort, "updated_at DESC, id DESC")
         rows = conn.execute(
-            f"SELECT * FROM leads{where_sql} ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?",
+            f"SELECT * FROM leads{where_sql} ORDER BY {order_sql} LIMIT ? OFFSET ?",
             params + [size, offset],
         ).fetchall()
         return [dict(r) for r in rows], total
