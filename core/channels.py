@@ -173,8 +173,15 @@ def _channel_reachable(ch, settings):
 
 
 def _channel_enabled(ch, settings):
-    """配置开关 + 显式 override。settings.channel_overrides = {id: bool} 可强制启停。"""
-    enabled = bool(ch.get("enabled_default", True))
+    """配置开关 + 密钥就绪自动启用 + 显式 override。
+
+    requires_key 的渠道（如 地图POI/SerpAPI/博查）只要密钥已配置就自动启用，
+    避免“配了高德 Key 却一直没用上地图渠道”。
+    settings.channel_overrides = {id: bool} 可强制启停。
+    """
+    requires_key = ch.get("requires_key") or ""
+    has_key = bool(settings.get(requires_key)) if requires_key else True
+    enabled = bool(ch.get("enabled_default", True)) or has_key
     ov = (settings or {}).get("channel_overrides") or {}
     if ch["id"] in ov:
         enabled = bool(ov[ch["id"]])
@@ -358,6 +365,16 @@ def _search_map(channel, query, settings):
     parts = [p for p in str(query).split() if p]
     kw = parts[0] if parts else query
     city = parts[-1] if len(parts) > 1 else ""
+    # 区域名 → 默认城市（高德需具体城市；海外区域用代表性城市，视 map_provider 而定）
+    _REGION_CITY = {
+        "中国大陆": "深圳", "亚太": "新加坡", "欧美": "洛杉矶",
+        "中东非洲拉美": "迪拜", "广东": "广州", "浙江": "杭州",
+        "江苏": "南京", "上海": "上海", "北京": "北京", "四川": "成都",
+    }
+    if city in _REGION_CITY:
+        city = _REGION_CITY[city]
+    if not city:
+        city = "深圳"
     try:
         leads = mapsearch.run_map_search(settings, kw, city, pages=1, max_results=10)
     except Exception:

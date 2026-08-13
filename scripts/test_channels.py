@@ -143,6 +143,32 @@ def main():
     assert "linkedin" in ch_ids and "c114" in ch_ids and "zhihu" in ch_ids
     print("6d) 引擎默认渠道解析 OK:", ch_ids)
 
+    # 6e) 已配置密钥的渠道自动启用（地图POI/SerpAPI）
+    with_map = channels.get_enabled_channel_ids(c, {"map_api_key": "k"})
+    assert "amap" in with_map, with_map
+    with_serp = channels.get_enabled_channel_ids(c, {"search_api_key": "k"})
+    assert "serpapi" in with_serp, with_serp
+    print("6e) 密钥就绪渠道自动启用 OK")
+
+    # 6f) 地图渠道区域名 → 城市映射
+    import types as _types
+    import sys as _sys
+
+    captured = {}
+
+    def _fake_map(settings, keyword, city, pages=1, max_results=10, progress=None):
+        captured["kw"] = keyword
+        captured["city"] = city
+        return [{"name": "某公司", "phone": "13800138000", "address": "深圳", "note": ""}]
+
+    import core.mapsearch as mapmod
+
+    mapmod.run_map_search = _fake_map
+    res_map = channels._search_map({"id": "amap", "provider": "map"}, "DWDM 中国大陆", {})
+    assert captured["city"] == "深圳", captured
+    assert len(res_map) == 1
+    print("6f) 地图区域映射 OK")
+
     # 9) 非法延时/重试配置不应导致崩溃（自检加固）
     import core.antibot as ab
 
