@@ -1596,7 +1596,7 @@ function renderPlans(plans) {
     <div id="plans-body">` + plans.map((p, i) => `
     <div style="border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:10px">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
-        <b>方案 ${"ABCDE"[i] || i + 1}：${esc(p.title)}</b>
+        <b>方案 ${"ABCDE"[i] || i + 1}：${esc(p.title)}${i === 0 ? ' <span class="type-chip" style="color:#fff;background:#16a34a">推荐</span>' : ""}</b>
         <span style="display:flex;gap:6px;flex-wrap:wrap">
           <button class="btn primary sm" data-use="${i}">🔍 手动搜索</button>
           <button class="btn sm" data-acq="${i}">🧠 用引擎获客</button>

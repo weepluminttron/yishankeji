@@ -92,9 +92,15 @@ def normalize_conditions(conditions):
         if (not c["buyer_types"] or c["buyer_types"] == _DEFAULT_TYPES) and plan.get("buyer_role"):
             c["buyer_types"] = as_list(plan.get("buyer_role"))
         _PLAN_CHANNEL_MAP = [
-            ("展会", "exhibition"), ("招投标", "procurement"), ("招标", "procurement"),
-            ("B2B", "company_db"), ("平台", "company_db"), ("社群", "web_search"),
-            ("邮件", "web_search"), ("搜索引擎", "web_search"),
+            ("展会", "exhibition"), ("expo", "exhibition"), ("cioe", "exhibition"),
+            ("招投标", "procurement"), ("招标", "procurement"), ("集采", "procurement"),
+            ("中标", "procurement"), ("采购平台", "procurement"), ("公告", "procurement"),
+            ("b2b", "company_db"), ("平台", "company_db"), ("数据库", "company_db"),
+            ("工商", "company_db"), ("企查查", "company_db"), ("天眼查", "company_db"),
+            ("社群", "web_search"), ("社媒", "web_search"), ("领英", "web_search"),
+            ("linkedin", "web_search"), ("微信", "web_search"), ("邮件", "web_search"),
+            ("edm", "web_search"), ("搜索引擎", "web_search"), ("seo", "web_search"),
+            ("内容", "web_search"), ("短视频", "web_search"), ("投放", "web_search"),
         ]
         mapped = []
         for ch in as_list(plan.get("channels")):
@@ -151,6 +157,37 @@ _OVERSEAS_WORDS = (
 )
 
 
+def _buyer_suffix_for(bt):
+    """从买方类型/角色文本推导买方侧检索后缀（行业无关）。
+
+    内置表命中（光通信等行业）直接返回；否则从角色文本推导通用买方意图词，
+    确保任意行业的 buyer_role 都能生成有效的买方侧检索式。
+    """
+    if bt in _BUYER_SUFFIX:
+        return _BUYER_SUFFIX[bt]
+    t = (bt or "").lower()
+    suffixes = []
+    if any(w in t for w in ("招标", "中标", "集采", "tender", "procurement", "rfp", "rfq")):
+        suffixes += ["招标公告", "中标公告", "采购公告", "集采"]
+    if any(w in t for w in ("采购", "buyer", "sourcing", "purchase")):
+        suffixes += ["采购", "询价", "供应商"]
+    if any(w in t for w in ("集成", "总包", "integrator", "contractor")):
+        suffixes += ["招标", "总包", "供应商入围"]
+    if any(w in t for w in ("代理", "分销", "distributor", "dealer")):
+        suffixes += ["代理", "分销", "经销商"]
+    if any(w in t for w in ("研发", "技术", "cto", "engineer", "rd")):
+        suffixes += ["选型", "规格", "技术要求"]
+    if not suffixes:
+        suffixes = ["采购", "询价", "供应商"]
+    seen = set()
+    out = []
+    for s in suffixes:
+        if s not in seen:
+            seen.add(s)
+            out.append(s)
+    return out[:4]
+
+
 def _is_overseas(market):
     """判断市场是否为海外（支持英文与中文海外市场名）。"""
     m = market or ""
@@ -205,7 +242,7 @@ def generate_plan(conditions):
 
     # 1) 买方类型专属查询（买方分层核心，提升“买方侧”命中、减少同行供应商）
     for bt in conditions["buyer_types"]:
-        for suf in _BUYER_SUFFIX.get(bt, ["采购"]):
+        for suf in _buyer_suffix_for(bt):
             for kw in expanded[:6]:
                 for m in (markets or [""]):
                     q = f"{kw} {suf} {m}".strip()
@@ -228,19 +265,28 @@ def generate_plan(conditions):
                 queries_by_channel["web_search"].append(q)
         queries_by_channel["company_db"].append(f"{kw} 公司 官网")
         if "exhibition" in conditions["channels"]:
-            queries_by_channel["exhibition"].append(f"CIOE 展商 {kw}")
+            expo = conditions.get("industry", "") or ""
+            expo_q = f"{expo} 展会 展商 {kw}".strip()
+            queries_by_channel["exhibition"].append(expo_q)
         if "procurement" in conditions["channels"]:
             queries_by_channel["procurement"].append(f"{kw} 招标 采购公告")
 
-    # 去重并截断（核心买方侧查询优先保留）
+    # 去重并截断（核心买方侧查询优先保留；按词集合归一化，词序不同但内容相同的视为重复）
     caps = {"web_search": 80, "procurement": 80, "company_db": 40, "exhibition": 40}
     for ch in queries_by_channel:
         seen = set()
+        seen_norm = set()
         uniq = []
         for q in queries_by_channel[ch]:
-            if q not in seen:
-                seen.add(q)
-                uniq.append(q)
+            if q in seen:
+                continue
+            # 归一化：按空格拆词排序去重，忽略词序差异
+            norm = " ".join(sorted(set(q.split())))
+            if norm in seen_norm:
+                continue
+            seen.add(q)
+            seen_norm.add(norm)
+            uniq.append(q)
         queries_by_channel[ch] = uniq[: caps.get(ch, 40)]
 
     return {
@@ -572,7 +618,11 @@ def _enrich_intent(target):
 # 5. 迭代优化：缺口分析 + 自动扩词重跑
 # ----------------------------------------------------------------------------
 def analyze_gaps(targets, conditions):
-    """分析当前清单覆盖缺口，返回需要补强的方向。"""
+    """分析当前清单覆盖缺口，返回需要补强的方向。
+
+    升级：不仅检测零覆盖维度，还检测严重欠覆盖（低于该维度平均值的 20%），
+    避免某个维度只有 1 条而其他维度有 20 条时误判为"已覆盖"。
+    """
     regions = conditions["regions"]
     buyer_types = conditions["buyer_types"]
     specs = conditions["specs"]
@@ -584,54 +634,87 @@ def analyze_gaps(targets, conditions):
         by_type[t["buyer_type"]] = by_type.get(t["buyer_type"], 0) + 1
         for s in t["matched_conditions"]:
             by_spec[s] = by_spec.get(s, 0) + 1
+
     gaps = []
-    for r in regions:
-        if by_region.get(r, 0) == 0:
-            gaps.append(("region", r))
-    for bt in buyer_types:
-        if by_type.get(bt, 0) == 0:
-            gaps.append(("buyer_type", bt))
-    for s in specs:
-        if by_spec.get(s, 0) == 0:
-            gaps.append(("spec", s))
+
+    def _check_dim(dim_values, target_dict, dim_kind):
+        """检测零覆盖 + 严重欠覆盖（< 最大值的 20% 且 < 3 条）。"""
+        if not dim_values:
+            return
+        max_v = max((target_dict.get(v, 0) for v in dim_values), default=0)
+        threshold = max(1, max_v * 0.2)  # 至少 1，或最大值的 20%
+        for v in dim_values:
+            cnt = target_dict.get(v, 0)
+            if cnt == 0:
+                gaps.append((dim_kind, v))
+            elif max_v >= 5 and cnt < threshold and cnt < 3:
+                # 严重欠覆盖：其他维度有 ≥5 条但本维度不足阈且 <3
+                gaps.append((dim_kind, v))
+
+    _check_dim(regions, by_region, "region")
+    _check_dim(buyer_types, by_type, "buyer_type")
+    _check_dim(specs, by_spec, "spec")
     return gaps
 
 
 def _expand_for_gaps(conditions, gaps, round_no):
-    """根据缺口自动产生补充检索词（不修改原始条件，仅本轮增强）。"""
+    """根据缺口自动产生补充检索词（不修改原始条件，仅本轮增强）。
+
+    行业无关：从已有 specs/keywords 用 _expand_keywords 做同义词扩展，
+    对 buyer_type 缺口用 _buyer_suffix_for 推导买方侧检索词，
+    对 region 缺口补充邻近市场——不再硬编码光通信行业词汇。
+    """
     add_kw = []
     add_regions = list(conditions["regions"])
+    existing_kw = set(conditions["specs"]) | set(conditions["keywords"])
+
     for kind, val in gaps:
         if kind == "spec":
+            # 规格缺口：用同义词扩展器补强（行业无关）
             add_kw.append(val)
-            # 规格的近义/组合
-            if val.lower() in ("dwdm", "wdm"):
-                add_kw += ["波分复用", "OADM", "光传输", "DCI"]
-            if "玻璃管" in val or "glass" in val.lower():
-                add_kw += ["石英毛细管", "玻璃毛细管", "fiber capillary"]
+            for syn in _expand_keywords(val):
+                if syn not in existing_kw:
+                    add_kw.append(syn)
+            # 补充该规格 + 通用买方意图词的组合
+            for suf in ("采购", "招标", "供应商"):
+                combo = f"{val} {suf}"
+                if combo not in existing_kw:
+                    add_kw.append(combo)
         elif kind == "buyer_type":
-            if "招标" in val or "扩容" in val:
-                add_kw += ["中标公告", "集采", "扩容项目"]
-            elif "模块" in val:
-                add_kw += ["800G 光模块", "1.6T 光模块"]
-            elif "无源" in val:
-                add_kw += ["无源器件", "准直器", "隔离器"]
-            elif "集成" in val:
-                add_kw += ["系统集成", "总包", "FTTH 工程"]
+            # 买方类型缺口：用买方后缀推导器生成该类型的买方侧检索词
+            for suf in _buyer_suffix_for(val):
+                # 用已有规格词 × 该买方后缀 组合补强
+                for kw in (conditions["specs"] + conditions["keywords"])[:3]:
+                    combo = f"{kw} {suf}"
+                    if combo not in existing_kw:
+                        add_kw.append(combo)
+            # 买方类型名本身也可作为检索种子
+            if val not in existing_kw:
+                add_kw.append(val)
         elif kind == "region":
-            # 邻近市场补充
-            if val == "欧美":
-                add_regions += ["德国", "荷兰"]
-            elif val == "亚太":
-                add_regions += ["印度", "印尼"]
-    # 去重
+            # 邻近市场补充（行业无关：从区域名推导邻近国家/地区）
+            _NEARBY = {
+                "欧美": ["德国", "荷兰", "英国", "法国"],
+                "亚太": ["印度", "印尼", "越南", "泰国"],
+                "中东非洲拉美": ["沙特", "阿联酋", "巴西", "尼日利亚"],
+                "中国大陆": ["深圳", "武汉", "苏州", "成都", "上海"],
+            }
+            add_regions += _NEARBY.get(val, [])
+    # 去重保序
     seen = set()
     out = []
     for k in add_kw:
         if k not in seen:
             seen.add(k)
             out.append(k)
-    return out[:10], add_regions
+    # 邻近市场也去重
+    seen_r = set()
+    uniq_r = []
+    for r in add_regions:
+        if r not in seen_r:
+            seen_r.add(r)
+            uniq_r.append(r)
+    return out[:10], uniq_r
 
 
 def run_engine(conditions, settings=None, max_rounds=3, progress=None, seed_candidates=None, use_manual=False):
@@ -709,6 +792,7 @@ def run_engine(conditions, settings=None, max_rounds=3, progress=None, seed_cand
         "contact_verify": contact_verify,
         "company_enrich": company_enrich,
         "stats": stats,
+        "ai_ready": bool(settings and settings.get("openai_api_key")),
     }
 
 
@@ -854,92 +938,139 @@ def verify_contacts(targets, settings, limit=20):
 # 6a. 策略文档所需的数据驱动模板（不限行业，按条件参数化）
 # ----------------------------------------------------------------------------
 # 获客渠道矩阵：覆盖 挖掘 / 触达 / 培育 全链路；auto=True 表示引擎已内置自动化
-_CHANNEL_MATRIX = [
-    {
-        "name": "搜索引擎 + 招投标平台",
-        "stage": "挖掘", "auto": True,
-        "fit": "近期招标扩容、系统集成商、光无源器件厂",
-        "tactic": "批量盯采：运营商/政企集采公告、政府采购网、行业招标聚合；用买方意图检索式自动挖采购方与中标方。",
-        "ai": "AI 线索挖掘(buyer.run)+增量缓存(search_cache)，刷新同一批条件秒级命中、无需重爬。",
-    },
-    {
-        "name": "社媒精准触达（LinkedIn / 领英 / 微信 / WhatsApp）",
-        "stage": "触达", "auto": False,
-        "fit": "光模块厂、系统集成商、海外买方",
-        "tactic": "按职位(采购/技术总监/CTO)与行业标签建名单，个性化私信破冰；海外走 LinkedIn/WhatsApp，国内走微信+脉脉。",
-        "ai": "AI 生成多语种私信话术+按买方类型定制；聊天机器人做首次接待与资格初筛。",
-    },
-    {
-        "name": "内容营销（SEO / 白皮书 / 案例 / 短视频）",
-        "stage": "培育", "auto": False,
-        "fit": "全部买方类型（长期资产）",
-        "tactic": "围绕必中规格产出技术白皮书、选型指南、客户案例、展会短视频；做行业词 SEO 承接主动搜索流量。",
-        "ai": "AI 内容生成(core.ai)批量产出文章/案例/社媒帖；按 region 出本地化版本，规模化铺内容。",
-    },
-    {
-        "name": "自动化投放（SEM / 信息流 / EDM）",
-        "stage": "触达", "auto": False,
-        "fit": "近期招标扩容、光无源器件厂",
-        "tactic": "对高意向关键词做 SEM/信息流精准投放；EDM 给清单客户做序列培育邮件。",
-        "ai": "AI 写广告文案与落地页、做 A/B 与出价建议；按意向分层自动分发不同邮件序列。",
-    },
-    {
-        "name": "行业展会（线上 + 线下，如 CIOE）",
-        "stage": "触达", "auto": True,
-        "fit": "全部买方类型（集中转化窗口）",
-        "tactic": "展前用清单完成首轮触达约见面；展中扫码留资；展后 48h 内跟进。",
-        "ai": "AI 生成邀约话术与跟进邮件；清单自动按展商/买家分类便于现场分工。",
-    },
-    {
-        "name": "手动搜索（高级）/ 地图 POI",
-        "stage": "挖掘", "auto": True,
-        "fit": "区域集中型买方（产业带集群 / 海外城市）",
-        "tactic": "按城市+品类拉取园区/产业带企业 POI，补齐工商信息缺失的中小买家。",
-        "ai": "AI 地图检索(mapsearch)自动归集 POI 并去重入清单。",
-    },
-]
+# 行业无关：fit/tactic 根据条件动态填充，不再硬编码光通信行业
+def _channel_matrix(conditions):
+    bts = conditions.get("buyer_types", [])
+    regs = conditions.get("regions", [])
+    industry = conditions.get("industry", "") or "行业"
+    has_procurement = any(
+        any(w in (bt or "").lower() for w in ("招标", "中标", "集采", "采购", "tender", "procurement"))
+        for bt in bts
+    )
+    has_overseas = any(_is_overseas(r) for r in regs)
+    all_bt = "、".join(bts) if bts else "全部买方类型"
+
+    matrix = [
+        {
+            "name": "搜索引擎 + 招投标平台",
+            "stage": "挖掘", "auto": True,
+            "fit": "、".join(bts) if has_procurement else all_bt,
+            "tactic": "批量盯采：政府/政企集采公告、政府采购网、行业招标聚合；用买方意图检索式自动挖采购方与中标方。",
+            "ai": "AI 线索挖掘(buyer.run)+增量缓存(search_cache)，刷新同一批条件秒级命中、无需重爬。",
+        },
+        {
+            "name": "社媒精准触达（LinkedIn / 领英 / 微信 / WhatsApp）",
+            "stage": "触达", "auto": False,
+            "fit": (all_bt + "、海外买方") if has_overseas else all_bt,
+            "tactic": "按职位(采购/技术总监/CTO)与行业标签建名单，个性化私信破冰；"
+                      + ("海外走 LinkedIn/WhatsApp，" if has_overseas else "")
+                      + "国内走微信+脉脉。",
+            "ai": "AI 生成多语种私信话术+按买方类型定制；聊天机器人做首次接待与资格初筛。",
+        },
+        {
+            "name": "内容营销（SEO / 白皮书 / 案例 / 短视频）",
+            "stage": "培育", "auto": False,
+            "fit": "全部买方类型（长期资产）",
+            "tactic": f"围绕必中规格产出技术白皮书、选型指南、客户案例、{industry}展会短视频；做行业词 SEO 承接主动搜索流量。",
+            "ai": "AI 内容生成(core.ai)批量产出文章/案例/社媒帖；按 region 出本地化版本，规模化铺内容。",
+        },
+        {
+            "name": "自动化投放（SEM / 信息流 / EDM）",
+            "stage": "触达", "auto": False,
+            "fit": all_bt,
+            "tactic": "对高意向关键词做 SEM/信息流精准投放；EDM 给清单客户做序列培育邮件。",
+            "ai": "AI 写广告文案与落地页、做 A/B 与出价建议；按意向分层自动分发不同邮件序列。",
+        },
+        {
+            "name": f"行业展会（线上 + 线下）",
+            "stage": "触达", "auto": True,
+            "fit": "全部买方类型（集中转化窗口）",
+            "tactic": "展前用清单完成首轮触达约见面；展中扫码留资；展后 48h 内跟进。",
+            "ai": "AI 生成邀约话术与跟进邮件；清单自动按展商/买家分类便于现场分工。",
+        },
+        {
+            "name": "手动搜索（高级）/ 地图 POI",
+            "stage": "挖掘", "auto": True,
+            "fit": "区域集中型买方（产业带集群 / 海外城市）",
+            "tactic": "按城市+品类拉取园区/产业带企业 POI，补齐工商信息缺失的中小买家。",
+            "ai": "AI 地图检索(mapsearch)自动归集 POI 并去重入清单。",
+        },
+    ]
+    # 动态优先级：有招标类买方时把"搜索引擎+招投标平台"排第一
+    if has_procurement:
+        matrix.sort(key=lambda ch: 0 if "招标" in ch["name"] else 1)
+    return matrix
 
 
-def _buyer_persona(bt):
+def _buyer_persona(bt, conditions=None):
     M = {
         "近期招标扩容": "决策链长、预算明确、窗口期短；关注参数合规、交付周期与总包能力，须盯招中标公告抢窗口。",
         "系统集成商": "做总包/工程，向上游器件与模块集采；关注兼容性、批量价与技术支持，适合方案+样品切入。",
         "光模块厂": "扩产带来器件/材料持续采购；关注规格(波长/损耗)、一致性与产能，适合长期供应绑定。",
         "光无源器件厂": "自产也外采玻璃管/滤光片等；关注来料精度、交期与定制能力，适合小批量送样起步。",
     }
-    return M.get(bt, "有真实采购/合作意向的买方，按行业通用打法触达即可。")
+    if bt in M:
+        return M[bt]
+    # 行业无关回退：从 AI 方案策略/合作模式推导，或按角色关键词给出通用画像
+    plan = (conditions or {}).get("ai_plan") or {}
+    strategy = plan.get("strategy") or ""
+    cooperation = plan.get("cooperation") or ""
+    t = (bt or "").lower()
+    if any(w in t for w in ("招标", "中标", "集采", "tender", "procurement")):
+        base = "决策链长、预算明确、窗口期短；须盯招中标公告抢窗口，关注参数合规与交付周期。"
+    elif any(w in t for w in ("集成", "总包", "integrator", "contractor")):
+        base = "做总包/工程，向上游集采；关注兼容性、批量价与技术支持，适合方案+样品切入。"
+    elif any(w in t for w in ("代理", "分销", "distributor", "dealer")):
+        base = "渠道型买方，关注利润空间与区域保护；适合授权代理+样品支持起步。"
+    elif any(w in t for w in ("研发", "技术", "cto", "engineer")):
+        base = "技术决策者，关注规格参数与兼容性验证；适合技术交流+送样测试切入。"
+    else:
+        base = "有真实采购/合作意向的买方，关注品质、交期与性价比，按行业通用打法触达即可。"
+    if strategy or cooperation:
+        base += f"（AI 策略建议：{strategy[:80]}）" if strategy else ""
+        base += f"（合作模式：{cooperation[:60]}）" if cooperation else ""
+    return base
 
 
 def _channel_fit_note(conditions):
     bts = conditions.get("buyer_types", [])
     regs = conditions.get("regions", [])
     parts = []
-    if "近期招标扩容" in bts:
+    # 行业无关：检测买方类型文本中的招标/采购意图词
+    if any(any(w in (bt or "").lower() for w in ("招标", "中标", "集采", "tender", "procurement"))
+           for bt in bts):
         parts.append("招投标/集采平台是最高优先级渠道")
-    if any(b in bts for b in ("光模块厂", "光无源器件厂")):
+    # 检测技术型买方
+    if any(any(w in (bt or "").lower() for w in ("技术", "研发", "cto", "engineer", "光", "器件", "模块"))
+           for bt in bts):
         parts.append("社媒+内容营销适合做技术型买方培育")
-    if "欧美" in regs or "亚太" in regs:
+    if any(_is_overseas(r) for r in regs):
         parts.append("海外渠道以 LinkedIn/WhatsApp + 本地化内容为主")
     return "；".join(parts) or "按行业通用组合即可"
 
 
-def _ai_playbook(conditions):
-    """AI 在获客各环节的应用方式（映射到本引擎真实模块，数据驱动）。"""
+def _ai_playbook(conditions, ai_ready=False):
+    """AI 在获客各环节的应用方式（映射到本引擎真实模块，数据驱动）。
+
+    适配条件：检测 AI 密钥可用性，未配置时标注为"待启用"而非隐藏，
+    让用户知道哪些环节需要补配密钥才能解锁。
+    """
+    ai_tag = "" if ai_ready else "（⚠️ 待配置 AI 密钥）"
     return [
         ("① 智能线索挖掘", "core.buyer.run + concurrent_search + search_cache + mapsearch",
-         "并行检索+抓取、增量缓存避免重复爬取；地图POI按城市归集。把‘分钟级人工搜’压缩到‘秒级自动出线索’。"),
+         "并行检索+抓取、增量缓存避免重复爬取；地图POI按城市归集。把'分钟级人工搜'压缩到'秒级自动出线索'。"),
         ("② 线索清洗与评分", "core.scorer.fit_comp_score + 买方侧意图过滤",
-         "双维度(匹配度+实力)自动打分分级，并用‘采购/招标’买方意图词剔除同行供应商与平台噪音，只留真买家。"),
-        ("③ 内容生成", "core.ai（需 openai_api_key）",
+         "双维度(匹配度+实力)自动打分分级，并用'采购/招标'买方意图词剔除同行供应商与平台噪音，只留真买家。"),
+        ("③ 内容生成", f"core.ai{ai_tag}",
          "批量生成私信/邮件/方案/白皮书/案例，按买方类型与区域出多语种版本，规模化铺内容不再靠人手堆。"),
-        ("④ 自动私信 / 触达", "core.ai 文案 + 外部 CRM/邮箱自动化",
+        ("④ 自动私信 / 触达", f"core.ai 文案 + 外部 CRM/邮箱自动化{ai_tag}",
          "AI 产出个性化首触文案与跟进序列，人工或自动化系统按 next_action 发送，杜绝群发模板感。"),
-        ("⑤ 聊天机器人 / 接待", "core.ai + core.intent",
+        ("⑤ 聊天机器人 / 接待", f"core.ai + core.intent{ai_tag}",
          "官网/社媒聊天机器人 7×24 接待与资格初筛；intent 模块对来访线索实时打购买阶段与紧迫度。"),
-        ("⑥ 意向识别与培育", "core.intent.classify（不限行业）",
+        ("⑥ 意向识别与培育", "core.intent.classify（不限行业，零成本规则引擎）",
          "对每条客户标注购买阶段(stage)/紧迫度(urgency)/下一步，自动分桶做差异化培育，销售只跟热线索。"),
-        ("⑦ 迭代优化", "analyze_gaps + _expand_for_gaps",
-         "每轮自动分析区域/买方/规格缺口，扩词补强重跑，清单随市场动态自我完善。"),
+        ("⑦ 迭代优化", "analyze_gaps + _expand_for_gaps（行业无关）",
+         "每轮自动分析区域/买方/规格缺口与欠覆盖维度，从条件推导扩词补强重跑，清单随市场动态自我完善。"),
     ]
 
 
@@ -1060,7 +1191,7 @@ def build_strategy_doc(conditions, engine_result, out_dir):
     lines.append("")
     lines.append("**买方决策特征（按类型）**：")
     for bt in conditions["buyer_types"]:
-        lines.append(f"- {bt}：{_buyer_persona(bt)}")
+        lines.append(f"- {bt}：{_buyer_persona(bt, conditions)}")
     lines.append("")
 
     # 三、获客渠道矩阵
@@ -1070,7 +1201,7 @@ def build_strategy_doc(conditions, engine_result, out_dir):
     lines.append("")
     lines.append("| 渠道 | 阶段 | 适配买方 | 具体打法 | AI 赋能点 | 是否已自动化 |")
     lines.append("| --- | --- | --- | --- | --- | --- |")
-    for ch in _CHANNEL_MATRIX:
+    for ch in _channel_matrix(conditions):
         auto = "✅ 引擎内置" if ch["auto"] else "🟡 人工+AI 文案"
         lines.append(f"| {ch['name']} | {ch['stage']} | {ch['fit']} | {ch['tactic']} | {ch['ai']} | {auto} |")
     lines.append("")
@@ -1078,7 +1209,7 @@ def build_strategy_doc(conditions, engine_result, out_dir):
     # 四、AI 工具在获客全流程中的应用
     lines.append("## 四、AI 工具在获客全流程中的应用方式")
     lines.append("")
-    for title, tool, desc in _ai_playbook(conditions):
+    for title, tool, desc in _ai_playbook(conditions, engine_result.get("ai_ready")):
         lines.append(f"**{title}** ｜ 工具：`{tool}`")
         lines.append(f"> {desc}")
         lines.append("")
@@ -1183,11 +1314,11 @@ def export_outputs(conditions, engine_result, out_dir, base_name="acquisition"):
             "channels": [
                 {"name": ch["name"], "stage": ch["stage"], "auto": ch["auto"],
                  "fit": ch["fit"], "tactic": ch["tactic"], "ai": ch["ai"]}
-                for ch in _CHANNEL_MATRIX
+                for ch in _channel_matrix(conditions)
             ],
             "ai_playbook": [
                 {"stage": t, "tools": tool, "desc": desc}
-                for t, tool, desc in _ai_playbook(conditions)
+                for t, tool, desc in _ai_playbook(conditions, engine_result.get("ai_ready"))
             ],
             "kpi": [
                 {"name": n, "definition": d, "baseline": b, "target": g}
@@ -1197,7 +1328,7 @@ def export_outputs(conditions, engine_result, out_dir, base_name="acquisition"):
                 {"cadence": c, "action": a, "owner": o, "ai": ai}
                 for c, a, o, ai in _cadence_plan(conditions)
             ],
-            "buyer_persona": {bt: _buyer_persona(bt) for bt in conditions["buyer_types"]},
+            "buyer_persona": {bt: _buyer_persona(bt, conditions) for bt in conditions["buyer_types"]},
         },
         "targets": targets,
     }

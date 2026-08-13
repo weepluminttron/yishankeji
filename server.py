@@ -586,6 +586,16 @@ def _strategy_worker(data, settings):
         if not plans:
             task_finish("strategy", "失败", "AI 没有生成有效方案，请重试")
             return
+        # 去重：buyer_role + markets 组合相同或高度相似的方案只保留综合评分更高的
+        best_by_sig = {}
+        for p in plans:
+            sig = (p.get("buyer_role", ""), tuple(sorted(p.get("markets", []))))
+            score = p["profit"] + p["demand"] + p["brand"]
+            if sig not in best_by_sig or score > best_by_sig[sig][0]:
+                best_by_sig[sig] = (score, p)
+        plans = [v[1] for v in best_by_sig.values()]
+        # 按综合评分降序排列（利润+需求量+知名度），最优方案排最前
+        plans.sort(key=lambda p: p["profit"] + p["demand"] + p["brand"], reverse=True)
         _tasks["strategy"]["result"] = {"plans": plans}
         task_finish("strategy", "成功", f"生成 {len(plans)} 套方案")
     except Exception as e:

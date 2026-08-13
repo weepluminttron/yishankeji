@@ -390,13 +390,13 @@ def _freshness_params(freshness):
     """搜索时间范围 → 各引擎参数（bocha 原值 / serpapi tbs / bing qdr）。"""
     f = str(freshness or "").strip().lower()
     if f in ("day", "d"):
-        return {"bocha": "day", "tbs": "qdr:d", "qdr": "d"}
+        return {"bocha": "oneDay", "tbs": "qdr:d", "qdr": "d"}
     if f in ("week", "w"):
-        return {"bocha": "week", "tbs": "qdr:w", "qdr": "w"}
+        return {"bocha": "oneWeek", "tbs": "qdr:w", "qdr": "w"}
     if f in ("month", "m"):
-        return {"bocha": "month", "tbs": "qdr:m", "qdr": "m"}
+        return {"bocha": "oneMonth", "tbs": "qdr:m", "qdr": "m"}
     if f in ("year", "y"):
-        return {"bocha": "year", "tbs": "qdr:y", "qdr": "y"}
+        return {"bocha": "oneYear", "tbs": "qdr:y", "qdr": "y"}
     return {"bocha": "noLimit", "tbs": "", "qdr": ""}
 
 

@@ -36,7 +36,7 @@ def main():
     q = buyer._apply_search_filters("DWDM 采购", {"search_site_filter": "gov.cn, in"})
     assert "site:gov.cn" in q and "site:in" in q, q
     fp = buyer._freshness_params("month")
-    assert fp["bocha"] == "month" and fp["tbs"] == "qdr:m" and fp["qdr"] == "m"
+    assert fp["bocha"] == "oneMonth" and fp["tbs"] == "qdr:m" and fp["qdr"] == "m"
     print("时间范围/站点过滤 OK:", q, fp)
 
     cand = buyer._to_candidate(
