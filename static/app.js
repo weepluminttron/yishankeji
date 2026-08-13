@@ -1719,7 +1719,7 @@ function renderAcqResult(res) {
     ? `<div style="margin:8px 0;padding:10px 12px;background:#fff8e1;border:1px solid #f0d27a;border-radius:10px;font-size:12px;color:#8a5a00">
         ⚠️ ${targets.length ? "部分搜索源受限：" : "本次没有找到目标客户，原因："}<br>
         ${warnings.slice(0, 6).map((w) => esc(w)).join("<br>")}
-        ${targets.length ? "" : "<br>建议：到“设置 → 搜索接口”更换/补充配额（SerpAPI/博查）后重试，或把方案关键词放进“检索种子词”、只填干净的产品词到“必中规格”。"}
+        ${targets.length ? "" : "<br>建议：① 到“设置 → 搜索接口”点「🧪 检测搜索源」看哪些源可用/被限流；② 更换或补充配额（SerpAPI/博查）；③ 把方案关键词放进“检索种子词”、只填干净产品词到“必中规格”；④ 配置地图/工商密钥作为补充渠道。"}
       </div>`
     : "";
   box.innerHTML = `
@@ -2532,6 +2532,11 @@ async function renderSettings() {
         <div class="field" style="grid-column:1/-1"><label>限定站点/域名（可选，逗号分隔，如 gov.cn,in 或 具体官网）</label><input class="input full" id="s-search-site" placeholder="gov.cn,in,example.com" value="${esc(s.search_site_filter)}"></div>
       </div>
       <div class="hint">推荐用博查 AI 搜索（国内稳定、结果精准，平台：open.bochaai.com）；也可用免费 360/搜狗，或 SerpAPI 走 Google（serpapi.com）。</div>
+      <div class="toolbar" style="margin-top:10px;margin-bottom:0">
+        <button class="btn" id="s-search-test">🧪 检测搜索源</button>
+        <span class="hint">找不到客户时先点这里，看哪些搜索源可用、哪些被限流</span>
+      </div>
+      <div id="s-search-test-result" style="margin-top:8px"></div>
     </div>
     <div class="card">
       <h3>🛡️ 反爬策略（参考"快启精线索"综合反爬体系）</h3>
@@ -2648,6 +2653,23 @@ async function renderSettings() {
     } catch (e) { toast(e.message, "err"); }
   };
   $("#s-lp-open").onclick = () => window.open("/lp", "_blank");
+  $("#s-search-test").onclick = async () => {
+    const box = $("#s-search-test-result");
+    box.innerHTML = `<div class="empty">正在检测各搜索源（约 10-30 秒），请稍候…</div>`;
+    try {
+      const r = await api("/api/search/test", { method: "POST", body: { query: "DWDM 采购" } });
+      const rows = (r.sources || []).map((s) => `
+        <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px dashed var(--line);font-size:12px">
+          <span style="min-width:150px">${esc(s.name)}</span>
+          ${s.status === "ok" ? `<span style="color:var(--green);font-weight:600">✅ ${s.count} 条</span>` : `<span style="color:var(--red);font-weight:600">⚠️ 失败</span>`}
+          <span class="sub">${s.seconds}s${s.error ? ` ｜ ${esc(s.error)}` : ""}</span>
+        </div>`).join("");
+      box.innerHTML = `
+        <div class="hint" style="margin-bottom:6px">查询：${esc(r.query)} ｜ 可用源：${r.usable && r.usable.length ? esc(r.usable.join("、")) : "无"}</div>
+        ${rows}
+        <div class="hint" style="margin-top:6px">${esc(r.advice || "")}</div>`;
+    } catch (e) { box.innerHTML = `<div class="empty">检测失败：${esc(e.message)}</div>`; }
+  };
   $("#test-webhook").onclick = async () => {
     try {
       await api("/api/settings", { method: "POST", body: { settings: { notify_webhook: $("#s-webhook").value.trim() } } });

@@ -1343,6 +1343,8 @@ class Handler(BaseHTTPRequestHandler):
                 settings=db.get_settings(),
             )
             return send_json(self, {"ok": not err, "candidates": candidates, "error": err})
+        if api == "search" and len(parts) > 2 and parts[2] == "test":
+            return self._search_test()
         if api == "settings":
             data = read_json_body(self)
             settings = db.save_settings(data.get("settings", {}))
@@ -1613,6 +1615,61 @@ class Handler(BaseHTTPRequestHandler):
         if err:
             return send_json(self, {"ok": False, "msg": err}, 400)
         return send_json(self, {"ok": True, "intel": info})
+
+    def _search_test(self):
+        """搜索源自检：逐个源跑一条测试查询，报告可用/失败，帮用户定位“找不到客户”的原因。"""
+        data = read_json_body(self)
+        q = str(data.get("query") or "DWDM 采购").strip()[:60]
+        settings = db.get_settings()
+        test = dict(settings)
+        test.update({
+            "retry_max": 0, "use_search_cache": False,
+            "delay_search": 0.2, "delay_fetch": 0.2, "delay_default": 0.2,
+        })
+        from core import buyer, mapsearch
+        results = []
+
+        def _run(name, fn):
+            t0 = time.time()
+            try:
+                items = fn()
+                results.append({
+                    "name": name, "status": "ok",
+                    "count": len(items or []),
+                    "seconds": round(time.time() - t0, 1),
+                })
+            except Exception as e:
+                results.append({
+                    "name": name, "status": "fail",
+                    "error": str(e)[:150],
+                    "seconds": round(time.time() - t0, 1),
+                })
+
+        key = settings.get("search_api_key", "")
+        prov = settings.get("search_provider", "")
+        if prov == "serpapi" and key:
+            _run("SerpAPI（当前主源）", lambda: buyer.search_serpapi(q, 3, key, "", test))
+        elif prov == "google_cse" and key and settings.get("search_engine_id"):
+            _run("Google CSE（当前主源）", lambda: buyer.search_google_cse(q, 3, key, settings.get("search_engine_id", ""), test))
+        elif prov == "bocha" and key:
+            _run("博查（当前主源）", lambda: buyer.search_bocha(q, 3, key, "noLimit", test))
+        _run("360（免费）", lambda: buyer.search_so(q, 3, test))
+        _run("搜狗（免费）", lambda: buyer.search_sogou(q, 3, test))
+        _run("Bing（免费）", lambda: buyer.search_bing(q, 3, "", test))
+        if settings.get("map_api_key"):
+            _run("地图POI（高德）", lambda: mapsearch.run_map_search(
+                test, q.split()[0] if q.split() else q, "深圳", pages=1, max_results=3,
+            ))
+
+        usable = [r["name"] for r in results if r["status"] == "ok" and r["count"]]
+        return send_json(self, {
+            "ok": True, "query": q, "sources": results, "usable": usable,
+            "advice": (
+                "有可用源，引擎会自动使用它们。" if usable else
+                "所有搜索源都不可用：请检查 SerpAPI 配额/Key，或在设置里换博查（国内稳定），"
+                "并建议配置地图/工商密钥作为补充渠道。"
+            ),
+        })
 
     def _social_copy(self, data):
         scenario = data.get("scenario", "抖音评论引流")

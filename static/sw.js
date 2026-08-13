@@ -1,5 +1,5 @@
 /* 光纤获客助手 - 离线缓存 Service Worker */
-const CACHE = "yishankeji-v17";
+const CACHE = "yishankeji-v18";
 const PRECACHE = [
   "/",
   "/static/index.html",
