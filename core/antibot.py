@@ -20,6 +20,7 @@ import os
 import re
 import json
 import base64
+import http.client
 import time
 import random
 import threading
@@ -331,6 +332,64 @@ def _proxy_parts(proxy_url):
     return scheme + host, "Basic " + token
 
 
+class _ProxyResponse:
+    """http.client 响应包装，兼容调用方的 read()/geturl()/headers。"""
+
+    def __init__(self, resp, final_url):
+        self._r = resp
+        self.final_url = final_url
+
+    def read(self, *args, **kwargs):
+        return self._r.read(*args, **kwargs)
+
+    def geturl(self):
+        return self.final_url
+
+    @property
+    def headers(self):
+        return self._r.headers
+
+    @property
+    def status(self):
+        return self._r.status
+
+
+def _open_with_proxy(req, proxy_url, timeout):
+    """通过代理发起请求：HTTPS 走显式 CONNECT 隧道（把 Proxy-Authorization 传给代理）。
+
+    urllib 的 HTTPS 代理隧道不会转发手动添加的 Proxy-Authorization 头（已知限制），
+    这里用 http.client.set_tunnel(headers=...) 解决带认证代理的 407 问题。
+    """
+    proxy_clean, proxy_auth = _proxy_parts(proxy_url)
+    p = urllib.parse.urlparse(proxy_clean)
+    phost = p.hostname
+    pport = p.port or 80
+    target = urllib.parse.urlparse(req.full_url)
+    thost = target.hostname
+    tport = target.port or (443 if target.scheme == "https" else 80)
+    if target.scheme != "https":
+        return None  # HTTP 走 urllib（非隧道，手动头即可）
+    conn = http.client.HTTPSConnection(phost, pport, timeout=timeout)
+    try:
+        tunnel = {"Proxy-Authorization": proxy_auth} if proxy_auth else {}
+        conn.set_tunnel(thost, tport, headers=tunnel)
+        path = target.path or "/"
+        if target.query:
+            path += "?" + target.query
+        headers = {k: v for k, v in req.headers.items() if k.lower() != "proxy-authorization"}
+        conn.request(req.get_method(), path, body=req.data, headers=headers)
+        resp = conn.getresponse()
+        if resp.status in (407, 403, 429, 502, 503):
+            raise urllib.error.HTTPError(
+                req.full_url, resp.status, http.client.responses.get(resp.status, "error"),
+                resp.headers, None,
+            )
+        return _ProxyResponse(resp, req.full_url)
+    except Exception:
+        conn.close()
+        raise
+
+
 def request_with_antibot(url, settings=None, timeout=15, method="GET", data=None,
                          extra_headers=None, use_proxy=True, use_delay=True,
                          delay_key="default", max_retries=3):
@@ -369,6 +428,12 @@ def request_with_antibot(url, settings=None, timeout=15, method="GET", data=None
             if used_proxy:
                 # 带代理的请求：每次新建 opener（代理可能不同）
                 proxy_clean, proxy_auth = _proxy_parts(used_proxy)
+                if proxy_auth and urllib.parse.urlparse(url).scheme == "https":
+                    # HTTPS 隧道：显式传认证头，避免 urllib CONNECT 不带认证导致 407
+                    resp = _open_with_proxy(req, used_proxy, timeout)
+                    if pool:
+                        pool.mark_good(used_proxy)
+                    return resp, used_proxy
                 proxy_handler = urllib.request.ProxyHandler({
                     "http": proxy_clean,
                     "https": proxy_clean,
