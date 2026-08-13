@@ -1542,7 +1542,7 @@ async function renderBuyer() {
       $("#strategy-plans").innerHTML = `<div class="empty"><div class="ico">⏳</div>${esc(t.stage || "AI 生成中")}…（进度看右上角任务栏）</div>`;
       if (!strategyPolling) pollStrategy();
     } else if (t.status === "成功" && t.result && t.result.plans) {
-      renderPlans(t.result.plans);
+      renderPlans(t.result.plans, t.result.warnings || []);
     } else if (t.status === "失败") {
       $("#strategy-plans").innerHTML = `<div class="empty"><div class="ico">⚠️</div>${esc(t.message || "生成失败，请重试")}</div>`;
     }
@@ -1572,7 +1572,7 @@ async function pollStrategy() {
       return;
     }
     if (t.status === "成功" && t.result && t.result.plans) {
-      renderPlans(t.result.plans);
+      renderPlans(t.result.plans, t.result.warnings || []);
     } else {
       $("#strategy-plans").innerHTML = `<div class="empty"><div class="ico">⚠️</div>${esc(t.message || "生成失败，请重试")}</div>`;
     }
@@ -1580,7 +1580,7 @@ async function pollStrategy() {
   } catch (e) { strategyPolling = false; }
 }
 
-function renderPlans(plans) {
+function renderPlans(plans, warnings) {
   const box = $("#strategy-plans");
   if (!box) return;
   if (!plans.length) {
@@ -1593,6 +1593,7 @@ function renderPlans(plans) {
       <b>🤖 AI 获客方案（${plans.length} 套）</b>
       <button class="btn sm" id="plans-toggle">收起 ▲</button>
     </div>
+    ${warnings && warnings.length ? `<div style="margin:0 0 10px;padding:8px 10px;background:#fff8e1;border:1px solid #f0d27a;border-radius:8px;font-size:12px;color:#8a5a00">⚠️ 方案自检：${warnings.map((w) => esc(w)).join("；")}</div>` : ""}
     <div id="plans-body">` + plans.map((p, i) => `
     <div style="border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:10px">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
@@ -1610,8 +1611,12 @@ function renderPlans(plans) {
         <span style="color:#e8913a">利润 ${stars(p.profit)}</span>
         <span style="color:#8b5cf6;margin-left:12px">知名度 ${stars(p.brand)}</span>
         <span style="color:#0ea5b7;margin-left:12px">需求量 ${stars(p.demand)}</span>
+        ${p.effort ? `<span style="color:#64748b;margin-left:12px">难度 ${stars(p.effort)}</span>` : ""}
         ${p.cooperation ? `<span class="type-chip" style="margin-left:12px">${esc(p.cooperation)}</span>` : ""}
       </div>
+      ${p.timeline ? `<div class="hint" style="margin-top:6px">🗓 ${esc(p.timeline)}</div>` : ""}
+      ${p.pitch ? `<div style="margin-top:6px;background:#eef6ff;border-radius:8px;padding:8px 10px;font-size:12px">💬 首触：${esc(p.pitch)}</div>` : ""}
+      ${p.why ? `<div class="hint" style="margin-top:6px">✅ 推荐理由：${esc(p.why)}</div>` : ""}
       ${p.strategy ? `<div class="hint" style="margin-top:6px">💡 ${esc(p.strategy)}</div>` : ""}
       ${p.channels && p.channels.length ? `<div class="hint" style="margin-top:6px">📡 渠道：${p.channels.map((c) => `<span class="tag-chip">${esc(c)}</span>`).join("")}</div>` : ""}
       ${p.risks && p.risks.length ? `<div class="hint" style="margin-top:6px">⚠️ 风险：${esc(p.risks.join("；"))}</div>` : ""}

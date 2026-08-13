@@ -518,6 +518,36 @@ def _mail_sequence_loop():
         time.sleep(60)
 
 
+def _validate_plans(plans):
+    """方案合理性自检：提示缺失字段、关键词不足、方案同质化，帮助用户判断方案质量。"""
+    warnings = []
+    if len(plans) < 3:
+        warnings.append(f"方案只有 {len(plans)} 套，建议至少 3 套以上再对比")
+    roles = set()
+    markets = set()
+    for i, p in enumerate(plans, 1):
+        label = f"方案{i}({p.get('title', '')[:20] or '未命名'})"
+        if not p.get("buyer_role"):
+            warnings.append(f"{label}：缺少目标买方角色")
+        else:
+            roles.add(p["buyer_role"])
+        if not p.get("markets"):
+            warnings.append(f"{label}：缺少目标市场")
+        else:
+            markets.update(p["markets"])
+        if len(p.get("keywords") or []) < 4:
+            warnings.append(f"{label}：关键词不足 4 个（当前 {len(p.get('keywords') or [])}），搜索覆盖会偏窄")
+        if not p.get("strategy"):
+            warnings.append(f"{label}：缺少获客策略建议")
+        if not p.get("pitch"):
+            warnings.append(f"{label}：缺少首触话术，建议补充后直接可用")
+    if len(roles) < 2:
+        warnings.append("方案之间的目标买方角色趋同，建议覆盖不同角色以扩大覆盖面")
+    if len(markets) < 2:
+        warnings.append("方案之间的目标市场趋同，建议覆盖不同地区")
+    return warnings
+
+
 def _strategy_worker(data, settings):
     """后台线程：AI 生成获客方案。"""
     desc = str(data.get("description", "")).strip()
@@ -525,16 +555,22 @@ def _strategy_worker(data, settings):
     industry = settings.get("industry", "") or "通用"
     system = (
         f"你是一名资深 B2B 获客策略顾问，当前服务行业：{industry}。我们是卖家，目标是为我们找到有真实采购意向的买家。"
-        "根据用户的业务描述，设计 3-5 套不同的获客方案，覆盖不同客户类型、地区和利润组合。"
+        "根据用户的业务描述，设计 4-5 套不同的获客方案，必须覆盖不同客户类型/市场/打法组合；"
+        "方案之间要差异化：buyer_role 或 markets 至少两两不同，禁止出几套几乎一样的方案；"
+        "每套方案都要自问三个问题再输出：① 这类客户为什么现在会买（需求触发点）？② 我们凭什么切入（差异化打法）？"
+        "③ 落地第一步做什么（首触动作）？写进对应字段。"
         '只输出一个 JSON 对象，不要输出任何其他内容，格式：'
         '{"plans":[{"title":"方案标题","buyer_role":"目标买方角色（如采购经理/总包/集成商/分销商）",'
         '"target_customers":"目标客户描述","keywords":["关键词1","关键词2"],'
         '"markets":["地区1","地区2"],"profit":1到5的整数,"brand":1到5的整数,"demand":1到5的整数,'
+        '"effort":1到5的整数(落地难度，5最难),"timeline":"建议执行节奏(如：1周内建名单+首触，2周内送样)",'
+        '"pitch":"一句话首触话术/切入点","why":"这套方案的推荐理由与适用前提",'
         '"strategy":"获客策略建议","cooperation":"合作模式","channels":["获客渠道1","获客渠道2"],'
         '"risks":["风险提示1","风险提示2"]}]}'
         "关键词规则：每条必须是【产品/场景词 + 买方意图词】的组合，例如“WDM 采购公告”“光传输扩容 项目方”"
         "“data center fiber procurement”；禁止只写产品名词，禁止包含百科/论文/新闻/知乎/高校等无效词；"
-        "海外市场的关键词用英文意图词（buyer/purchase/procurement/tender/RFP）。"
+        "海外市场的关键词用英文意图词（buyer/purchase/procurement/tender/RFP）；"
+        "每套 8-12 个关键词，尽量覆盖不同搜索场景（招标/询价/扩产/展会/供应商征集）。"
     )
     user = (
         f"公司：{settings.get('company_name', '')}\n"
@@ -542,7 +578,8 @@ def _strategy_worker(data, settings):
         f"业务描述：{desc}\n\n"
         "请生成方案。关键词请给出可直接用于搜索引擎的短语（每套 8-12 个，尽量覆盖不同场景和地区，海外市场用英文）；"
         "利润/知名度/需求量用 1-5 整数表示（5 最高）；channels 给出 2-4 个可执行获客渠道（如展会/B2B平台/社群/邮件）；"
-        "risks 给出 1-3 条风险提示（如竞争激烈/资质门槛/账期）。"
+        "risks 给出 1-3 条风险提示（如竞争激烈/资质门槛/账期）；effort 用 1-5 表示落地难度；"
+        "pitch 必须是一句可直接发出去的开场话术；why 必须说清为什么这套方案适合当前业务、前提是什么。"
     )
     text, err = ai.generate_copy(
         settings.get("openai_api_key"),
@@ -566,8 +603,10 @@ def _strategy_worker(data, settings):
                 profit = int(p.get("profit", 3) or 3)
                 brand = int(p.get("brand", 3) or 3)
                 demand = int(p.get("demand", 3) or 3)
+                effort = int(p.get("effort", 3) or 3)
             except Exception:
                 profit = brand = demand = 3
+                effort = 3
             markets_list = [str(x).strip() for x in (p.get("markets") or []) if str(x).strip()][:4]
             keywords = buyer.polish_plan_keywords(p.get("keywords"), markets_list)
             plans.append({
@@ -579,6 +618,10 @@ def _strategy_worker(data, settings):
                 "profit": min(5, max(1, profit)),
                 "brand": min(5, max(1, brand)),
                 "demand": min(5, max(1, demand)),
+                "effort": min(5, max(1, effort)),
+                "timeline": str(p.get("timeline", ""))[:120],
+                "pitch": str(p.get("pitch", ""))[:120],
+                "why": str(p.get("why", ""))[:200],
                 "strategy": str(p.get("strategy", ""))[:300],
                 "cooperation": str(p.get("cooperation", ""))[:120],
                 "channels": [str(c).strip() for c in (p.get("channels") or []) if str(c).strip()][:4],
@@ -597,7 +640,8 @@ def _strategy_worker(data, settings):
         plans = [v[1] for v in best_by_sig.values()]
         # 按综合评分降序排列（利润+需求量+知名度），最优方案排最前
         plans.sort(key=lambda p: p["profit"] + p["demand"] + p["brand"], reverse=True)
-        _tasks["strategy"]["result"] = {"plans": plans}
+        warnings = _validate_plans(plans)
+        _tasks["strategy"]["result"] = {"plans": plans, "warnings": warnings}
         task_finish("strategy", "成功", f"生成 {len(plans)} 套方案")
     except Exception as e:
         task_finish("strategy", "失败", f"方案解析失败：{e}")

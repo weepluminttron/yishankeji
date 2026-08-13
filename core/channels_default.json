@@ -1,0 +1,390 @@
+{
+  "_comment": "多源获客渠道配置。每个渠道（channel）是一个可独立启停、可配置的搜索来源。引擎按 conditions.channels 类别或 --channels 指定的渠道 id 启用对应来源，从不同途径自动发起网络搜索并采集潜在客户。修改本文件即可灵活扩展新渠道，无需改动代码。",
+  "categories": {
+    "search_engine": "通用搜索引擎（已有 search_provider 能力的承接层）",
+    "social_media": "社交媒体 / 职场社交（LinkedIn、Facebook、Reddit、X 等）",
+    "industry_site": "行业垂直网站 / 媒体（通信、光电、光通信专业站点）",
+    "forum": "论坛 / 问答社区（知乎、CSDN、Quora 等）",
+    "procurement": "招投标 / 政府采购平台",
+    "company_db": "工商企业库（企查查 / 天眼查 / 爱企查，用于发现公司主页）",
+    "map": "地图 POI（高德 / 腾讯地图，按城市拉取本地厂商）"
+  },
+  "channels": [
+    {
+      "id": "bing",
+      "name": "Bing 搜索",
+      "category": "search_engine",
+      "provider": "bing",
+      "site_scope": "",
+      "query_template": "{kw} {intent} {market}",
+      "enabled_default": true,
+      "requires_key": "",
+      "rate_limit": 0.3,
+      "freshness": "",
+      "access_params": {
+        "说明": "免费公开搜索，无需密钥。复用 core.buyer.search_bing（HTML 解析 b_algo 结果）。",
+        "endpoint": "https://www.bing.com/search",
+        "限制": "免费源易被反爬返回罐头结果，命中率不稳定，建议配合 SerpAPI/博查 使用。"
+      },
+      "keyword_config": "关键词模板 {kw}=规格词，{intent}=买方意图词（采购/招标/询价…），{market}=目标地区。留空 site_scope 即全站搜索。"
+    },
+    {
+      "id": "so360",
+      "name": "360 搜索",
+      "category": "search_engine",
+      "provider": "so",
+      "site_scope": "",
+      "query_template": "{kw} {intent} {market}",
+      "enabled_default": true,
+      "requires_key": "",
+      "rate_limit": 0.3,
+      "freshness": "",
+      "access_params": {
+        "说明": "免费备用源，无需密钥。复用 core.buyer.search_so（真实地址在 data-mdurl 属性）。",
+        "endpoint": "https://www.so.com/s",
+        "限制": "国内服务器可用，被限流时会抛错并自动降级到搜狗/Bing。"
+      },
+      "keyword_config": "同 Bing，{site} 为空。适合作为免费兜底源。"
+    },
+    {
+      "id": "sogou",
+      "name": "搜狗搜索",
+      "category": "search_engine",
+      "provider": "sogou",
+      "site_scope": "",
+      "query_template": "{kw} {intent} {market}",
+      "enabled_default": true,
+      "requires_key": "",
+      "rate_limit": 0.3,
+      "freshness": "",
+      "access_params": {
+        "说明": "免费备用源，无需密钥。复用 core.buyer.search_sogou（/link?url= 跳转自动跟随）。",
+        "endpoint": "https://www.sogou.com/web",
+        "限制": "频繁访问需验证码，作为兜底源。"
+      },
+      "keyword_config": "同 Bing。"
+    },
+    {
+      "id": "serpapi",
+      "name": "SerpAPI（Google）",
+      "category": "search_engine",
+      "provider": "serpapi",
+      "site_scope": "",
+      "query_template": "{kw} {intent} {market}",
+      "enabled_default": false,
+      "requires_key": "search_api_key",
+      "rate_limit": 0.2,
+      "freshness": "",
+      "access_params": {
+        "说明": "稳定商业搜索 API，需 SerpAPI Key（settings.search_api_key）。",
+        "endpoint": "https://serpapi.com/search.json",
+        "限制": "按次计费，配额耗尽自动降级到免费源。"
+      },
+      "keyword_config": "同 Bing；支持 tbs 时间范围（由 settings.search_freshness 控制）。"
+    },
+    {
+      "id": "google_cse",
+      "name": "Google CSE",
+      "category": "search_engine",
+      "provider": "google_cse",
+      "site_scope": "",
+      "query_template": "{kw} {intent} {market}",
+      "enabled_default": false,
+      "requires_key": "search_api_key",
+      "rate_limit": 0.2,
+      "freshness": "",
+      "access_params": {
+        "说明": "Google 自定义搜索，需 API Key + 引擎 ID（settings.search_api_key / search_engine_id）。",
+        "endpoint": "https://www.googleapis.com/customsearch/v1",
+        "限制": "每日免费配额 100 次，超出需计费。"
+      },
+      "keyword_config": "同 Bing。"
+    },
+    {
+      "id": "bocha",
+      "name": "博查 AI 搜索",
+      "category": "search_engine",
+      "provider": "bocha",
+      "site_scope": "",
+      "query_template": "{kw} {intent} {market}",
+      "enabled_default": false,
+      "requires_key": "search_api_key",
+      "rate_limit": 0.2,
+      "freshness": "",
+      "access_params": {
+        "说明": "国内稳定搜索 API，需博查 Key（settings.search_api_key，64 位 hex）。",
+        "endpoint": "https://api.bochaai.com/v1/web-search",
+        "限制": "按额度计费；支持 freshness 时间范围。"
+      },
+      "keyword_config": "同 Bing；freshness 由 settings.search_freshness 控制。"
+    },
+    {
+      "id": "linkedin",
+      "name": "LinkedIn（领英）",
+      "category": "social_media",
+      "provider": "bing",
+      "site_scope": "linkedin.com",
+      "query_template": "{kw} {intent} {site}",
+      "enabled_default": true,
+      "requires_key": "",
+      "rate_limit": 0.3,
+      "freshness": "",
+      "access_params": {
+        "说明": "职场社交，用 site:linkedin.com 限定域名（复用搜索后端，免费源即可）。",
+        "endpoint": "搜索引擎 site: 限定",
+        "限制": "LinkedIn 页面多需登录，抓取联系方式成功率中等；适合发现公司/采购人主页。"
+      },
+      "keyword_config": "模板 {site}=site:linkedin.com，{intent}=buyer/采购经理 等买方侧词，精准定位海外/国内采购决策人。"
+    },
+    {
+      "id": "facebook",
+      "name": "Facebook",
+      "category": "social_media",
+      "provider": "bing",
+      "site_scope": "facebook.com",
+      "query_template": "{kw} {intent} {site}",
+      "enabled_default": true,
+      "requires_key": "",
+      "rate_limit": 0.3,
+      "freshness": "",
+      "access_params": {
+        "说明": "社交主页/群组，site:facebook.com 限定。",
+        "endpoint": "搜索引擎 site: 限定",
+        "限制": "公开信息有限，适合海外中小买家线索。"
+      },
+      "keyword_config": "同 LinkedIn，偏海外买方。"
+    },
+    {
+      "id": "reddit",
+      "name": "Reddit",
+      "category": "social_media",
+      "provider": "bing",
+      "site_scope": "reddit.com",
+      "query_template": "{kw} {intent} {site}",
+      "enabled_default": true,
+      "requires_key": "",
+      "rate_limit": 0.3,
+      "freshness": "",
+      "access_params": {
+        "说明": "海外社区，site:reddit.com 限定；r/networking、r/telecom 等版块常有采购讨论。",
+        "endpoint": "搜索引擎 site: 限定",
+        "限制": "讨论多、成交意向弱，需结合意图过滤。"
+      },
+      "keyword_config": "英文意图词 buyer/rfq/sourcing 更准。"
+    },
+    {
+      "id": "x",
+      "name": "X / Twitter",
+      "category": "social_media",
+      "provider": "bing",
+      "site_scope": "twitter.com,x.com",
+      "query_template": "{kw} {intent} {site}",
+      "enabled_default": true,
+      "requires_key": "",
+      "rate_limit": 0.3,
+      "freshness": "",
+      "access_params": {
+        "说明": "实时动态，site:twitter.com site:x.com 限定。",
+        "endpoint": "搜索引擎 site: 限定",
+        "限制": "短文本，需配合 freshness=day/week 才有价值。"
+      },
+      "keyword_config": "配合 settings.search_freshness 收窄到近期。"
+    },
+    {
+      "id": "c114",
+      "name": "C114 通信网",
+      "category": "industry_site",
+      "provider": "bing",
+      "site_scope": "c114.com.cn",
+      "query_template": "{kw} {intent} {site}",
+      "enabled_default": true,
+      "requires_key": "",
+      "rate_limit": 0.3,
+      "freshness": "",
+      "access_params": {
+        "说明": "国内光通信权威媒体，site:c114.com.cn 限定；新闻/商机/展商集中。",
+        "endpoint": "搜索引擎 site: 限定",
+        "限制": "新闻类噪音多，已内置过滤；偏招标/采购公告类高价值。"
+      },
+      "keyword_config": "意图词用 招标/采购/中标 更易命中商机页。"
+    },
+    {
+      "id": "ofweek",
+      "name": "OFweek 光通讯",
+      "category": "industry_site",
+      "provider": "bing",
+      "site_scope": "ofweek.com",
+      "query_template": "{kw} {intent} {site}",
+      "enabled_default": true,
+      "requires_key": "",
+      "rate_limit": 0.3,
+      "freshness": "",
+      "access_params": {
+        "说明": "光电/激光行业媒体，site:ofweek.com 限定。",
+        "endpoint": "搜索引擎 site: 限定",
+        "限制": "偏厂商新闻，需意图过滤剔除同行。"
+      },
+      "keyword_config": "意图词 采购/询价/项目。"
+    },
+    {
+      "id": "lightreading",
+      "name": "Light Reading",
+      "category": "industry_site",
+      "provider": "bing",
+      "site_scope": "lightreading.com",
+      "query_template": "{kw} {intent} {site}",
+      "enabled_default": true,
+      "requires_key": "",
+      "rate_limit": 0.3,
+      "freshness": "",
+      "access_params": {
+        "说明": "海外电信媒体，site:lightreading.com 限定；适合欧美/海外买方。",
+        "endpoint": "搜索引擎 site: 限定",
+        "限制": "英文，配合海外地区与英文意图词。"
+      },
+      "keyword_config": "英文意图词 buyer/procurement/tender。"
+    },
+    {
+      "id": "zhihu",
+      "name": "知乎",
+      "category": "forum",
+      "provider": "bing",
+      "site_scope": "zhihu.com",
+      "query_template": "{kw} {intent} {site}",
+      "enabled_default": true,
+      "requires_key": "",
+      "rate_limit": 0.3,
+      "freshness": "",
+      "access_params": {
+        "说明": "中文问答社区，site:zhihu.com 限定；问题/文章常含真实需求方。",
+        "endpoint": "搜索引擎 site: 限定",
+        "限制": "讨论噪音高，仅保留含明确采购意图的词条。"
+      },
+      "keyword_config": "意图词 采购/求购/哪家好（需求方语境）。"
+    },
+    {
+      "id": "csdn",
+      "name": "CSDN",
+      "category": "forum",
+      "provider": "bing",
+      "site_scope": "csdn.net",
+      "query_template": "{kw} {intent} {site}",
+      "enabled_default": true,
+      "requires_key": "",
+      "rate_limit": 0.3,
+      "freshness": "",
+      "access_params": {
+        "说明": "技术社区，site:csdn.net 限定；工程师选型/采购讨论。",
+        "endpoint": "搜索引擎 site: 限定",
+        "限制": "偏技术，需意图过滤。"
+      },
+      "keyword_config": "意图词 选型/采购/方案。"
+    },
+    {
+      "id": "quora",
+      "name": "Quora",
+      "category": "forum",
+      "provider": "bing",
+      "site_scope": "quora.com",
+      "query_template": "{kw} {intent} {site}",
+      "enabled_default": true,
+      "requires_key": "",
+      "rate_limit": 0.3,
+      "freshness": "",
+      "access_params": {
+        "说明": "海外问答，site:quora.com 限定。",
+        "endpoint": "搜索引擎 site: 限定",
+        "限制": "英文，偏海外。"
+      },
+      "keyword_config": "英文意图词。"
+    },
+    {
+      "id": "cn_procurement",
+      "name": "政府采购/招投标平台",
+      "category": "procurement",
+      "provider": "bing",
+      "site_scope": "ccgp.gov.cn,zfcg.gov.cn",
+      "query_template": "{kw} {intent} {site}",
+      "enabled_default": true,
+      "requires_key": "",
+      "rate_limit": 0.3,
+      "freshness": "week",
+      "access_params": {
+        "说明": "中央/地方政府采购网，site:ccgp.gov.cn site:zfcg.gov.cn 限定；强买方意图。",
+        "endpoint": "搜索引擎 site: 限定",
+        "限制": "需 freshness 收窄到本周才有价值；命中即高价值线索。"
+      },
+      "keyword_config": "意图词 招标/中标/采购公告/集采；强制 site 限定到政府域名。"
+    },
+    {
+      "id": "qcc",
+      "name": "企查查/天眼查（公司发现）",
+      "category": "company_db",
+      "provider": "bing",
+      "site_scope": "qcc.com,aiqicha.baidu.com,tianyancha.com",
+      "query_template": "{kw} 公司 官网 {site}",
+      "enabled_default": true,
+      "requires_key": "",
+      "rate_limit": 0.3,
+      "freshness": "",
+      "access_params": {
+        "说明": "工商库内检索目标公司主页/简介（site 限定），用于发现公司官网以便后续抓取联系方式。如需补全工商登记电话/邮箱，请配置 qcc_app_key/tyc_token 走 enrich_with_company_api。",
+        "endpoint": "搜索引擎 site: 限定",
+        "限制": "工商库本身不暴露联系方式，仅作公司发现入口。"
+      },
+      "keyword_config": "模板固定 {kw} 公司 官网 + site 限定，弱化意图词。"
+    },
+    {
+      "id": "amap",
+      "name": "高德地图 POI",
+      "category": "map",
+      "provider": "map",
+      "site_scope": "",
+      "query_template": "{kw} {market}",
+      "enabled_default": false,
+      "requires_key": "map_api_key",
+      "rate_limit": 0.5,
+      "freshness": "",
+      "access_params": {
+        "说明": "按关键词+城市拉取 POI 厂商（core.mapsearch.run_map_search），需 map_api_key + map_provider。",
+        "endpoint": "高德/腾讯地图 POI API",
+        "限制": "需地图 Key；返回厂商名/电话/地址，直接作为候选。"
+      },
+      "keyword_config": "由引擎按区域名映射城市后逐城检索；与 web_search 互补。"
+    },
+    {
+      "id": "zhaopin",
+      "name": "???????/????????",
+      "category": "procurement",
+      "provider": "bing",
+      "site_scope": "zhipin.com,liepin.com,51job.com",
+      "query_template": "{kw} ?? ?? {site}",
+      "enabled_default": true,
+      "requires_key": "",
+      "rate_limit": 0.3,
+      "freshness": "",
+      "access_params": {
+        "??": "??????????????????????????",
+        "endpoint": "???? site: ??"
+      },
+      "keyword_config": "???? ??/??/??? ?????????"
+    },
+    {
+      "id": "cninfo",
+      "name": "??????/??",
+      "category": "company_db",
+      "provider": "bing",
+      "site_scope": "cninfo.com.cn",
+      "query_template": "{kw} ?? ?? ?? {site}",
+      "enabled_default": true,
+      "requires_key": "",
+      "rate_limit": 0.3,
+      "freshness": "month",
+      "access_params": {
+        "??": "????????????/???????",
+        "endpoint": "???? site: ??"
+      },
+      "keyword_config": "???? ??/??/??/????"
+    }
+  ]
+}

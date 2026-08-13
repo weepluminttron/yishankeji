@@ -151,6 +151,16 @@ def main():
     assert ab.human_delay({"delay_default": "abc"}, key="default") >= 0.1
     print("9) 非法配置安全解析 OK")
 
+    # 10) 仓库默认渠道配置可回退（服务器无 data/channels_config.json 时也能启用全部渠道）
+    import pathlib
+
+    default_path = str(pathlib.Path("core/channels_default.json"))
+    cfg_default = channels.load_channel_config(default_path)
+    assert len(cfg_default["channels"]) >= 20, len(cfg_default["channels"])
+    ids_default = {c["id"] for c in cfg_default["channels"]}
+    assert "zhaopin" in ids_default and "cninfo" in ids_default
+    print("10) 默认渠道配置 OK，渠道数:", len(cfg_default["channels"]))
+
     print("\nALL CHANNEL TESTS OK")
 
 

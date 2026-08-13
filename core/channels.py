@@ -42,6 +42,7 @@ import re
 from core import concurrent_search
 
 _CONFIG_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "channels_config.json")
+_DEFAULT_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "channels_default.json")
 
 # provider 取值 → 是否由 buyer 的“网页搜索后端”承接（需要走 search_web 的 provider 选择/缓存）
 _WEB_PROVIDERS = ("bing", "so", "sogou", "serpapi", "google_cse", "bocha")
@@ -96,13 +97,17 @@ def load_channel_config(path=None):
     """加载渠道配置；缺文件/解析失败时回退内置兜底配置。结果带默认字段补全。"""
     if _cache["cfg"] is not None and path is None:
         return _cache["cfg"]
-    p = path or _CONFIG_PATH
     cfg = None
-    try:
-        with open(p, encoding="utf-8") as f:
-            cfg = json.load(f)
-    except Exception:
-        cfg = None
+    # 优先用户配置 data/channels_config.json，其次仓库默认 core/channels_default.json，最后内置最小兜底
+    for cand in (path or _CONFIG_PATH, _DEFAULT_CONFIG_PATH):
+        try:
+            with open(cand, encoding="utf-8") as f:
+                cand_cfg = json.load(f)
+            if cand_cfg and isinstance(cand_cfg.get("channels"), list) and cand_cfg["channels"]:
+                cfg = cand_cfg
+                break
+        except Exception:
+            cfg = None
     if not cfg or not isinstance(cfg.get("channels"), list) or not cfg["channels"]:
         cfg = json.loads(json.dumps(_BUILTIN))
     # 字段补全，保证下游不 KeyError
