@@ -2534,7 +2534,7 @@ async function renderSettings() {
       <div class="hint">推荐用博查 AI 搜索（国内稳定、结果精准，平台：open.bochaai.com）；也可用免费 360/搜狗，或 SerpAPI 走 Google（serpapi.com）。</div>
       <div class="toolbar" style="margin-top:10px;margin-bottom:0">
         <button class="btn" id="s-search-test">🧪 检测搜索源</button>
-        <span class="hint">找不到客户时先点这里，看哪些搜索源可用、哪些被限流</span>
+        <span class="hint">找不到客户时先点这里；每个源最多等 18 秒，超时自动跳过</span>
       </div>
       <div id="s-search-test-result" style="margin-top:8px"></div>
     </div>

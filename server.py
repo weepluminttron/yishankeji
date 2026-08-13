@@ -1627,15 +1627,24 @@ class Handler(BaseHTTPRequestHandler):
             "delay_search": 0.2, "delay_fetch": 0.2, "delay_default": 0.2,
         })
         from core import buyer, mapsearch
+        from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutTimeout
         results = []
 
         def _run(name, fn):
             t0 = time.time()
+            ex = ThreadPoolExecutor(max_workers=1)
+            fut = ex.submit(fn)
             try:
-                items = fn()
+                items = fut.result(timeout=18)
                 results.append({
                     "name": name, "status": "ok",
                     "count": len(items or []),
+                    "seconds": round(time.time() - t0, 1),
+                })
+            except FutTimeout:
+                results.append({
+                    "name": name, "status": "fail",
+                    "error": "超时（>18秒，该源可能被墙或限流）",
                     "seconds": round(time.time() - t0, 1),
                 })
             except Exception as e:
@@ -1644,6 +1653,8 @@ class Handler(BaseHTTPRequestHandler):
                     "error": str(e)[:150],
                     "seconds": round(time.time() - t0, 1),
                 })
+            finally:
+                ex.shutdown(wait=False)
 
         key = settings.get("search_api_key", "")
         prov = settings.get("search_provider", "")
