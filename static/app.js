@@ -1623,8 +1623,25 @@ function renderPlans(plans) {
     // 方案 → 引擎条件：规格/市场/买方角色 一键带入并启动
     state.acqPlan = p;  // 完整方案（标题/评级/策略/合作/渠道/风险）随引擎一起传递
     $("#acq-products").value = p.target_customers || "";
-    // 方案关键词是“搜索式”（如 DWDM 招标公告），放到检索种子词，不做必中规格硬过滤
-    $("#acq-specs").value = "";
+    // 从方案关键词提取干净的产品词填“必中规格”（去掉 采购/招标/公告 等意图后缀）
+    const specs = [];
+    (p.keywords || []).forEach((kw) => {
+      const kwText = String(kw || "").trim();
+      // 在第一个买方意图词处切分，只保留前面的产品/场景词
+      let s = kwText.split(/\s+(?:采购经理|扩容项目|项目方|采购公告|招标公告|询价公告|中标公告|采购|招标|询价|求购|公告|中标|项目|需求|供应商|procurement|tender|rfq|rfp|purchase|buyer|sourcing|inquiry|distributor|dealer|supplier)\b/i)[0] || "";
+      s = s.trim();
+      // 没有“空格+意图词”时，尝试直接去掉结尾的意图词（如“光模块需求”）
+      if (s === kwText) {
+        s = kwText.replace(/(?:采购经理|扩容项目|项目方|采购公告|招标公告|询价公告|中标公告|采购|招标|询价|求购|公告|中标|项目|需求|供应商|procurement|tender|rfq|rfp|purchase|buyer|sourcing|inquiry|distributor|dealer|supplier)\s*$/i, "").trim();
+      }
+      // 首段仍含意图词时（如“采购经理”），退而取关键词第一个词
+      if (!s || /(采购|招标|询价|求购|公告|中标|项目|需求|供应商|procurement|tender|rfq|rfp|purchase|buyer)/i.test(s)) {
+        s = kwText.split(/\s+/)[0] || "";
+      }
+      s = s.trim();
+      if (s && specs.indexOf(s) < 0) specs.push(s);
+    });
+    $("#acq-specs").value = specs.slice(0, 5).join(",");
     $("#acq-seeds").value = (p.keywords || []).join(",");
     $("#acq-regions").value = (p.markets || []).join(",");
     $("#acq-types").value = p.buyer_role || "";

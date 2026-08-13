@@ -352,8 +352,20 @@ def classify_region(text, fallback="其他"):
 
 
 def _match_specs(text, specs):
+    """规格匹配：整串命中优先；复合规格再按“品类词”拆分，任一品类词命中即算命中。"""
     t = (text or "").lower()
-    hit = [s for s in specs if s.lower() in t]
+    hit = []
+    for s in specs:
+        s = str(s or "").strip()
+        if not s:
+            continue
+        if s.lower() in t:
+            hit.append(s)
+            continue
+        # “电信运营商 光模块”这类复合规格，按词拆分匹配（长度≥2 的品类词）
+        toks = [x for x in re.split(r"[\s,，、/|]+", s) if len(x) >= 2]
+        if any(x.lower() in t for x in toks):
+            hit.append(s)
     return hit
 
 
