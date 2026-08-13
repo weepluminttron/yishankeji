@@ -245,60 +245,101 @@ def polish_plan_keywords(keywords, markets):
 def search_bing(query, count=5, qdr="", settings=None):
     """Bing 搜索（接入反爬：随机延时 + UA 轮换 + 代理池 + 重试退避）。"""
     antibot.human_delay(settings, key="search")  # 行为模拟：请求前随机延时
-    url = ("https://www.bing.com/search?q=" + urllib.parse.quote(query)
-           + "&count=" + str(max(3, min(10, count)))
-           + (("&qdr=" + qdr) if qdr else ""))
-    html_text, _ = fetch_page(url, settings=settings)
-    # 反爬检测：被拦截时重试/降级
-    if antibot.detect_block(html_text):
-        antibot.record_stats("blocked_detected")
-        raise ValueError("Bing 检测到反爬拦截，已触发重试/降级")
-    doc = lh.fromstring(html_text)
-    results = []
-    for li in doc.xpath("//li[contains(@class,'b_algo')]")[:count]:
-        a = li.xpath(".//h2/a | .//a")
-        if not a:
+    common = ("&count=" + str(max(3, min(10, count)))
+              + "&mkt=zh-CN&setlang=zh-hans"
+              + (("&qdr=" + qdr) if qdr else ""))
+    # 主站 → cn 站 双地址兜底（机房 IP 常被 www 版反爬）
+    for host in ("https://www.bing.com/search?", "https://cn.bing.com/search?"):
+        url = host + "q=" + urllib.parse.quote(query) + common
+        try:
+            html_text, _ = fetch_page(url, settings=settings)
+        except Exception:
             continue
-        a = a[0]
-        href = (a.get("href") or "").strip()
-        title = _clean_text(a.text_content())
-        if not title or not href.startswith("http"):
+        if antibot.detect_block(html_text):
+            antibot.record_stats("blocked_detected")
             continue
-        p = li.xpath(".//p")
-        snippet = _clean_text(p[0].text_content()) if p else ""
-        results.append({"title": title, "url": href, "snippet": snippet})
-    return results
+        doc = lh.fromstring(html_text)
+        results = []
+        for li in doc.xpath("//li[contains(@class,'b_algo')]")[:count]:
+            a = li.xpath(".//h2/a | .//a")
+            if not a:
+                continue
+            a = a[0]
+            href = (a.get("href") or "").strip()
+            title = _clean_text(a.text_content())
+            if not title or not href.startswith("http"):
+                continue
+            p = li.xpath(".//p")
+            snippet = _clean_text(p[0].text_content()) if p else ""
+            results.append({"title": title, "url": href, "snippet": snippet})
+        if results:
+            return results
+        # 兜底：抓取通用标题链接
+        fallback = []
+        seen = set()
+        for a in doc.xpath("//h2/a | //h3/a | //li//a[@href]")[:count * 2]:
+            href = (a.get("href") or "").strip()
+            title = _clean_text(a.text_content())
+            if not title or len(title) < 4 or not href.startswith("http") or href in seen:
+                continue
+            seen.add(href)
+            fallback.append({"title": title, "url": href, "snippet": ""})
+            if len(fallback) >= count:
+                break
+        if fallback:
+            return fallback
+    raise ValueError("Bing 检测到反爬拦截，已触发重试/降级")
 
 
 def search_so(query, count=6, settings=None):
     """360 搜索（免费，国内服务器可用）。真实地址在 data-mdurl 属性里。"""
     antibot.human_delay(settings, key="search")
-    url = "https://www.so.com/s?q=" + urllib.parse.quote(query)
-    html_text, _ = fetch_page(url, settings=settings)
-    if len(html_text) < 12000 and ("访问异常" in html_text or "安全验证" in html_text or "captcha" in html_text.lower()):
-        antibot.record_stats("blocked_detected")
-        raise ValueError("360 搜索暂时被限流（访问异常），请稍后再试，或到“设置 → 搜索接口”配置 SerpAPI 更稳定")
-    doc = lh.fromstring(html_text)
-    results = []
-    for li in doc.xpath("//li[contains(@class,'res-list')]")[:count]:
-        a = li.xpath(".//h3/a | .//a[contains(@class,'res-title')]")
-        if not a:
+    # 桌面版 → 移动版 双地址兜底
+    for host in ("https://www.so.com/s?", "https://m.so.com/s?"):
+        url = host + "q=" + urllib.parse.quote(query)
+        try:
+            html_text, _ = fetch_page(url, settings=settings)
+        except Exception:
             continue
-        a = a[0]
-        href = (a.get("data-mdurl") or a.get("href") or "").strip()
-        title = _clean_text(a.text_content())
-        if not title or not href.startswith("http"):
+        if len(html_text) < 12000 and ("访问异常" in html_text or "安全验证" in html_text or "captcha" in html_text.lower()):
+            antibot.record_stats("blocked_detected")
             continue
-        block = _clean_text(li.text_content())
-        snippet = block.replace(title, "", 1).strip()[:160]
-        results.append({"title": title, "url": href, "snippet": snippet})
-    return results
+        doc = lh.fromstring(html_text)
+        results = []
+        for li in doc.xpath("//li[contains(@class,'res-list')]")[:count]:
+            a = li.xpath(".//h3/a | .//a[contains(@class,'res-title')]")
+            if not a:
+                continue
+            a = a[0]
+            href = (a.get("data-mdurl") or a.get("href") or "").strip()
+            title = _clean_text(a.text_content())
+            if not title or not href.startswith("http"):
+                continue
+            block = _clean_text(li.text_content())
+            snippet = block.replace(title, "", 1).strip()[:160]
+            results.append({"title": title, "url": href, "snippet": snippet})
+        if results:
+            return results
+        fallback = []
+        seen = set()
+        for a in doc.xpath("//h3/a | //a[contains(@class,'res-title')] | //li//a[@href]")[:count * 2]:
+            href = (a.get("data-mdurl") or a.get("href") or "").strip()
+            title = _clean_text(a.text_content())
+            if not title or len(title) < 4 or not href.startswith("http") or href in seen:
+                continue
+            seen.add(href)
+            fallback.append({"title": title, "url": href, "snippet": ""})
+            if len(fallback) >= count:
+                break
+        if fallback:
+            return fallback
+    raise ValueError("360 搜索暂时被限流（访问异常），请稍后再试，或到“设置 → 搜索接口”配置 SerpAPI 更稳定")
 
 
 def search_sogou(query, count=6, settings=None):
     """搜狗搜索（免费备用源）。链接是 /link?url= 跳转，抓取时自动跟随。"""
     antibot.human_delay(settings, key="search")
-    url = "https://www.sogou.com/web?query=" + urllib.parse.quote(query)
+    url = "https://www.sogou.com/web?query=" + urllib.parse.quote(query) + "&ie=utf8"
     html_text, _ = fetch_page(url, settings=settings)
     if len(html_text) < 12000 and any(w in html_text for w in ("访问过于频繁", "安全验证", "请输入验证码", "captcha")):
         antibot.record_stats("blocked_detected")
@@ -317,6 +358,23 @@ def search_sogou(query, count=6, settings=None):
         block = _clean_text(a.xpath("ancestor::li[1]")[0].text_content()) if a.xpath("ancestor::li[1]") else title
         snippet = block.replace(title, "", 1).strip()[:160]
         results.append({"title": title, "url": href, "snippet": snippet})
+    if not results:
+        fallback = []
+        seen = set()
+        for a in doc.xpath("//a[@href]")[:count * 2]:
+            href = (a.get("href") or "").strip()
+            title = _clean_text(a.text_content())
+            if not title or len(title) < 4 or href in seen:
+                continue
+            seen.add(href)
+            if href.startswith("/"):
+                href = "https://www.sogou.com" + href
+            if not href.startswith("http"):
+                continue
+            fallback.append({"title": title, "url": href, "snippet": ""})
+            if len(fallback) >= count:
+                break
+        return fallback
     return results
 
 
