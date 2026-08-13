@@ -143,6 +143,14 @@ def main():
     assert "linkedin" in ch_ids and "c114" in ch_ids and "zhihu" in ch_ids
     print("6d) 引擎默认渠道解析 OK:", ch_ids)
 
+    # 9) 非法延时/重试配置不应导致崩溃（自检加固）
+    import core.antibot as ab
+
+    assert ab._safe_float("abc", 0.5) == 0.5
+    assert ab._safe_int("xyz", 2) == 2
+    assert ab.human_delay({"delay_default": "abc"}, key="default") >= 0.1
+    print("9) 非法配置安全解析 OK")
+
     print("\nALL CHANNEL TESTS OK")
 
 

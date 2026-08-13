@@ -397,7 +397,10 @@ def run_channel_search(channel_ids, keywords, markets=None, settings=None,
         if not queries:
             continue
         # rate_limit 作为 stagger 基准，随机化到 [0.5×, 1.5×] 区间，模拟人类不规则节奏
-        rate_base = float(ch.get("rate_limit") or 0.3)
+        try:
+            rate_base = float(ch.get("rate_limit") or 0.3)
+        except (TypeError, ValueError):
+            rate_base = 0.3
         stagger = (rate_base * 0.5, rate_base * 1.5) if rate_base > 0 else 0
 
         def _worker(item, _ch=ch):

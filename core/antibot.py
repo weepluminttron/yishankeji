@@ -233,10 +233,10 @@ def human_delay(settings=None, key="default"):
     settings = settings or {}
     # 从 settings 读取延时基准（允许用户调整）
     base_map = {
-        "search": float(settings.get("delay_search") or 0.8),
-        "fetch": float(settings.get("delay_fetch") or 0.3),
-        "page": float(settings.get("delay_page") or 1.5),
-        "default": float(settings.get("delay_default") or 0.5),
+        "search": _safe_float(settings.get("delay_search"), 0.8),
+        "fetch": _safe_float(settings.get("delay_fetch"), 0.3),
+        "page": _safe_float(settings.get("delay_page"), 1.5),
+        "default": _safe_float(settings.get("delay_default"), 0.5),
     }
     base = base_map.get(key, base_map["default"])
     if base <= 0:
@@ -277,8 +277,8 @@ def retry_with_backoff(func, args=None, kwargs=None, max_retries=3, base_delay=1
     kwargs = kwargs or {}
     settings = settings or {}
     # settings 可覆盖默认重试参数
-    max_retries = int(settings.get("retry_max") or max_retries)
-    base_delay = float(settings.get("retry_base_delay") or base_delay)
+    max_retries = _safe_int(settings.get("retry_max"), max_retries)
+    base_delay = _safe_float(settings.get("retry_base_delay"), base_delay)
 
     last_err = None
     for attempt in range(max_retries + 1):
@@ -303,6 +303,22 @@ _cookie_processor = urllib.request.HTTPCookieProcessor(_cookie_jar)
 _opener = urllib.request.build_opener(_cookie_processor)
 
 
+def _safe_float(v, default):
+    """安全解析浮点配置，非法值回退默认，避免一个坏配置让搜索直接崩溃。"""
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def _safe_int(v, default):
+    """安全解析整数配置。"""
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return int(default)
+
+
 def request_with_antibot(url, settings=None, timeout=15, method="GET", data=None,
                          extra_headers=None, use_proxy=True, use_delay=True,
                          delay_key="default", max_retries=3):
@@ -323,6 +339,9 @@ def request_with_antibot(url, settings=None, timeout=15, method="GET", data=None
     pool = get_proxy_pool(settings) if use_proxy else None
     used_proxy = None
     last_err = None
+
+    max_retries = _safe_int(settings.get("retry_max"), max_retries)
+    retry_base = _safe_float(settings.get("retry_base_delay"), 1.0)
 
     for attempt in range(max_retries + 1):
         # 行为模拟：请求前随机延时
@@ -357,7 +376,7 @@ def request_with_antibot(url, settings=None, timeout=15, method="GET", data=None
             if not is_retryable_error(e) or attempt >= max_retries:
                 raise
             # 指数退避
-            delay = float(settings.get("retry_base_delay") or 1.0) * (2 ** attempt) + random.uniform(0, 1)
+            delay = retry_base * (2 ** attempt) + random.uniform(0, 1)
             time.sleep(delay)
             # 重试时换 UA 和代理（可能被目标识别）
             headers["User-Agent"] = random_ua()
@@ -379,7 +398,7 @@ def fetch_with_antibot(url, settings=None, timeout=15, use_jina_fallback=True,
     try:
         resp, used_proxy = request_with_antibot(
             url, settings=settings, timeout=timeout, delay_key=delay_key,
-            max_retries=int(settings.get("retry_max") or 2),
+            max_retries=_safe_int(settings.get("retry_max"), 2),
         )
         raw = resp.read()
         final = resp.geturl() or url
