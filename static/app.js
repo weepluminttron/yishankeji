@@ -1576,13 +1576,14 @@ async function pollStrategy() {
     } else {
       $("#strategy-plans").innerHTML = `<div class="empty"><div class="ico">⚠️</div>${esc(t.message || "生成失败，请重试")}</div>`;
     }
-    strategyPolling = false;
-  } catch (e) { strategyPolling = false; }
+  } catch (e) { /* 忽略 */ }
+  finally { strategyPolling = false; }
 }
 
 function renderPlans(plans, warnings) {
   const box = $("#strategy-plans");
   if (!box) return;
+  try {
   if (!plans.length) {
     box.innerHTML = `<div class="empty">没有生成方案，请调整描述后重试</div>`;
     return;
@@ -1674,6 +1675,17 @@ function renderPlans(plans, warnings) {
     const card = $("#acq-run").closest(".card");
     if (card) card.scrollIntoView({ behavior: "smooth", block: "start" });
   });
+  } catch (e) {
+    // 防御：渲染异常时至少把方案标题/角色/关键词兜底显示出来
+    console.error("方案渲染异常", e);
+    box.innerHTML = `<div class="empty">⚠️ 方案渲染异常（${esc(e && e.message || e)}），已降级显示</div>` +
+      (plans || []).map((p, i) => `
+        <div style="border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:10px">
+          <b>方案 ${"ABCDE"[i] || i + 1}：${esc(p && p.title)}</b>
+          ${p && p.buyer_role ? `<div class="sub">👤 ${esc(p.buyer_role)}</div>` : ""}
+          <div class="sub">关键词：${((p && p.keywords) || []).map((k) => `<span class="tag-chip">${esc(k)}</span>`).join("")}</div>
+        </div>`).join("");
+  }
 }
 
 async function pollBuyerJob() {
