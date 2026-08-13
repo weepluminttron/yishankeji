@@ -373,7 +373,12 @@ def _acquisition_worker(conditions, seed=None, use_manual=False):
             use_manual=use_manual,
         )
         _acq_job.update(running=False, result=result, message="")
-        task_finish("acq", "成功", f"发现 {result['stats']['total']} 家目标客户")
+        total = result["stats"]["total"]
+        if total == 0 and result.get("warnings"):
+            reason = "；".join(result["warnings"][:3])[:150]
+            task_finish("acq", "失败", f"发现 0 家目标客户：{reason}")
+        else:
+            task_finish("acq", "成功", f"发现 {total} 家目标客户")
     except Exception as e:
         _acq_job.update(running=False, result=None, message=str(e))
         task_finish("acq", "失败", str(e))

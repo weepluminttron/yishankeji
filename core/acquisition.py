@@ -74,6 +74,19 @@ def normalize_conditions(conditions):
 
     # specs 同时作为检索种子；keywords 补充额外词
     c["specs"] = [s.strip() for s in c["specs"] if s.strip()]
+    # 把“搜索短语”从规格里拆出来当检索种子词：
+    # 例如“DWDM 招标公告 / 光传输设备 采购商”是搜索式，不是必中规格，不该拿来硬过滤
+    _PHRASE_WORDS = ("采购", "招标", "询价", "求购", "公告", "中标", "扩容", "项目", "需求",
+                     "供应商", "procurement", "tender", "rfq", "rfp", "purchase", "buyer")
+    clean_specs = []
+    phrase_kw = []
+    for s in c["specs"]:
+        if any(w in s.lower() for w in _PHRASE_WORDS):
+            phrase_kw.append(s)
+        else:
+            clean_specs.append(s)
+    c["specs"] = clean_specs
+    c["keywords"] = list(c["keywords"]) + phrase_kw
     if not c["specs"] and not c["keywords"]:
         raise ValueError("至少需要提供一个 specs（必中规格）或 keywords（检索种子）")
     c["min_tier"] = str(c["min_tier"]).upper()
@@ -215,6 +228,7 @@ def _discover_one_round(conditions, settings, progress=None):
             "timings": res.get("timings", {}),
             "cache_hits": res.get("cache_hits", 0),
             "filtered": res.get("filtered", 0),
+            "errors": res.get("errors", [])[:10],
         },
     }
 
@@ -344,8 +358,8 @@ def build_targets(candidates, conditions, seq_start=1):
         fc = scorer.fit_comp_score({"note": note, "tags": tags, "name": name})
         fit, comp, total, tier = fc["fit"], fc["comp"], fc["total"], fc["tier"]
 
-        # 3) 命中规格（用户真正想要的品类）
-        matched = _match_specs(text, specs)
+        # 3) 命中规格（用户真正想要的品类）；未填写规格时不硬过滤
+        matched = ["（未指定规格，按搜索命中保留）"] if not specs else _match_specs(text, specs)
 
         # 4) 买方类型 & 区域归类
         buyer_type = classify_buyer_type(text)
@@ -561,6 +575,7 @@ def run_engine(conditions, settings=None, max_rounds=3, progress=None, seed_cand
     rounds = 0
     gaps_history = []
     discovery_info = []
+    warnings = []
     if not seed_candidates:
         # 手动搜索（高级）一次性补充，避免每轮重复调用地图接口
         if use_manual:
@@ -570,6 +585,9 @@ def run_engine(conditions, settings=None, max_rounds=3, progress=None, seed_cand
             dres = _discover_one_round(conditions, settings, progress)
             all_candidates.extend(dres["candidates"])
             discovery_info.append(dres["info"])
+            for e in (dres.get("errors") or [])[:10]:
+                if e not in warnings:
+                    warnings.append(e)
             targets, _ = build_targets(_dedupe(all_candidates), conditions)
             gaps = analyze_gaps(targets, conditions)
             gaps_history.append({"round": rnd, "targets": len(targets), "gaps": [list(g) for g in gaps]})
@@ -596,6 +614,7 @@ def run_engine(conditions, settings=None, max_rounds=3, progress=None, seed_cand
         "plan": plan,
         "gaps_history": gaps_history,
         "discovery": discovery_info,
+        "warnings": warnings[:15],
         "final_gaps": [list(g) for g in final_gaps],
         "rounds": rounds,
         "stats": stats,

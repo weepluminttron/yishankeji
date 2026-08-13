@@ -1361,6 +1361,7 @@ async function renderBuyer() {
       <div class="form-grid">
         <div class="field" style="grid-column:1/-1"><label>主营产品（给 AI 判断用）</label><input class="input full" id="acq-products" placeholder="石英玻璃毛细管 / 光无源器件（准直器、滤光片、隔离器、透镜、套管）"></div>
         <div class="field"><label>必中规格/品类（逗号分隔）*</label><input class="input full" id="acq-specs" placeholder="DWDM,WDM,玻璃管"></div>
+        <div class="field"><label>检索种子词（可选，逗号分隔）</label><input class="input full" id="acq-seeds" placeholder="DWDM 招标公告,光传输设备 采购商"></div>
         <div class="field"><label>目标市场（逗号分隔）</label><input class="input full" id="acq-regions" placeholder="中国大陆,亚太,欧美,中东非洲拉美"></div>
         <div class="field"><label>目标买方类型（逗号分隔）</label><input class="input full" id="acq-types" placeholder="光无源器件厂,光模块厂,系统集成商,近期招标扩容"></div>
         <div class="field"><label>最低等级</label><select class="select full" id="acq-tier">
@@ -1477,6 +1478,7 @@ async function renderBuyer() {
       industry: "光纤通信 / 光器件",
       products: $("#acq-products").value.trim(),
       specs,
+      keywords: $("#acq-seeds").value.trim(),
       regions: $("#acq-regions").value.trim(),
       buyer_types: $("#acq-types").value.trim(),
       min_tier: $("#acq-tier").value,
@@ -1609,7 +1611,9 @@ function renderPlans(plans) {
     const p = plans[+b.dataset.acq];
     // 方案 → 引擎条件：规格/市场/买方角色 一键带入并启动
     $("#acq-products").value = p.target_customers || "";
-    $("#acq-specs").value = (p.keywords || []).slice(0, 5).join(",");
+    // 方案关键词是“搜索式”（如 DWDM 招标公告），放到检索种子词，不做必中规格硬过滤
+    $("#acq-specs").value = "";
+    $("#acq-seeds").value = (p.keywords || []).join(",");
     $("#acq-regions").value = (p.markets || []).join(",");
     $("#acq-types").value = p.buyer_role || "";
     $("#acq-exclude").value = "";
@@ -1658,21 +1662,30 @@ async function pollAcquisition() {
 function renderAcqResult(res) {
   const targets = res.targets || [];
   const stats = res.stats || {};
+  const warnings = res.warnings || [];
   const box = $("#acq-result");
   if (!box) return;
   const importBtn = $("#acq-import");
   if (importBtn) importBtn.disabled = !targets.length;
   const tiers = Object.entries(stats.by_tier || {}).map(([k, v]) => `${k}级 ${v}`).join(" / ") || "—";
+  const warnHtml = warnings.length
+    ? `<div style="margin:8px 0;padding:10px 12px;background:#fff8e1;border:1px solid #f0d27a;border-radius:10px;font-size:12px;color:#8a5a00">
+        ⚠️ ${targets.length ? "部分搜索源受限：" : "本次没有找到目标客户，原因："}<br>
+        ${warnings.slice(0, 6).map((w) => esc(w)).join("<br>")}
+        ${targets.length ? "" : "<br>建议：到“设置 → 搜索接口”更换/补充配额（SerpAPI/博查）后重试，或把方案关键词放进“检索种子词”、只填干净的产品词到“必中规格”。"}
+      </div>`
+    : "";
   box.innerHTML = `
     <h3 style="margin:6px 0 8px">发现 ${targets.length} 家目标客户</h3>
+    ${warnHtml}
     <div class="hint" style="margin-bottom:8px">等级分布：${esc(tiers)} ｜ 已核验 ${stats.verified || 0} 家${res.final_gaps && res.final_gaps.length ? ` ｜ 剩余缺口：${esc(res.final_gaps.map((g) => g.join(":")).join("；"))}` : ""}</div>
-    <div class="table-wrap"><table>
+    ${targets.length ? `<div class="table-wrap"><table>
       <thead><tr><th>等级</th><th>公司</th><th>区域</th><th>买方类型</th><th>命中规格</th><th>建议动作</th></tr></thead>
       <tbody>${targets.slice(0, 30).map((t) => `
         <tr><td>${esc(t.priority)}级</td><td><b>${esc(t.company)}</b>${t.email ? `<div class="sub">${esc(t.email)}</div>` : ""}</td>
         <td>${esc(t.region)}</td><td>${esc(t.buyer_type)}</td><td class="sub">${esc((t.matched_conditions || []).join("、"))}</td>
         <td class="sub">${esc(t.next_action || "")}</td></tr>`).join("")}</tbody>
-    </table></div>`;
+    </table></div>` : `<div class="empty">没有目标客户，请根据上方原因调整后重试</div>`}`;
 }
 
 async function pollMapJob() {

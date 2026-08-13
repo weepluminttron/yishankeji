@@ -360,42 +360,67 @@ def _is_canned(results):
 
 
 def search_web(query, count, settings=None):
-    """按设置选择搜索源；免费源被反爬限制时抛出明确错误。"""
+    """按设置选择搜索源；主源失败（限流/配额/反爬）自动降级到备用源，避免“一个都搜不到”。"""
     settings = settings or {}
     provider = settings.get("search_provider", "bing_free")
     key = settings.get("search_api_key", "")
     engine_id = settings.get("search_engine_id", "")
-    if provider == "serpapi" and key:
-        return search_serpapi(query, count, key)
-    if provider == "google_cse" and key and engine_id:
-        return search_google_cse(query, count, key, engine_id)
-    if provider == "bocha" and key:
-        return search_bocha(query, count, key)
-    if provider == "so_free":
-        chain = []
+    chain = []
+
+    def _try_free():
+        """360 → 搜狗 免费源链。"""
+        errs = []
         try:
             results = search_so(query, count)
             if results:
                 return results
-            chain.append("360 无结果")
+            errs.append("360 无结果")
         except Exception as e:
-            chain.append(f"360：{e}")
+            errs.append(f"360：{e}")
         try:
-            time.sleep(2)
+            time.sleep(1)
             results = search_sogou(query, count)
             if results:
                 return results
-            chain.append("搜狗无结果")
+            errs.append("搜狗无结果")
         except Exception as e:
-            chain.append(f"搜狗：{e}")
-        raise ValueError("免费搜索源均不可用（" + "；".join(chain) + "）。建议到“设置 → 搜索接口”配置 SerpAPI，更稳定精准")
-    results = search_bing(query, count)
-    if _is_canned(results):
-        raise ValueError(
-            "免费搜索源（Bing）被反爬限制，只能返回通用结果。请到“设置 → 搜索接口”"
-            "配置 SerpAPI（免费200次/月）或 Google 自定义搜索 API 密钥后重试。"
-        )
-    return results
+            errs.append(f"搜狗：{e}")
+        raise ValueError("免费搜索源不可用（" + "；".join(errs) + "）")
+
+    sources = []
+    if provider == "serpapi" and key:
+        sources.append(("SerpAPI", lambda: search_serpapi(query, count, key)))
+    if provider == "google_cse" and key and engine_id:
+        sources.append(("Google CSE", lambda: search_google_cse(query, count, key, engine_id)))
+    if provider == "bocha" and key:
+        sources.append(("博查", lambda: search_bocha(query, count, key)))
+    if provider == "so_free":
+        sources.append(("360/搜狗", _try_free))
+    else:
+        sources.append(("Bing", lambda: search_bing(query, count)))
+
+    # 主源失败后的兜底：免费源（避免 SerpAPI 429/配额耗尽时一个都搜不到）
+    if provider not in ("so_free",):
+        if not any(n == "360/搜狗" for n, _ in sources):
+            sources.append(("360/搜狗", _try_free))
+        sources.append(("Bing", lambda: search_bing(query, count)))
+
+    for name, fn in sources:
+        try:
+            results = fn()
+            if not results:
+                chain.append(f"{name} 无结果")
+                continue
+            if name == "Bing" and _is_canned(results):
+                chain.append("Bing 被反爬（只返回通用结果）")
+                continue
+            return results
+        except Exception as e:
+            chain.append(f"{name}：{str(e)[:120]}")
+    raise ValueError(
+        "所有搜索源均不可用（" + "；".join(chain) + "）。"
+        "建议到“设置 → 搜索接口”更换或补充分配额（SerpAPI/博查）后重试"
+    )
 
 
 def search_web_cached(query, count, settings):
