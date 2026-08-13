@@ -39,6 +39,24 @@
 
 在“买家发现”页填写主营产品、必中规格/品类、目标市场、目标买方类型、最低等级与目标数量，引擎会自动生成多渠道检索方案 → 发现并筛选买家 → 按“匹配度+实力”双维度分级（S/A/B/C）→ 自动补齐缺口迭代，完成后可一键导入客户库（保留评分与等级）。引擎与 AI 获客方案、手动搜索已打通：方案可“🧠 用引擎获客”，手动搜索结果可“🧠 送引擎筛选分级”（离线跑双维度分级，无需再联网）。也可用命令行 `python scripts/run_acquisition.py --conditions 条件文件.json [--seed 已收集线索.json]` 输出策略文档与目标清单。
 
+### 🖥️ 引擎任务栏监控（系统托盘 / 状态栏）
+
+`scripts/tray_monitor.py` 可实时监控获客引擎的后台任务与相关子进程，在 Windows 系统托盘或控制台状态栏显示**名称、状态、运行时间**，支持定时刷新、空列表提示、异常退出标记与完整日志：
+
+```bash
+# 系统托盘模式（推荐，需 pystray + Pillow，可加 psutil 枚举子进程）
+pip install pystray pillow psutil
+python scripts/tray_monitor.py --base-url http://你的服务器:8017 --password 后台密码
+
+# 控制台状态栏模式（零依赖）
+python scripts/tray_monitor.py --mode console --base-url http://127.0.0.1:8017 --password 123456lfs
+
+# 只读模式：只枚举本机引擎相关进程
+python scripts/tray_monitor.py --mode console --local-only
+```
+
+日志写入 `data/tray_monitor.log`（自动轮转，保留最近 3 份）。托盘菜单提供“刷新 / 打开日志 / 退出”，刷新间隔默认 2 秒（`--refresh` 可调）。
+
 ### AI 接口配置
 
 在“设置 → AI”里可配置接口地址与模型，支持所有 OpenAI 兼容协议的服务：

@@ -77,7 +77,9 @@ async function pollTasks() {
         const running = t.status === "运行中";
         const cls = running ? "" : t.status === "成功" ? "t-done" : "t-fail";
         const icon = running ? "⏳" : t.status === "成功" ? "✅" : "⚠️";
-        const stage = running ? (t.stage || "运行中") + (t.total ? ` ${t.done}/${t.total}` : "") : (t.message || t.status);
+        const stage = running
+          ? (t.stage || "运行中") + (t.total ? ` ${t.done}/${t.total}` : "") + ` · ⏱ ${fmtElapsed(t.started)}`
+          : (t.message || t.status);
         return `<div class="task-chip ${cls}" data-id="${esc(t.id)}" onclick="taskChipClick(this)">
           <span class="t-icon">${icon}</span>
           <span class="t-label">${esc(t.label)}</span>
@@ -100,6 +102,17 @@ async function pollTasks() {
     });
   } catch (e) { /* 忽略轮询错误 */ }
   setTimeout(pollTasks, 2500);
+}
+
+function fmtElapsed(started) {
+  if (!started) return "—";
+  const t = new Date(String(started).replace(/-/g, "/")).getTime();
+  if (isNaN(t)) return "—";
+  const s = Math.max(0, Math.floor((Date.now() - t) / 1000));
+  if (s < 60) return s + "秒";
+  const m = Math.floor(s / 60);
+  if (m < 60) return m + "分" + (s % 60) + "秒";
+  return Math.floor(m / 60) + "小时" + (m % 60) + "分";
 }
 
 function openTaskPanel() {
