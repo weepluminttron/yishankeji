@@ -154,6 +154,21 @@ def main():
     assert "采购信号" in res_s["candidates"][0]["note"] and "最佳窗口" in res_s["candidates"][0]["note"]
     print("10) AI 信号/窗口写入 OK")
 
+    # 11) 渠道级失败/跳过原因要汇入 errors，方便定位“找不到客户”的原因
+    def _fake_channel_err(channel_ids, keywords=None, markets=None, settings=None,
+                          progress=None, use_cache=True):
+        return ([], {"bing": {"error": "HTTP 429"}, "linkedin": {"status": "skipped", "reason": "无密钥"}})
+
+    chmod.run_channel_search = _fake_channel_err
+    res_e2 = buyer.run(
+        "", markets="", settings={"use_search_cache": True},
+        channel_ids=["bing", "linkedin"],
+    )
+    assert any("渠道[bing]" in e and "429" in e for e in res_e2["errors"]), res_e2["errors"]
+    assert any("渠道[linkedin]" in e and "跳过" in e for e in res_e2["errors"]), res_e2["errors"]
+    assert res_e2["channel_stats"].get("bing", {}).get("error") == "HTTP 429"
+    print("11) 渠道失败原因汇入 errors OK:", res_e2["errors"])
+
     print("ALL OK")
 
 

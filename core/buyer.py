@@ -762,8 +762,19 @@ def run(keywords, markets=None, max_results=6, urls=None, use_ai=False, settings
                 progress=progress, use_cache=use_cache,
             )
             raw_results = ch_raw
+            # 把渠道级失败/跳过原因汇入 errors，避免“找不到客户”却看不到哪个渠道失败
+            for cid, st in channel_stats.items():
+                if st.get("error"):
+                    msg = f"渠道[{cid}]搜索失败：{st['error']}"
+                    if msg not in errors:
+                        errors.append(msg)
+                elif st.get("status") == "skipped" and st.get("reason"):
+                    msg = f"渠道[{cid}]已跳过：{st['reason']}"
+                    if msg not in errors:
+                        errors.append(msg)
         if not raw_results and not keywords:
-            return {"candidates": [], "errors": ["请至少填写一个关键词"]}
+            return {"candidates": [], "errors": errors or ["请至少填写一个关键词"],
+                    "channel_stats": channel_stats, "timings": timings, "cache_hits": cache_hits[0]}
     else:
         if not keywords:
             return {"candidates": [], "errors": ["请至少填写一个关键词"]}

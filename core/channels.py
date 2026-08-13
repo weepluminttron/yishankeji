@@ -392,15 +392,14 @@ def run_channel_search(channel_ids, keywords, markets=None, settings=None,
 
     workers = max(1, min(int(settings.get("max_search_workers", 8) or 8), 16))
 
-    for ch in channels:
+    def _run_channel(ch):
         cid = ch["id"]
         if not _channel_reachable(ch, settings):
-            stats[cid] = {"status": "skipped", "reason": "缺少密钥或未启用", "queries": 0, "count": 0}
-            continue
+            return cid, {"status": "skipped", "reason": "缺少密钥或未启用", "queries": 0, "count": 0}, []
         queries = build_channel_queries(ch, keywords, markets, max_per_channel=max_per_channel)
-        stats[cid] = {"status": "run", "queries": len(queries), "count": 0, "category": ch["category"]}
+        st = {"status": "run", "queries": len(queries), "count": 0, "category": ch["category"]}
         if not queries:
-            continue
+            return cid, st, []
         # rate_limit 作为 stagger 基准，随机化到 [0.5×, 1.5×] 区间，模拟人类不规则节奏
         try:
             rate_base = float(ch.get("rate_limit") or 0.3)
@@ -421,12 +420,13 @@ def run_channel_search(channel_ids, keywords, markets=None, settings=None,
             desc=f"渠道搜索[{ch['name']}]", progress=progress,
         )
         ch_count = 0
+        items = []
         for r in res_list:
             if r is None or isinstance(r, Exception):
                 continue
             status, payload, kw, mkt = r
             if status == "err":
-                stats[cid]["error"] = payload
+                st["error"] = payload
                 continue
             for item in (payload or []):
                 item = dict(item)
@@ -435,9 +435,22 @@ def run_channel_search(channel_ids, keywords, markets=None, settings=None,
                 item.setdefault("channels", [])
                 if cid not in item["channels"]:
                     item["channels"].append(cid)
-                raw.append(item)
+                items.append(item)
                 ch_count += 1
-        stats[cid]["count"] = ch_count
+        st["count"] = ch_count
+        return cid, st, items
+
+    # 渠道之间并行（最多 4 个同时跑），避免单个慢渠道拖垮整体
+    from concurrent.futures import ThreadPoolExecutor
+    ch_results = []
+    ch_workers = max(1, min(4, len(channels)))
+    with ThreadPoolExecutor(max_workers=ch_workers) as ex:
+        futures = [ex.submit(_run_channel, ch) for ch in channels]
+        for fut in futures:
+            ch_results.append(fut.result())
+    for cid, st, items in ch_results:
+        stats[cid] = st
+        raw.extend(items)
 
     merged = normalize_merge(raw)
     return merged, stats
