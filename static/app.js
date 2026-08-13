@@ -2653,23 +2653,46 @@ async function renderSettings() {
     } catch (e) { toast(e.message, "err"); }
   };
   $("#s-lp-open").onclick = () => window.open("/lp", "_blank");
+  let searchTestPolling = false;
   $("#s-search-test").onclick = async () => {
     const box = $("#s-search-test-result");
-    box.innerHTML = `<div class="empty">正在检测各搜索源（约 10-30 秒），请稍候…</div>`;
+    box.innerHTML = `<div class="empty">搜索自检已启动，正在逐个检测搜索源…（进度看右上角任务栏）</div>`;
     try {
-      const r = await api("/api/search/test", { method: "POST", body: { query: "DWDM 采购" } });
-      const rows = (r.sources || []).map((s) => `
-        <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px dashed var(--line);font-size:12px">
-          <span style="min-width:150px">${esc(s.name)}</span>
-          ${s.status === "ok" ? `<span style="color:var(--green);font-weight:600">✅ ${s.count} 条</span>` : `<span style="color:var(--red);font-weight:600">⚠️ 失败</span>`}
-          <span class="sub">${s.seconds}s${s.error ? ` ｜ ${esc(s.error)}` : ""}</span>
-        </div>`).join("");
-      box.innerHTML = `
-        <div class="hint" style="margin-bottom:6px">查询：${esc(r.query)} ｜ 可用源：${r.usable && r.usable.length ? esc(r.usable.join("、")) : "无"}</div>
-        ${rows}
-        <div class="hint" style="margin-top:6px">${esc(r.advice || "")}</div>`;
-    } catch (e) { box.innerHTML = `<div class="empty">检测失败：${esc(e.message)}</div>`; }
+      await api("/api/search/test", { method: "POST", body: { query: "DWDM 采购" } });
+      pollSearchTest();
+    } catch (e) { box.innerHTML = `<div class="empty">启动失败：${esc(e.message)}</div>`; }
   };
+  async function pollSearchTest() {
+    if (searchTestPolling) return;
+    searchTestPolling = true;
+    try {
+      const d = await api("/api/search/test");
+      const job = d.job || {};
+      if (job.running) {
+        searchTestPolling = false;
+        setTimeout(pollSearchTest, 2000);
+        return;
+      }
+      searchTestPolling = false;
+      const box = $("#s-search-test-result");
+      if (job.result) renderSearchTest(job.result);
+      else box.innerHTML = `<div class="empty">自检失败：${esc(job.message || "未知错误")}</div>`;
+    } catch (e) { searchTestPolling = false; }
+  }
+  function renderSearchTest(r) {
+    const box = $("#s-search-test-result");
+    if (!box) return;
+    const rows = (r.sources || []).map((s) => `
+      <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px dashed var(--line);font-size:12px">
+        <span style="min-width:150px">${esc(s.name)}</span>
+        ${s.status === "ok" ? `<span style="color:var(--green);font-weight:600">✅ ${s.count} 条</span>` : `<span style="color:var(--red);font-weight:600">⚠️ 失败</span>`}
+        <span class="sub">${s.seconds}s${s.error ? ` ｜ ${esc(s.error)}` : ""}</span>
+      </div>`).join("");
+    box.innerHTML = `
+      <div class="hint" style="margin-bottom:6px">查询：${esc(r.query)} ｜ 可用源：${r.usable && r.usable.length ? esc(r.usable.join("、")) : "无"}</div>
+      ${rows}
+      <div class="hint" style="margin-top:6px">${esc(r.advice || "")}</div>`;
+  }
   $("#test-webhook").onclick = async () => {
     try {
       await api("/api/settings", { method: "POST", body: { settings: { notify_webhook: $("#s-webhook").value.trim() } } });

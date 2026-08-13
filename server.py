@@ -47,6 +47,7 @@ _mail_job = {"running": False, "message": "", "started": "", "result": None}
 _map_job = {"running": False, "message": "", "started": "", "result": None}
 _touch_job = {"running": False, "message": "", "enrolled": 0, "skipped": 0, "last_run": ""}
 _acq_job = {"running": False, "message": "", "stage": "", "started": "", "result": None}
+_search_test_job = {"running": False, "message": "", "started": "", "result": None}
 _login_attempts = {}
 _tasks = {}
 
@@ -1032,6 +1033,12 @@ class Handler(BaseHTTPRequestHandler):
                 "stats": antibot.get_stats(),
                 "proxy_pool": pool.stats() if pool else {"total": 0, "healthy": 0, "details": []},
             })
+        if api == "search" and len(parts) > 2 and parts[2] == "test":
+            return send_json(self, {
+                "ok": True,
+                "job": dict(_search_test_job),
+                "task": task_snapshot("searchtest"),
+            })
         if api == "mail" and len(parts) > 2 and parts[2] == "status":
             return send_json(self, {"ok": True, "job": dict(_mail_job)})
         if api == "mail":
@@ -1344,7 +1351,8 @@ class Handler(BaseHTTPRequestHandler):
             )
             return send_json(self, {"ok": not err, "candidates": candidates, "error": err})
         if api == "search" and len(parts) > 2 and parts[2] == "test":
-            return self._search_test()
+            data = read_json_body(self)
+            return self._search_test_start(data)
         if api == "settings":
             data = read_json_body(self)
             settings = db.save_settings(data.get("settings", {}))
@@ -1616,10 +1624,20 @@ class Handler(BaseHTTPRequestHandler):
             return send_json(self, {"ok": False, "msg": err}, 400)
         return send_json(self, {"ok": True, "intel": info})
 
-    def _search_test(self):
-        """搜索源自检：逐个源跑一条测试查询，报告可用/失败，帮用户定位“找不到客户”的原因。"""
-        data = read_json_body(self)
+    def _search_test_start(self, data):
+        """启动搜索源自检（后台任务，进度走右上角任务栏，不阻塞页面）。"""
+        if _search_test_job.get("running"):
+            return send_json(self, {"ok": False, "msg": "搜索自检正在运行，请等待完成"}, 400)
         q = str(data.get("query") or "DWDM 采购").strip()[:60]
+        _search_test_job.update(running=True, message="", result=None,
+                                started=time.strftime("%Y-%m-%d %H:%M:%S"))
+        threading.Thread(target=self._search_test_worker, args=(q,), daemon=True).start()
+        return send_json(self, {"ok": True, "msg": "搜索自检已启动（进度看右上角任务栏）"})
+
+    def _search_test_worker(query):
+        """后台执行：逐个源跑一条测试查询，报告可用/失败（单源超时自动跳过）。"""
+        q = query
+        task_start("searchtest", "搜索源自检")
         settings = db.get_settings()
         test = dict(settings)
         test.update({
@@ -1641,46 +1659,54 @@ class Handler(BaseHTTPRequestHandler):
                     "count": len(items or []),
                     "seconds": round(time.time() - t0, 1),
                 })
+                task_progress("searchtest", stage=f"{name} 完成")
             except FutTimeout:
                 results.append({
                     "name": name, "status": "fail",
                     "error": "超时（>18秒，该源可能被墙或限流）",
                     "seconds": round(time.time() - t0, 1),
                 })
+                task_progress("searchtest", stage=f"{name} 超时")
             except Exception as e:
                 results.append({
                     "name": name, "status": "fail",
                     "error": str(e)[:150],
                     "seconds": round(time.time() - t0, 1),
                 })
+                task_progress("searchtest", stage=f"{name} 失败")
             finally:
                 ex.shutdown(wait=False)
 
-        key = settings.get("search_api_key", "")
-        prov = settings.get("search_provider", "")
-        if prov == "serpapi" and key:
-            _run("SerpAPI（当前主源）", lambda: buyer.search_serpapi(q, 3, key, "", test))
-        elif prov == "google_cse" and key and settings.get("search_engine_id"):
-            _run("Google CSE（当前主源）", lambda: buyer.search_google_cse(q, 3, key, settings.get("search_engine_id", ""), test))
-        elif prov == "bocha" and key:
-            _run("博查（当前主源）", lambda: buyer.search_bocha(q, 3, key, "noLimit", test))
-        _run("360（免费）", lambda: buyer.search_so(q, 3, test))
-        _run("搜狗（免费）", lambda: buyer.search_sogou(q, 3, test))
-        _run("Bing（免费）", lambda: buyer.search_bing(q, 3, "", test))
-        if settings.get("map_api_key"):
-            _run("地图POI（高德）", lambda: mapsearch.run_map_search(
-                test, q.split()[0] if q.split() else q, "深圳", pages=1, max_results=3,
-            ))
-
-        usable = [r["name"] for r in results if r["status"] == "ok" and r["count"]]
-        return send_json(self, {
-            "ok": True, "query": q, "sources": results, "usable": usable,
-            "advice": (
-                "有可用源，引擎会自动使用它们。" if usable else
-                "所有搜索源都不可用：请检查 SerpAPI 配额/Key，或在设置里换博查（国内稳定），"
-                "并建议配置地图/工商密钥作为补充渠道。"
-            ),
-        })
+        try:
+            key = settings.get("search_api_key", "")
+            prov = settings.get("search_provider", "")
+            if prov == "serpapi" and key:
+                _run("SerpAPI（当前主源）", lambda: buyer.search_serpapi(q, 3, key, "", test))
+            elif prov == "google_cse" and key and settings.get("search_engine_id"):
+                _run("Google CSE（当前主源）", lambda: buyer.search_google_cse(q, 3, key, settings.get("search_engine_id", ""), test))
+            elif prov == "bocha" and key:
+                _run("博查（当前主源）", lambda: buyer.search_bocha(q, 3, key, "noLimit", test))
+            _run("360（免费）", lambda: buyer.search_so(q, 3, test))
+            _run("搜狗（免费）", lambda: buyer.search_sogou(q, 3, test))
+            _run("Bing（免费）", lambda: buyer.search_bing(q, 3, "", test))
+            if settings.get("map_api_key"):
+                _run("地图POI（高德）", lambda: mapsearch.run_map_search(
+                    test, q.split()[0] if q.split() else q, "深圳", pages=1, max_results=3,
+                ))
+            usable = [r["name"] for r in results if r["status"] == "ok" and r["count"]]
+            result = {
+                "query": q, "sources": results, "usable": usable,
+                "advice": (
+                    "有可用源，引擎会自动使用它们。" if usable else
+                    "所有搜索源都不可用：请检查 SerpAPI 配额/Key，或在设置里换博查（国内稳定），"
+                    "并建议配置地图/工商密钥作为补充渠道。"
+                ),
+            }
+            _search_test_job.update(running=False, result=result, message="")
+            task_finish("searchtest", "成功", f"可用源 {len(usable)} 个")
+        except Exception as e:
+            _search_test_job.update(running=False, result=None, message=str(e))
+            task_finish("searchtest", "失败", str(e))
 
     def _social_copy(self, data):
         scenario = data.get("scenario", "抖音评论引流")
