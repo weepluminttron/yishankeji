@@ -40,6 +40,8 @@ def main():
     ap.add_argument("--max-rounds", type=int, default=3, help="迭代最大轮次（默认 3）")
     ap.add_argument("--base-name", default="acquisition", help="输出文件前缀")
     ap.add_argument("--no-ai", action="store_true", help="即使有 key 也不调用 AI 精筛（更快、免费）")
+    ap.add_argument("--manual", action="store_true",
+                    help="额外启用手动搜索（高级）：用 core.mapsearch 按城市拉取 POI 线索（需地图 Key）")
     args = ap.parse_args()
 
     # 解析 conditions：文件 or 内联
@@ -75,7 +77,7 @@ def main():
     print("== 运行获客引擎 ==")
     result = acquisition.run_engine(
         conditions, settings=settings, max_rounds=args.max_rounds,
-        progress=progress, seed_candidates=seed,
+        progress=progress, seed_candidates=seed, use_manual=args.manual,
     )
 
     paths = acquisition.export_outputs(conditions, result, args.out, base_name=args.base_name)

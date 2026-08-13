@@ -9,7 +9,6 @@
 
 设计：纯后台轮询 + 幂等（has_pending_scheduled_mail 防重复排程），不阻塞主流程。
 """
-import threading
 import time
 import traceback
 

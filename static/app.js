@@ -1375,6 +1375,7 @@ async function renderBuyer() {
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         <button class="btn primary" id="acq-run">🚀 运行获客引擎</button>
         <button class="btn" id="acq-import" disabled>📥 导入客户库</button>
+        <label style="display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" id="acq-manual"> 🗺️ 同时用地图POI补充（需地图Key）</label>
         <span class="hint">引擎按你的条件自动生成多渠道检索方案、发现并筛选买家、迭代补齐缺口；也可接收“AI 方案”或“手动搜索”的结果做离线筛选分级；完成后可一键导入客户库（保留评分与等级）。</span>
       </div>
       <div id="acq-result" style="margin-top:12px"></div>
@@ -1483,7 +1484,7 @@ async function renderBuyer() {
       exclude: $("#acq-exclude").value.trim(),
     };
     try {
-      await api("/api/acquisition/run", { method: "POST", body: { conditions } });
+      await api("/api/acquisition/run", { method: "POST", body: { conditions, use_manual: $("#acq-manual").checked } });
       $("#acq-result").innerHTML = `<div class="empty"><div class="ico">🧠</div>获客引擎已启动，正在发现并筛选买家…（进度看右上角任务栏）</div>`;
       $("#acq-import").disabled = true;
       pollAcquisition();

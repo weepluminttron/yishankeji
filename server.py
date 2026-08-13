@@ -354,7 +354,7 @@ def start_buyer_job(data):
     return True, "搜索任务已启动"
 
 
-def _acquisition_worker(conditions, seed=None):
+def _acquisition_worker(conditions, seed=None, use_manual=False):
     """后台线程：条件驱动的 AI 获客引擎。
     有 seed（已发现线索）时走离线筛选分级，无 seed 时联网发现→筛选→迭代补缺口。"""
     task_start("acq", "AI 获客引擎（筛选分级）" if seed else "AI 获客引擎")
@@ -370,6 +370,7 @@ def _acquisition_worker(conditions, seed=None):
         settings = db.get_settings()
         result = acquisition.run_engine(
             conditions, settings=settings, max_rounds=3, progress=cb, seed_candidates=seed,
+            use_manual=use_manual,
         )
         _acq_job.update(running=False, result=result, message="")
         task_finish("acq", "成功", f"发现 {result['stats']['total']} 家目标客户")
@@ -1407,11 +1408,12 @@ class Handler(BaseHTTPRequestHandler):
             seed = data.get("seed")
             if seed is not None and not isinstance(seed, list):
                 return send_json(self, {"ok": False, "msg": "seed 必须是线索数组"}, 400)
+            use_manual = bool(data.get("use_manual"))
             if _acq_job.get("running"):
                 return send_json(self, {"ok": False, "msg": "获客引擎正在运行，请等待完成"}, 400)
             _acq_job.update(running=True, result=None, message="", stage="准备中",
                             started=time.strftime("%Y-%m-%d %H:%M:%S"))
-            threading.Thread(target=_acquisition_worker, args=(conditions, seed), daemon=True).start()
+            threading.Thread(target=_acquisition_worker, args=(conditions, seed, use_manual), daemon=True).start()
             return send_json(self, {"ok": True, "msg": "获客引擎已启动（进度看右上角任务栏）", "job": dict(_acq_job)})
         if api == "acquisition" and len(parts) > 2 and parts[2] == "import":
             data = read_json_body(self)

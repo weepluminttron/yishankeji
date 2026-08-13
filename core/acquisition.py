@@ -211,15 +211,67 @@ def _discover_one_round(conditions, settings, progress=None):
     return res.get("candidates", []), res.get("errors", [])
 
 
+def _discover_manual(conditions, settings, progress=None):
+    """手动搜索（高级）：调用 core.mapsearch 按关键词+城市拉取 POI 线索。
+
+    无地图 Key 或导入失败时返回空列表（不阻断主流程）。返回与 engine 候选同形的列表。
+    """
+    try:
+        from core import mapsearch
+    except Exception:
+        return []
+    if not settings:
+        return []
+    provider = settings.get("map_provider", "amap")
+    key = settings.get("map_api_key") if provider == "amap" else settings.get("search_api_key")
+    if not key:
+        return []
+
+    # 区域名 → 真实城市（手动搜索需要具体城市）
+    CITY_MAP = {
+        "中国大陆": ["深圳", "武汉", "苏州", "成都", "上海"],
+        "亚太": ["新加坡", "吉隆坡", "雅加达"],
+        "欧美": ["Frankfurt", "San Jose"],
+        "中东非洲拉美": ["迪拜", "圣保罗"],
+    }
+    cities = []
+    for r in conditions["regions"]:
+        cities += CITY_MAP.get(r, [])
+    if not cities:
+        cities = ["深圳"]
+
+    seeds = list(conditions["specs"]) + list(conditions["keywords"])
+    out = []
+    seen = set()
+    for kw in seeds[:6]:
+        for city in cities[:4]:
+            try:
+                leads = mapsearch.run_map_search(settings, kw, city, pages=1, max_results=20)
+                for ld in leads:
+                    key_ = (str(ld.get("name", "")).strip().lower(), str(ld.get("phone", "")))
+                    if key_ in seen:
+                        continue
+                    seen.add(key_)
+                    out.append(ld)
+            except Exception as e:
+                if progress:
+                    progress({"stage": f"手动搜索跳过({city}/{kw})", "note": str(e)[:80]})
+    if progress:
+        progress({"stage": f"手动搜索完成", "manual": len(out)})
+    return out
+
+
 # ----------------------------------------------------------------------------
 # 4. 按用户条件筛选 / 分级 / 标注匹配条件
 # ----------------------------------------------------------------------------
 _BUYER_TYPE_RULES = [
+    # 买方动作词优先（运营商/集成商在招标、集采、扩容）→ 近期招标扩容，优先级高于品类词，
+    # 避免“中国电信 DWDM 扩容集采”被同笔记里的玻璃管/滤光片误判为器件厂。
     ("近期招标扩容", ["招标", "中标", "采购公告", "扩容", "集采", "tender", "procurement", "rfp", "rfq", "询价公告"]),
+    ("系统集成商", ["系统集成", "集成商", "总包", "工程公司", "施工", "布线", "contractor", "integrator", "installer"]),
     ("光模块厂", ["光模块", "optical module", "transceiver", "硅光", "cpo", "800g", "1.6t", "400g"]),
     ("光无源器件厂", ["无源", "器件", "准直器", "隔离器", "环形器", "滤光片", "玻璃管", "毛细管", "ferrule",
                    "z-block", "zblock", "透镜", "套管", "插芯", "passive", "pigtail", "fiber"]),
-    ("系统集成商", ["系统集成", "集成商", "总包", "工程公司", "施工", "布线", "contractor", "integrator", "installer"]),
 ]
 
 
@@ -235,7 +287,7 @@ _REGION_MAP = [
     ("中国大陆", ["中国", "大陆", "广东", "深圳", "江苏", "浙江", "武汉", "上海", "成都", "北京"]),
     ("亚太", ["印度", "印尼", "越南", "泰国", "马来西亚", "日本", "韩国", "台湾", "新加坡", "亚太", "asia", "india", "indonesia"]),
     ("欧美", ["美国", "德国", "英国", "法国", "荷兰", "欧洲", "usa", "us ", "germany", "europe", "america", "lumentum", "coherent"]),
-    ("中东非洲拉美", ["中东", "非洲", "拉美", "沙特", "阿联酋", "巴西", "尼日利亚", "midd/le east", "uae", "saudi", "brazil", "africa"]),
+    ("中东非洲拉美", ["中东", "非洲", "拉美", "沙特", "阿联酋", "巴西", "尼日利亚", "middle east", "uae", "saudi", "brazil", "africa"]),
 ]
 
 
@@ -327,7 +379,13 @@ def build_targets(candidates, conditions, seq_start=1):
             "note": note[:300],
             "verified": bool(c.get("verified", False)) or _looks_verified(c),
             "path": str(c.get("path") or _default_path(website, buyer_type)),
+            # 策略助手（不限行业）衍生的意向信号，失败自动留空
+            "intent_stage": "",
+            "intent_urgency": "",
+            "intent_next_action": "",
+            "profile": "",
         }
+        _enrich_intent(target)
         targets.append(target)
 
     # 优先级排序：等级 → 综合分 → 买方类型权重
@@ -382,6 +440,33 @@ def _default_path(website, buyer_type):
     if website:
         return f"公司官网公开信息栏 / 年报；{website}"
     return "公司官网公开信息栏 / 年报 / 行业展商名录（合法公开渠道）"
+
+
+def _enrich_intent(target):
+    """策略助手（不限行业）：用 core.intent 给目标客户打购买意向标签。
+
+    纯规则、零成本、永远可用；导入或评分失败则留空，不影响主流程。
+    """
+    try:
+        from core import intent
+    except Exception:
+        return
+    lead = {
+        "name": target["company"],
+        "note": target["note"],
+        "tags": target["buyer_type"],
+        "type": target["buyer_type"],
+        "region": target["region"],
+        "source": target["channel_source"],
+    }
+    try:
+        it = intent.classify(lead, use_ai=False)
+        target["intent_stage"] = it.get("stage", "")
+        target["intent_urgency"] = it.get("urgency", "")
+        target["intent_next_action"] = it.get("next_action", "")
+        target["profile"] = intent.enrich_profile(lead, it)
+    except Exception:
+        pass
 
 
 # ----------------------------------------------------------------------------
@@ -450,10 +535,11 @@ def _expand_for_gaps(conditions, gaps, round_no):
     return out[:10], add_regions
 
 
-def run_engine(conditions, settings=None, max_rounds=3, progress=None, seed_candidates=None):
+def run_engine(conditions, settings=None, max_rounds=3, progress=None, seed_candidates=None, use_manual=False):
     """编排：发现 → 筛选 → 迭代补强 → 导出就绪。
 
     返回 dict: {targets, dropped, plan, gaps_history, rounds, stats}
+    use_manual=True 时，会额外调用 core.mapsearch（手动搜索/高级）补充 POI 线索。
     """
     conditions = normalize_conditions(conditions)
     plan = generate_plan(conditions)
@@ -467,6 +553,9 @@ def run_engine(conditions, settings=None, max_rounds=3, progress=None, seed_cand
     rounds = 0
     gaps_history = []
     if not seed_candidates:
+        # 手动搜索（高级）一次性补充，避免每轮重复调用地图接口
+        if use_manual:
+            all_candidates = _discover_manual(conditions, settings, progress) + all_candidates
         for rnd in range(1, max_rounds + 1):
             rounds = rnd
             cands, errors = _discover_one_round(conditions, settings, progress)
@@ -650,7 +739,8 @@ def export_outputs(conditions, engine_result, out_dir, base_name="acquisition"):
     csv_path = os.path.join(out_dir, f"{base_name}_targets.csv")
     fields = ["id", "company", "company_en", "contact_name", "contact_role", "phone", "email",
               "website", "region", "buyer_type", "matched_conditions", "channel_source",
-              "priority", "fit", "comp", "total", "next_action", "verified", "path", "note"]
+              "priority", "fit", "comp", "total", "next_action", "verified", "path", "note",
+              "intent_stage", "intent_urgency", "intent_next_action", "profile"]
     with open(csv_path, "w", encoding="utf-8-sig", newline="") as f:
         w = csv.DictWriter(f, fieldnames=fields)
         w.writeheader()
