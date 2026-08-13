@@ -19,6 +19,7 @@
 import os
 import re
 import json
+import base64
 import time
 import random
 import threading
@@ -319,6 +320,17 @@ def _safe_int(v, default):
         return int(default)
 
 
+def _proxy_parts(proxy_url):
+    """解析代理 URL：提取认证信息（urllib 对带账号的代理认证不稳定，手动补头更可靠）。"""
+    m = re.match(r"^(https?://)([^/@]+)@(.*)$", str(proxy_url or "").strip())
+    if not m:
+        return str(proxy_url or "").strip(), ""
+    scheme, cred, host = m.groups()
+    user, _, pwd = cred.partition(":")
+    token = base64.b64encode(f"{user}:{pwd}".encode("utf-8")).decode("ascii")
+    return scheme + host, "Basic " + token
+
+
 def request_with_antibot(url, settings=None, timeout=15, method="GET", data=None,
                          extra_headers=None, use_proxy=True, use_delay=True,
                          delay_key="default", max_retries=3):
@@ -356,11 +368,15 @@ def request_with_antibot(url, settings=None, timeout=15, method="GET", data=None
         try:
             if used_proxy:
                 # 带代理的请求：每次新建 opener（代理可能不同）
+                proxy_clean, proxy_auth = _proxy_parts(used_proxy)
                 proxy_handler = urllib.request.ProxyHandler({
-                    "http": used_proxy,
-                    "https": used_proxy,
+                    "http": proxy_clean,
+                    "https": proxy_clean,
                 })
                 opener = urllib.request.build_opener(proxy_handler, _cookie_processor)
+                if proxy_auth:
+                    # 手动带认证头，兼容需要 Proxy-Authorization 的代理（HTTP 与 HTTPS CONNECT 都生效）
+                    req.add_unredirected_header("Proxy-Authorization", proxy_auth)
             else:
                 opener = _opener
 

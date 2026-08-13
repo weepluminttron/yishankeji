@@ -175,6 +175,10 @@ def main():
     assert ab._safe_float("abc", 0.5) == 0.5
     assert ab._safe_int("xyz", 2) == 2
     assert ab.human_delay({"delay_default": "abc"}, key="default") >= 0.1
+    clean, auth = ab._proxy_parts("http://user:pass@1.2.3.4:8080")
+    assert clean == "http://1.2.3.4:8080" and auth.startswith("Basic ")
+    clean2, auth2 = ab._proxy_parts("http://1.2.3.4:8080")
+    assert clean2 == "http://1.2.3.4:8080" and auth2 == ""
     print("9) 非法配置安全解析 OK")
 
     # 10) 仓库默认渠道配置可回退（服务器无 data/channels_config.json 时也能启用全部渠道）
