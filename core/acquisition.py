@@ -26,6 +26,7 @@ import csv
 import json
 import os
 import re
+import time
 import datetime
 
 from core import scorer  # 纯标准库，安全顶层导入
@@ -63,6 +64,7 @@ def normalize_conditions(conditions):
     c.setdefault("channels", ["web_search", "company_db", "exhibition", "procurement"])
     c.setdefault("max_results", 30)
     c.setdefault("allow_broad", False)
+    c.setdefault("enrich_limit", 30)
     c["ai_plan"] = c.get("ai_plan") if isinstance(c.get("ai_plan"), dict) else {}
 
     def as_list(v):
@@ -134,11 +136,22 @@ def normalize_conditions(conditions):
 # ----------------------------------------------------------------------------
 # 买方类型 → 专属检索后缀（从“买方/采购”侧切入，避开同行供应商噪音）
 _BUYER_SUFFIX = {
-    "光无源器件厂": ["采购", "询价", "规格书"],
-    "光模块厂": ["采购", "物料", "供应商征集"],
-    "系统集成商": ["招标", "采购公告", "项目"],
-    "近期招标扩容": ["招标公告", "中标", "扩容", "集采"],
+    "光无源器件厂": ["采购", "询价", "规格书", "物料采购", "来料检验"],
+    "光模块厂": ["采购", "物料", "供应商征集", "扩产 募投", "新产线 产能"],
+    "系统集成商": ["招标", "采购公告", "项目", "总包", "供应商入围"],
+    "近期招标扩容": ["招标公告", "中标", "扩容", "集采", "骨干网 项目", "metro DWDM"],
 }
+
+_OVERSEAS_WORDS = (
+    "印度", "印尼", "越南", "泰国", "马来西亚", "日本", "韩国", "新加坡", "沙特", "阿联酋",
+    "巴西", "尼日利亚", "德国", "英国", "法国", "美国", "欧洲", "中东", "非洲", "拉美", "海外",
+)
+
+
+def _is_overseas(market):
+    """判断市场是否为海外（支持英文与中文海外市场名）。"""
+    m = market or ""
+    return bool(re.search(r"[a-zA-Z]{2,}", m)) or any(w in m for w in _OVERSEAS_WORDS)
 
 
 def _expand_keywords(kw):
@@ -186,6 +199,26 @@ def generate_plan(conditions):
 
     markets = conditions["regions"]
     queries_by_channel = {"web_search": [], "company_db": [], "exhibition": [], "procurement": []}
+
+    # 1) 买方类型专属查询（买方分层核心，提升“买方侧”命中、减少同行供应商）
+    for bt in conditions["buyer_types"]:
+        for suf in _BUYER_SUFFIX.get(bt, ["采购"]):
+            for kw in expanded[:6]:
+                for m in (markets or [""]):
+                    q = f"{kw} {suf} {m}".strip()
+                    queries_by_channel["web_search"].append(q)
+                    queries_by_channel["procurement"].append(q)
+
+    # 2) 新兴市场/海外专项：import / tender / distributor 买方侧检索
+    for kw in expanded[:6]:
+        for m in (markets or [""]):
+            if _is_overseas(m):
+                for suf in ("import", "tender", "procurement", "distributor", "ISP"):
+                    q = f"{kw} {suf} {m}".strip()
+                    queries_by_channel["web_search"].append(q)
+                    queries_by_channel["procurement"].append(q)
+
+    # 3) 通用规格检索（兜底覆盖）
     for kw in expanded:
         for m in (markets or [""]):
             for q in _buyer_queries(kw, m):
@@ -196,16 +229,8 @@ def generate_plan(conditions):
         if "procurement" in conditions["channels"]:
             queries_by_channel["procurement"].append(f"{kw} 招标 采购公告")
 
-    # 买方类型专属查询（提升“买方侧”命中、减少同行供应商）
-    for bt in conditions["buyer_types"]:
-        for suf in _BUYER_SUFFIX.get(bt, ["采购"]):
-            for kw in expanded[:6]:
-                for m in (markets or [""]):
-                    q = f"{kw} {suf} {m}".strip()
-                    queries_by_channel["web_search"].append(q)
-                    queries_by_channel["procurement"].append(q)
-
-    # 去重并截断（控制每轮成本）
+    # 去重并截断（核心买方侧查询优先保留）
+    caps = {"web_search": 80, "procurement": 80, "company_db": 40, "exhibition": 40}
     for ch in queries_by_channel:
         seen = set()
         uniq = []
@@ -213,7 +238,7 @@ def generate_plan(conditions):
             if q not in seen:
                 seen.add(q)
                 uniq.append(q)
-        queries_by_channel[ch] = uniq[:40]
+        queries_by_channel[ch] = uniq[: caps.get(ch, 40)]
 
     return {
         "seed_keywords": expanded,
@@ -649,6 +674,12 @@ def run_engine(conditions, settings=None, max_rounds=3, progress=None, seed_cand
 
     targets, dropped = build_targets(_dedupe(all_candidates), conditions)
     final_gaps = analyze_gaps(targets, conditions)
+    # 配置了企查查/天眼查密钥时，自动补全待核验目标的联系方式
+    company_enrich = {}
+    if settings:
+        company_enrich = enrich_with_company_api(
+            targets, settings, limit=conditions.get("enrich_limit", 30),
+        )
     stats = _stats(targets, conditions)
     return {
         "targets": targets,
@@ -659,6 +690,7 @@ def run_engine(conditions, settings=None, max_rounds=3, progress=None, seed_cand
         "warnings": warnings[:15],
         "final_gaps": [list(g) for g in final_gaps],
         "rounds": rounds,
+        "company_enrich": company_enrich,
         "stats": stats,
     }
 
@@ -696,6 +728,50 @@ def _stats(targets, conditions):
         "verified": verified,
         "target_count": conditions["max_results"],
     }
+
+
+def enrich_with_company_api(targets, settings, limit=30):
+    """用企查查/天眼查官方接口补全待核验目标的电话/邮箱/地址（配置密钥后自动启用）。
+
+    只补 verified=False 且缺联系方式的目标；命中即更新并标记 verified=True，
+    单次最多补 limit 家，失败静默记录（不阻塞主流程）。
+    """
+    settings = settings or {}
+    if not (settings.get("qcc_app_key") or settings.get("tyc_token")):
+        return {"done": 0, "updated": 0, "errors": []}
+    try:
+        from core import company_api
+    except Exception as e:
+        return {"done": 0, "updated": 0, "errors": [{"msg": f"company_api 不可用：{e}"}]}
+    done = updated = 0
+    errors = []
+    for t in targets:
+        if done >= limit:
+            break
+        if t.get("verified") or (t.get("email") and t.get("phone")):
+            continue
+        done += 1
+        try:
+            info = company_api.query_company(settings, t.get("company") or "", provider="auto")
+        except Exception as e:
+            errors.append({"company": t.get("company", ""), "msg": str(e)[:120]})
+            continue
+        changed = False
+        if not t.get("phone") and info.get("phone"):
+            t["phone"] = info["phone"]
+            changed = True
+        if not t.get("email") and info.get("email"):
+            t["email"] = info["email"]
+            changed = True
+        if not t.get("address") and info.get("address"):
+            t["address"] = info["address"]
+            changed = True
+        if changed:
+            t["verified"] = True
+            t["path"] = "企查查/天眼查工商接口（官方API）"
+            updated += 1
+        time.sleep(0.5)
+    return {"done": done, "updated": updated, "errors": errors}
 
 
 # ----------------------------------------------------------------------------

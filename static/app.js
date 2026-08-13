@@ -1697,6 +1697,7 @@ function renderAcqResult(res) {
   const targets = res.targets || [];
   const stats = res.stats || {};
   const warnings = res.warnings || [];
+  const enrich = res.company_enrich || {};
   const box = $("#acq-result");
   if (!box) return;
   const importBtn = $("#acq-import");
@@ -1712,7 +1713,7 @@ function renderAcqResult(res) {
   box.innerHTML = `
     <h3 style="margin:6px 0 8px">发现 ${targets.length} 家目标客户</h3>
     ${warnHtml}
-    <div class="hint" style="margin-bottom:8px">等级分布：${esc(tiers)} ｜ 已核验 ${stats.verified || 0} 家${res.final_gaps && res.final_gaps.length ? ` ｜ 剩余缺口：${esc(res.final_gaps.map((g) => g.join(":")).join("；"))}` : ""}</div>
+    <div class="hint" style="margin-bottom:8px">等级分布：${esc(tiers)} ｜ 已核验 ${stats.verified || 0} 家${enrich.updated ? ` ｜ 🏢 工商补全 ${enrich.updated} 家` : ""}${res.final_gaps && res.final_gaps.length ? ` ｜ 剩余缺口：${esc(res.final_gaps.map((g) => g.join(":")).join("；"))}` : ""}</div>
     ${targets.length ? `<div class="table-wrap"><table>
       <thead><tr><th>等级</th><th>公司</th><th>区域</th><th>买方类型</th><th>命中规格</th><th>建议动作</th></tr></thead>
       <tbody>${targets.slice(0, 30).map((t) => `

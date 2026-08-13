@@ -169,7 +169,7 @@ def _is_vpn_link(url):
 
 def build_queries(keyword, market=""):
     """为一个关键词 + 地区生成多组意图查询。"""
-    overseas = bool(re.search(r"[a-zA-Z]{2,}", market or ""))
+    overseas = _market_overseas(market)
     if overseas:
         variants = [
             _with_words(keyword, ["buyer", "purchase", "procurement"]),
@@ -189,6 +189,17 @@ def build_queries(keyword, market=""):
     for v in variants:
         out.append(f"{v} {market}".strip())
     return out
+
+
+def _market_overseas(market):
+    """判断市场是否海外（支持英文与中文海外市场名）。"""
+    m = market or ""
+    if re.search(r"[a-zA-Z]{2,}", m):
+        return True
+    return any(w in m for w in (
+        "印度", "印尼", "越南", "泰国", "马来西亚", "日本", "韩国", "新加坡", "沙特", "阿联酋",
+        "巴西", "尼日利亚", "德国", "英国", "法国", "美国", "欧洲", "中东", "非洲", "拉美", "海外",
+    ))
 
 
 def expand_keywords(keyword):
@@ -469,6 +480,16 @@ def _clean_company(raw, url):
     return name[:80]
 
 
+def _looks_verified(cand):
+    """核验分级：企业邮箱（非免费邮箱）+ 电话 + 独立网站 → 视为可核验。"""
+    email = str(cand.get("email") or "")
+    phone = str(cand.get("phone") or "")
+    website = str(cand.get("website") or "")
+    if email and any(email.endswith("@" + w) for w in WEBMAILS):
+        return False
+    return bool(email and phone and website)
+
+
 def extract_contacts(html_text, url=""):
     text = re.sub(r"<script.*?</script>|<style.*?</style>", " ", html_text, flags=re.S | re.I)
     text = re.sub(r"<[^>]+>", " ", text)
@@ -561,10 +582,13 @@ def _to_candidate(contact, title, snippet, keyword, market, page_text):
         "snippet": snippet[:200],
         "note": (title + "。" + snippet)[:300],
         "next_action": "",
+        "verified": False,
+        "path": "官网公开信息栏 / 年报 / 行业展商名录（合法公开渠道）",
     }
     score, reason = _score_candidate(cand, page_text)
     cand["score"] = score
     cand["score_reason"] = reason
+    cand["verified"] = _looks_verified(cand)
     # WorkBuddy 式双维度：匹配度 + 实力 → S/A/B/C 等级
     fc = fit_comp_score(cand)
     cand["fit"] = fc["fit"]
