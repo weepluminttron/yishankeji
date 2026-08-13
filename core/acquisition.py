@@ -553,6 +553,8 @@ def build_targets(candidates, conditions, seq_start=1):
             "matched_conditions": matched,
             "channel_source": str(c.get("source") or "买家发现"),
             "channels": str(c.get("channels") or ""),
+            "signal": str(c.get("signal") or ""),
+            "window": str(c.get("window") or ""),
             "priority": tier,
             "fit": fit,
             "comp": comp,
@@ -1225,6 +1227,10 @@ def build_strategy_doc(conditions, engine_result, out_dir):
             lines.append(f"- **策略建议**：{plan_src.get('strategy')}")
         if plan_src.get("cooperation"):
             lines.append(f"- **合作模式**：{plan_src.get('cooperation')}")
+        if plan_src.get("decision"):
+            lines.append(f"- **决策链/周期**：{plan_src.get('decision')}")
+        if plan_src.get("moat"):
+            lines.append(f"- **差异化壁垒**：{plan_src.get('moat')}")
         if plan_src.get("channels"):
             lines.append(f"- **获客渠道**：{'、'.join(str(x) for x in plan_src.get('channels'))}")
         if plan_src.get("risks"):
@@ -1426,6 +1432,7 @@ def export_outputs(conditions, engine_result, out_dir, base_name="acquisition"):
     csv_path = os.path.join(out_dir, f"{base_name}_targets.csv")
     fields = ["id", "company", "company_en", "contact_name", "contact_role", "phone", "email",
               "website", "region", "buyer_type", "matched_conditions", "channel_source", "channels",
+              "signal", "window",
               "priority", "fit", "comp", "total", "next_action", "verified", "path", "note",
               "intent_stage", "intent_urgency", "intent_next_action", "profile"]
     with open(csv_path, "w", encoding="utf-8-sig", newline="") as f:

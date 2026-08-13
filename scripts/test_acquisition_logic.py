@@ -131,6 +131,29 @@ def main():
         assert captured["provider"] == expect, (prov, captured["provider"])
     print("8) 渠道 provider 映射 OK")
 
+    # 9) 场景词矩阵：查询覆盖采购/扩产/展会等场景
+    qs_cn = buyer.build_queries("DWDM", "广东")
+    assert len(qs_cn) >= 8, qs_cn
+    allq = " ".join(qs_cn)
+    assert "供应商征集" in allq and "扩产" in allq and "展会" in allq and "集采" in allq
+    qs_en = buyer.build_queries("DWDM", "India")
+    assert any("exhibition" in q for q in qs_en) and any("expansion" in q for q in qs_en)
+    print("9) 场景词矩阵 OK，中文", len(qs_cn), "条 / 英文", len(qs_en), "条")
+
+    # 10) AI 精筛输出采购信号/最佳窗口并写入线索
+    def _fake_ai_filter(settings, candidates, context=""):
+        return {0: {"buyer": True, "score": 8, "next_action": "发报价单",
+                    "signal": "正在招标", "window": "中标后48小时内"}}
+
+    buyer.ai_filter = _fake_ai_filter
+    res_s = buyer.run(
+        "", urls=["http://a.com"], markets="", settings={"use_search_cache": True},
+        use_ai=True,
+    )
+    assert res_s["candidates"] and res_s["candidates"][0]["signal"] == "正在招标"
+    assert "采购信号" in res_s["candidates"][0]["note"] and "最佳窗口" in res_s["candidates"][0]["note"]
+    print("10) AI 信号/窗口写入 OK")
+
     print("ALL OK")
 
 

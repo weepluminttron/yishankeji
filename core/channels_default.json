@@ -385,6 +385,57 @@
         "endpoint": "???? site: ??"
       },
       "keyword_config": "???? ??/??/??/????"
+    },
+    {
+      "id": "prnews",
+      "name": "???/PR?????????",
+      "category": "industry_site",
+      "provider": "bing",
+      "site_scope": "prnewswire.com,businesswire.com,globenewswire.com",
+      "query_template": "{kw} {intent} {site}",
+      "enabled_default": true,
+      "requires_key": "",
+      "rate_limit": 0.3,
+      "freshness": "month",
+      "access_params": {
+        "??": "??????????????",
+        "endpoint": "???? site: ??"
+      },
+      "keyword_config": "???? ??/??/???/???/expansion/procurement?"
+    },
+    {
+      "id": "eu_gov",
+      "name": "?????TED?",
+      "category": "procurement",
+      "provider": "bing",
+      "site_scope": "ted.europa.eu",
+      "query_template": "{kw} {intent} {site}",
+      "enabled_default": true,
+      "requires_key": "",
+      "rate_limit": 0.3,
+      "freshness": "month",
+      "access_params": {
+        "??": "????????????",
+        "endpoint": "???? site: ??"
+      },
+      "keyword_config": "???? tender/procurement/rfq?"
+    },
+    {
+      "id": "us_gov",
+      "name": "???????SAM?",
+      "category": "procurement",
+      "provider": "bing",
+      "site_scope": "sam.gov",
+      "query_template": "{kw} {intent} {site}",
+      "enabled_default": true,
+      "requires_key": "",
+      "rate_limit": 0.3,
+      "freshness": "month",
+      "access_params": {
+        "??": "??????????",
+        "endpoint": "???? site: ??"
+      },
+      "keyword_config": "???? tender/opportunity/contract?"
     }
   ]
 }

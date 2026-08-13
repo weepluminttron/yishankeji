@@ -393,6 +393,8 @@ def _acq_target_to_lead(t):
         f"【买方类型】{t.get('buyer_type', '')}",
         f"【命中规格】{'、'.join(t.get('matched_conditions') or [])}",
         f"【渠道】{t.get('channel_source', '')}",
+        f"【采购信号】{t.get('signal', '')}",
+        f"【最佳窗口】{t.get('window', '')}",
         f"【下一步】{t.get('next_action', '')}",
         f"【官网】{t.get('website', '')}",
         t.get("note") or "",
@@ -541,6 +543,10 @@ def _validate_plans(plans):
             warnings.append(f"{label}：缺少获客策略建议")
         if not p.get("pitch"):
             warnings.append(f"{label}：缺少首触话术，建议补充后直接可用")
+        if not p.get("decision"):
+            warnings.append(f"{label}：缺少决策链/采购周期，建议补充后再决定投入")
+        if not p.get("moat"):
+            warnings.append(f"{label}：缺少差异化壁垒，建议明确我们凭什么赢")
     if len(roles) < 2:
         warnings.append("方案之间的目标买方角色趋同，建议覆盖不同角色以扩大覆盖面")
     if len(markets) < 2:
@@ -565,6 +571,8 @@ def _strategy_worker(data, settings):
         '"markets":["地区1","地区2"],"profit":1到5的整数,"brand":1到5的整数,"demand":1到5的整数,'
         '"effort":1到5的整数(落地难度，5最难),"timeline":"建议执行节奏(如：1周内建名单+首触，2周内送样)",'
         '"pitch":"一句话首触话术/切入点","why":"这套方案的推荐理由与适用前提",'
+        '"decision":"决策链与采购周期(如：采购部+技术部双确认，周期2-3个月)",'
+        '"moat":"我们的差异化壁垒/切入优势(一句话)",'
         '"strategy":"获客策略建议","cooperation":"合作模式","channels":["获客渠道1","获客渠道2"],'
         '"risks":["风险提示1","风险提示2"]}]}'
         "关键词规则：每条必须是【产品/场景词 + 买方意图词】的组合，例如“WDM 采购公告”“光传输扩容 项目方”"
@@ -579,7 +587,8 @@ def _strategy_worker(data, settings):
         "请生成方案。关键词请给出可直接用于搜索引擎的短语（每套 8-12 个，尽量覆盖不同场景和地区，海外市场用英文）；"
         "利润/知名度/需求量用 1-5 整数表示（5 最高）；channels 给出 2-4 个可执行获客渠道（如展会/B2B平台/社群/邮件）；"
         "risks 给出 1-3 条风险提示（如竞争激烈/资质门槛/账期）；effort 用 1-5 表示落地难度；"
-        "pitch 必须是一句可直接发出去的开场话术；why 必须说清为什么这套方案适合当前业务、前提是什么。"
+        "pitch 必须是一句可直接发出去的开场话术；why 必须说清为什么这套方案适合当前业务、前提是什么；"
+        "decision 必须说清这类客户的决策链和采购周期；moat 必须写清我们相对同行的差异化优势（如现货/交期/定制/价格/认证）。"
     )
     text, err = ai.generate_copy(
         settings.get("openai_api_key"),
@@ -622,6 +631,8 @@ def _strategy_worker(data, settings):
                 "timeline": str(p.get("timeline", ""))[:120],
                 "pitch": str(p.get("pitch", ""))[:120],
                 "why": str(p.get("why", ""))[:200],
+                "decision": str(p.get("decision", ""))[:120],
+                "moat": str(p.get("moat", ""))[:120],
                 "strategy": str(p.get("strategy", ""))[:300],
                 "cooperation": str(p.get("cooperation", ""))[:120],
                 "channels": [str(c).strip() for c in (p.get("channels") or []) if str(c).strip()][:4],

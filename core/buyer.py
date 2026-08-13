@@ -170,7 +170,7 @@ def _is_vpn_link(url):
 
 
 def build_queries(keyword, market=""):
-    """为一个关键词 + 地区生成多组意图查询。"""
+    """为一个关键词 + 地区生成多组意图查询（场景词矩阵，覆盖采购/招标/扩产/展会等场景）。"""
     overseas = _market_overseas(market)
     if overseas:
         variants = [
@@ -178,6 +178,10 @@ def build_queries(keyword, market=""):
             _with_words(keyword, ["rfq", "tender", "project"]),
             _with_words(keyword, ["distributor", "dealer", "import"]),
             _with_words(keyword, ["procurement manager", "RFP"]),
+            _with_words(keyword, ["supplier sourcing", "vendor registration"]),
+            _with_words(keyword, ["factory expansion", "new capacity"]),
+            _with_words(keyword, ["exhibition", "exhibitor"]),
+            _with_words(keyword, ["annual report", "procurement announcement"]),
         ]
     else:
         variants = [
@@ -186,6 +190,11 @@ def build_queries(keyword, market=""):
             _with_words(keyword, ["求购", "信息"]),
             _with_words(keyword, ["需要", "报价"]),
             _with_words(keyword, ["采购经理", "项目"]),
+            _with_words(keyword, ["供应商征集", "供应商入围"]),
+            _with_words(keyword, ["扩产", "募投", "新产线"]),
+            _with_words(keyword, ["集采", "中标"]),
+            _with_words(keyword, ["展会", "展商"]),
+            _with_words(keyword, ["长期合作", "代理招募"]),
         ]
     out = []
     for v in variants:
@@ -671,6 +680,8 @@ def ai_filter(settings, candidates, context=""):
         '"points":["2到3条具体判断依据，如采购意向、规模信号、匹配度"],'
         '"fit":0到50的整数（品类/规格/定制匹配度）,'
         '"comp":0到50的整数（体量/层级/活跃度/可持续性）,'
+        '"signal":"该客户最明显的采购信号(一句话，如：正在招标/刚中标/扩产采购)",'
+        '"window":"最佳触达窗口(如：Q3扩产投产前送样 / 中标后48小时内)",'
         '"next_action":"针对该线索的下一步动作建议（如：电话确认采购预算 / 发样品报价单 / 加微信发案例，20字内）"}，'
         "不要输出任何其他内容。reason、points、next_action 必须基于线索本身的真实信息，禁止编造。"
     )
@@ -760,7 +771,7 @@ def run(keywords, markets=None, max_results=6, urls=None, use_ai=False, settings
         for market in markets or [""]:
             for kw in keywords:
                 queries.extend(build_queries(kw, market))
-        queries = queries[:30]
+        queries = queries[:40]
         q_total = len(queries)
         workers = max(1, min(int((settings or {}).get("max_search_workers", 8) or 8), 16))
         _stg = (settings or {}).get("search_stagger")
@@ -878,6 +889,8 @@ def run(keywords, markets=None, max_results=6, urls=None, use_ai=False, settings
                 if item.get("reason"):
                     c["score_reason"] = c.get("score_reason", "") + "；AI：" + str(item["reason"])[:60]
                 c["next_action"] = str(item.get("next_action") or "").strip()
+                c["signal"] = str(item.get("signal") or "").strip()
+                c["window"] = str(item.get("window") or "").strip()
                 # AI 给出的匹配度/实力双维度（缺失时保留规则值）
                 try:
                     if item.get("fit") is not None:
@@ -897,6 +910,12 @@ def run(keywords, markets=None, max_results=6, urls=None, use_ai=False, settings
         if na:
             c["note"] = (c.get("note", "") or "").rstrip("；") + f"；AI建议：{na}"[:200]
             c["score_reason"] = (c.get("score_reason", "") or "").rstrip("；") + f"；AI建议：{na}"
+        sig = (c.get("signal") or "").strip()
+        if sig:
+            c["note"] = (c.get("note", "") or "").rstrip("；") + f"；采购信号：{sig}"[:150]
+        win = (c.get("window") or "").strip()
+        if win:
+            c["note"] = (c.get("note", "") or "").rstrip("；") + f"；最佳窗口：{win}"[:150]
         # 补充双维度等级信息，便于排序与前端展示
         c.setdefault("fit", 0)
         c.setdefault("comp", 0)

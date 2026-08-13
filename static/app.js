@@ -1617,6 +1617,8 @@ function renderPlans(plans, warnings) {
       ${p.timeline ? `<div class="hint" style="margin-top:6px">🗓 ${esc(p.timeline)}</div>` : ""}
       ${p.pitch ? `<div style="margin-top:6px;background:#eef6ff;border-radius:8px;padding:8px 10px;font-size:12px">💬 首触：${esc(p.pitch)}</div>` : ""}
       ${p.why ? `<div class="hint" style="margin-top:6px">✅ 推荐理由：${esc(p.why)}</div>` : ""}
+      ${p.decision ? `<div class="hint" style="margin-top:6px">🧭 决策链/周期：${esc(p.decision)}</div>` : ""}
+      ${p.moat ? `<div class="hint" style="margin-top:6px">🛡 差异化壁垒：${esc(p.moat)}</div>` : ""}
       ${p.strategy ? `<div class="hint" style="margin-top:6px">💡 ${esc(p.strategy)}</div>` : ""}
       ${p.channels && p.channels.length ? `<div class="hint" style="margin-top:6px">📡 渠道：${p.channels.map((c) => `<span class="tag-chip">${esc(c)}</span>`).join("")}</div>` : ""}
       ${p.risks && p.risks.length ? `<div class="hint" style="margin-top:6px">⚠️ 风险：${esc(p.risks.join("；"))}</div>` : ""}
@@ -1814,7 +1816,7 @@ function renderBuyerResult(res) {
           <td>${esc(c.email || "—")}</td>
           <td>${esc(c.phone || "—")}</td>
           <td>${scoreBadge(c.score)}</td>
-          <td class="sub" style="max-width:280px">${c.tier ? `<span class="tag-chip" style="background:${c.tier === "S" ? "#ffe9ec;color:#c62828" : c.tier === "A" ? "#fff8e1;color:#b26a00" : "#f1f5f9;color:#475569"}">${esc(c.tier)}级</span> ` : ""}${esc(c.score_reason || "")}${c.next_action ? `<div style="margin-top:4px;color:var(--blue)">👉 ${esc(c.next_action)}</div>` : ""}${c.snippet ? `<div style="margin-top:3px;color:var(--muted)">${esc(c.snippet.slice(0, 120))}</div>` : ""}</td>
+          <td class="sub" style="max-width:280px">${c.tier ? `<span class="tag-chip" style="background:${c.tier === "S" ? "#ffe9ec;color:#c62828" : c.tier === "A" ? "#fff8e1;color:#b26a00" : "#f1f5f9;color:#475569"}">${esc(c.tier)}级</span> ` : ""}${esc(c.score_reason || "")}${c.next_action ? `<div style="margin-top:4px;color:var(--blue)">👉 ${esc(c.next_action)}</div>` : ""}${c.signal ? `<div style="margin-top:4px;color:var(--green)">📶 ${esc(c.signal)}</div>` : ""}${c.window ? `<div style="margin-top:4px;color:var(--orange)">⏰ ${esc(c.window)}</div>` : ""}${c.snippet ? `<div style="margin-top:3px;color:var(--muted)">${esc(c.snippet.slice(0, 120))}</div>` : ""}</td>
         </tr>`).join("")}
       </tbody></table></div>
       ${errs ? `<div style="margin-top:10px;color:var(--orange);font-size:12px">部分页面抓取失败：<ul style="margin:4px 0 0 18px">${errs}</ul></div>` : ""}`;

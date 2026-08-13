@@ -156,9 +156,9 @@ def main():
 
     default_path = str(pathlib.Path("core/channels_default.json"))
     cfg_default = channels.load_channel_config(default_path)
-    assert len(cfg_default["channels"]) >= 20, len(cfg_default["channels"])
+    assert len(cfg_default["channels"]) >= 24, len(cfg_default["channels"])
     ids_default = {c["id"] for c in cfg_default["channels"]}
-    assert "zhaopin" in ids_default and "cninfo" in ids_default
+    assert {"zhaopin", "cninfo", "prnews", "eu_gov", "us_gov"} <= ids_default
     print("10) 默认渠道配置 OK，渠道数:", len(cfg_default["channels"]))
 
     print("\nALL CHANNEL TESTS OK")
