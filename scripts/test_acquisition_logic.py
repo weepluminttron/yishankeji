@@ -69,7 +69,7 @@ def main():
     import core.crawler as crawler
     import core.buyer as buyer_mod
 
-    crawler.fetch_page = lambda url, timeout=15, use_jina=True, jina_timeout=12: (
+    crawler.fetch_page = lambda url, timeout=15, use_jina=True, jina_timeout=12, settings=None: (
         "<html><title>公司</title><body>buy@corp.com 010-88886666</body></html>", url,
     )
     buyer_mod.extract_contacts = lambda html, url="": {
@@ -95,6 +95,42 @@ def main():
     res = acquisition.run_engine(c, max_rounds=1, seed_candidates=seed)
     assert not res["company_enrich"] or res["company_enrich"] == {"done": 0, "updated": 0, "errors": []}
     print("引擎集成 OK")
+
+    # 7) buyer.run(channel_ids) 不应 NameError（此前误用未定义的 eff_settings）
+    import core.channels as chmod
+
+    def _fake_channel_search(channel_ids, keywords=None, markets=None, settings=None,
+                             progress=None, use_cache=True):
+        return ([{"url": "http://a.com", "title": "某公司 - 采购",
+                  "snippet": "DWDM 采购 招标", "channels": ["bing"]}], {})
+
+    chmod.run_channel_search = _fake_channel_search
+    buyer.fetch_page = lambda url, timeout=15, use_jina=True, jina_timeout=12, settings=None: (
+        "<html><title>某公司</title><body>buy@corp.com 13800138000</body></html>", url,
+    )
+    res_b = buyer.run(
+        "DWDM", markets="广东",
+        settings={"use_search_cache": True, "search_provider": "bing_free"},
+        channel_ids=["bing"],
+    )
+    assert res_b["candidates"] and res_b["candidates"][0]["channels"] == "bing", res_b
+    print("7) buyer.run(channel_ids) OK，候选:", len(res_b["candidates"]))
+
+    # 8) 渠道 provider 映射：so→so_free、sogou→sogou、bing→bing_free
+    captured = {}
+
+    def _fake_web(query, count, settings=None):
+        captured["provider"] = settings.get("search_provider")
+        return [{"url": "http://x.com", "title": "x", "snippet": "采购"}]
+
+    buyer.search_web = _fake_web
+    for prov, expect in [("so", "so_free"), ("sogou", "sogou"), ("bing", "bing_free"), ("bocha", "bocha")]:
+        ch_cfg = {"id": "t", "name": "t", "provider": prov, "site_scope": "",
+                  "query_template": "{kw} {intent} {market}"}
+        chmod.search_channel(ch_cfg, "DWDM 采购 广东", 5, {}, use_cache=False)
+        assert captured["provider"] == expect, (prov, captured["provider"])
+    print("8) 渠道 provider 映射 OK")
+
     print("ALL OK")
 
 

@@ -39,6 +39,34 @@
 
 在“买家发现”页填写主营产品、必中规格/品类、目标市场、目标买方类型、最低等级与目标数量，引擎会自动生成多渠道检索方案 → 发现并筛选买家 → 按“匹配度+实力”双维度分级（S/A/B/C）→ 自动补齐缺口迭代，完成后可一键导入客户库（保留评分与等级）。引擎与 AI 获客方案、手动搜索已打通：方案可“🧠 用引擎获客”，手动搜索结果可“🧠 送引擎筛选分级”（离线跑双维度分级，无需再联网）。也可用命令行 `python scripts/run_acquisition.py --conditions 条件文件.json [--seed 已收集线索.json]` 输出策略文档与目标清单。
 
+### 🌐 多源获客渠道（可配置、可扩展）
+
+获客途径被抽象为一组**可独立启停、可配置**的「渠道」，引擎会按配置从不同途径**自动发起网络搜索并采集潜在客户**，结果统一去重归一化后进入抓取/抽取/评分。开箱即用覆盖：
+
+- **搜索引擎**：Bing / 360 / 搜狗 / SerpAPI / Google CSE / 博查
+- **社交媒体**：LinkedIn / Facebook / Reddit / X
+- **行业网站**：C114 / OFweek / Light Reading
+- **论坛社区**：知乎 / CSDN / Quora
+- **招投标平台**：政府采购网 / 政企集采
+- **工商企业库 / 地图 POI**：用于发现公司主页与本地厂商
+
+**接入参数、关键词配置、去重归一化均在 `data/channels_config.json` 中定义**，无需改代码即可：
+
+- 接入参数：每个渠道的 `provider`（搜索后端）/ `site_scope`（域名限定）/ `rate_limit`（限流）/ `freshness`（时间范围）；密钥走 `settings`（`search_api_key` 覆盖 SerpAPI/博查，`map_api_key` 覆盖地图，`qcc_app_key` 覆盖工商库）。
+- 搜索关键词配置：渠道 `query_template` 模板，占位符 `{kw}`=规格词、`{intent}`=买方意图词（采购/招标/询价…或 buyer/rfq，按市场中英自动切换）、`{market}`=地区、`{site}`=自动注入的 site 限定；引擎按「关键词×市场×意图」组合生成检索式。
+- 去重与归一化：跨渠道按归一化 URL 去重；同一客户出现在多个渠道时合并 `channels` 归因；统一经噪音站点过滤 + 同行供应商信号过滤后进入评分，确保多渠道线索口径一致。
+
+**启用 / 扩展**：默认即启用搜索引擎 + 社交媒体 + 行业站 + 论坛 + 招投标 + 工商库 + 地图（付费源与地图需相应密钥）；可在 `conditions.channels` 指定类别，或用命令行 `--channels 搜索引擎,linkedin,zhihu,c114` 临时指定；新增一个获客途径 = 在 `channels_config.json` 的 `channels` 数组加一项（指定 provider/site_scope/模板），代码零改动。
+
+```bash
+# 查看全部可用渠道及其接入参数 / 可达性
+python scripts/run_acquisition.py --list-channels
+# 临时指定本次启用的渠道（类别名或渠道 id 均可）
+python scripts/run_acquisition.py --conditions 条件.json --channels 搜索引擎,社交媒体,行业网站,论坛
+# 使用自定义渠道配置
+python scripts/run_acquisition.py --conditions 条件.json --channels-config my_channels.json
+```
+
 ### 🖥️ 引擎任务栏监控（系统托盘 / 状态栏）
 
 `scripts/tray_monitor.py` 可实时监控获客引擎的后台任务与相关子进程，在 Windows 系统托盘或控制台状态栏显示**名称、状态、运行时间**，支持定时刷新、空列表提示、异常退出标记与完整日志：

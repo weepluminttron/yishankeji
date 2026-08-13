@@ -12,13 +12,13 @@ import urllib.parse
 from core import ai, crawler
 
 
-def _fetch_context(company, region=""):
-    """尝试联网拿到公司简介文本；失败返回 ("", 原因)。"""
+def _fetch_context(company, region="", settings=None):
+    """尝试联网拿到公司简介文本；失败返回 ("", 原因)。settings 透传反爬配置。"""
     query = (company + " " + (region or "")).strip() + " 公司 官网 简介"
     try:
         html_text, _ = crawler.fetch_page(
             "https://www.bing.com/search?q=" + urllib.parse.quote(query),
-            timeout=12,
+            timeout=12, settings=settings,
         )
         text = re.sub(r"<script.*?</script>|<style.*?</style>", " ", html_text, flags=re.S | re.I)
         text = re.sub(r"<[^>]+>", " ", text)
@@ -43,7 +43,7 @@ def brief(company, settings, region=""):
     industry = settings.get("industry", "") or "通用"
     product = settings.get("product_name", "") or "我们的产品"
 
-    ctx, ctx_err = _fetch_context(company, region)
+    ctx, ctx_err = _fetch_context(company, region, settings=settings)
     inferred = not ctx
     ctx_block = (
         f"【联网获取的公司相关信息】\n{ctx}\n" if ctx

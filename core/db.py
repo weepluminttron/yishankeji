@@ -693,6 +693,15 @@ def get_settings():
         "auto_touch_score": "7",      # 触发自动首触的最低评分
         "auto_touch_delay": "1",      # 入库后延迟几天再首触
         "auto_touch_channel": "email",  # 首触渠道：email / sms
+        # ---- 反爬策略配置（对应"快启精线索"综合反爬体系）----
+        "proxy_pool": "",          # 代理池：逗号分隔的代理 URL（http://ip:port 或 http://user:pass@ip:port）
+        "proxy_url": "",           # 单个代理 URL（与 proxy_pool 二选一，优先级低于 pool）
+        "delay_search": "0.8",      # 搜索请求前随机延时基准（秒，±50% 抖动）
+        "delay_fetch": "0.3",      # 页面抓取前随机延时基准（秒）
+        "delay_page": "1.5",      # 翻页/连续抓取延时基准（秒）
+        "delay_default": "0.5",    # 默认随机延时基准（秒）
+        "retry_max": "2",          # 失败重试次数（指数退避：1s → 2s → 4s）
+        "retry_base_delay": "1.0", # 重试退避基准延时（秒）
     }
     merged = dict(defaults)
     merged.update(saved)
@@ -716,6 +725,10 @@ def save_settings(values):
         "last_auto_crawl",
         "auto_intent_enabled", "auto_intent_use_ai",
         "auto_touch_enabled", "auto_touch_score", "auto_touch_delay", "auto_touch_channel",
+        # 反爬策略配置
+        "proxy_pool", "proxy_url",
+        "delay_search", "delay_fetch", "delay_page", "delay_default",
+        "retry_max", "retry_base_delay",
     ]
     conn = get_conn()
     try:

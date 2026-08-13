@@ -1023,6 +1023,15 @@ class Handler(BaseHTTPRequestHandler):
             return send_json(self, {"items": items, "total": total, "page": page, "size": size})
         if api == "settings":
             return send_json(self, {"ok": True, "settings": db.get_settings()})
+        if api == "antibot":
+            # 反爬策略状态：代理池健康度 + 请求统计 + 拦截检测计数
+            from core import antibot
+            pool = antibot.get_proxy_pool(db.get_settings())
+            return send_json(self, {
+                "ok": True,
+                "stats": antibot.get_stats(),
+                "proxy_pool": pool.stats() if pool else {"total": 0, "healthy": 0, "details": []},
+            })
         if api == "mail" and len(parts) > 2 and parts[2] == "status":
             return send_json(self, {"ok": True, "job": dict(_mail_job)})
         if api == "mail":
@@ -1330,12 +1339,19 @@ class Handler(BaseHTTPRequestHandler):
         if api == "crawl":
             data = read_json_body(self)
             candidates, err = crawler.crawl(
-                url=data.get("url", ""), html_text=data.get("html", "")
+                url=data.get("url", ""), html_text=data.get("html", ""),
+                settings=db.get_settings(),
             )
             return send_json(self, {"ok": not err, "candidates": candidates, "error": err})
         if api == "settings":
             data = read_json_body(self)
             settings = db.save_settings(data.get("settings", {}))
+            # 反爬配置变更后重新加载代理池（proxy_pool / proxy_url）
+            try:
+                from core import antibot
+                antibot.configure_from_settings(settings)
+            except Exception:
+                pass
             return send_json(self, {"ok": True, "settings": settings})
         if api == "ai":
             data = read_json_body(self)
@@ -1524,7 +1540,7 @@ class Handler(BaseHTTPRequestHandler):
                 return send_json(self, {"ok": False, "msg": f"抓取失败：{e}"}, 400)
         if not settings.get("openai_api_key"):
             try:
-                src = html_text if html_text else crawler.fetch_page(url, timeout=12)[0]
+                src = html_text if html_text else crawler.fetch_page(url, timeout=12, settings=settings)[0]
                 cands = crawler.extract_candidates(src, url or "")
                 return send_json(self, {"ok": True, "ai": False, "msg": "未配置 AI 密钥，已用规则提取", "extracted": cands[:5]})
             except Exception as e:

@@ -46,7 +46,25 @@ def main():
                     help="禁用搜索结果缓存（每次重新爬取，便于对比提速效果）")
     ap.add_argument("--workers", type=int, default=8,
                     help="搜索/抓取并发线程数（默认 8；免费源易被限流时可调小）")
+    ap.add_argument("--channels", default="",
+                    help="显式指定本次启用的搜索渠道（逗号分隔，如 '搜索引擎,linkedin,zhihu,c114'）；"
+                         "覆盖 conditions.channels 的类别解析。可用 --list-channels 查看全部渠道。")
+    ap.add_argument("--channels-config", default="",
+                    help="自定义渠道配置文件路径（JSON），覆盖默认 data/channels_config.json")
+    ap.add_argument("--list-channels", action="store_true",
+                    help="打印全部可用渠道及其接入参数/可达性后退出，不执行获客")
     args = ap.parse_args()
+
+    if args.list_channels:
+        from core import channels as chmod
+        cfg = chmod.load_channel_config(args.channels_config or None)
+        print("可用获客渠道（数据驱动，来自 channels_config.json）：")
+        print(f"  {'ID':<14}{'类别':<14}{'后端':<10}{'需密钥':<14}{'可达':<6}说明")
+        for ch in cfg["channels"]:
+            print(f"  {ch['id']:<14}{ch['category']:<14}{ch['provider']:<10}"
+                  f"{(ch.get('requires_key') or '无'):<14}{'Y' if True else 'N':<6}{ch['name']}")
+        print("\n说明：--channels 接受类别名(搜索引擎/社交媒体/行业网站/论坛/招投标/工商库/地图)或具体渠道 id。")
+        return
 
     # 解析 conditions：文件 or 内联
     cpath = args.conditions
@@ -71,6 +89,17 @@ def main():
     settings["max_fetch_workers"] = args.workers
     if args.no_cache:
         settings["use_search_cache"] = False
+    # 多源获客：显式指定本次启用的渠道（类别名或渠道 id），覆盖 conditions.channels
+    if args.channels.strip():
+        settings["channel_ids"] = [x.strip() for x in args.channels.split(",") if x.strip()]
+    # 支持自定义渠道配置文件（覆盖默认 data/channels_config.json）
+    if args.channels_config.strip():
+        try:
+            from core import channels as chmod
+            _cfg = chmod.load_channel_config(args.channels_config)
+            chmod._cache["cfg"] = _cfg  # 注入缓存，使本次运行全程使用自定义配置
+        except Exception as e:
+            print(f"[警告] 自定义渠道配置加载失败，改用默认：{e}", flush=True)
 
     seed = None
     if args.seed:

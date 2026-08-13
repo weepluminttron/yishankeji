@@ -61,7 +61,7 @@ def normalize_conditions(conditions):
     c.setdefault("buyer_types", ["光无源器件厂", "光模块厂", "系统集成商", "近期招标扩容"])
     c.setdefault("min_tier", "B")
     c.setdefault("exclude", [])
-    c.setdefault("channels", ["web_search", "company_db", "exhibition", "procurement"])
+    c.setdefault("channels", ["web_search", "social_media", "industry_site", "forum", "company_db", "procurement", "exhibition"])
     c.setdefault("max_results", 30)
     c.setdefault("allow_broad", False)
     c.setdefault("enrich_limit", 30)
@@ -289,12 +289,36 @@ def generate_plan(conditions):
             uniq.append(q)
         queries_by_channel[ch] = uniq[: caps.get(ch, 40)]
 
+    # 渠道来源说明：把本次启用的具体渠道及其接入参数/关键词配置方式一并列明，
+    # 便于用户核对“从哪些途径获客”以及每个途径怎么配。
+    try:
+        from core import channels as chmod
+        ch_enabled = chmod.get_enabled_channel_ids(conditions, {})
+        channel_sources = []
+        for cid in ch_enabled:
+            ch = chmod.get_channel(cid)
+            if not ch:
+                continue
+            sample = chmod.build_channel_queries(ch, expanded[:3], markets[:2], max_per_channel=2)
+            channel_sources.append({
+                "id": ch["id"], "name": ch["name"], "category": ch["category"],
+                "provider": ch["provider"], "site_scope": ch["site_scope"],
+                "query_template": ch["query_template"], "enabled": True,
+                "requires_key": ch["requires_key"], "rate_limit": ch["rate_limit"],
+                "access_params": ch.get("access_params", {}),
+                "keyword_config": ch.get("keyword_config", ""),
+                "sample_queries": [q for q, _, _ in sample][:3],
+            })
+    except Exception:
+        channel_sources = []
+
     return {
         "seed_keywords": expanded,
         "markets": markets,
         "buyer_types": conditions["buyer_types"],
         "channels": conditions["channels"],
         "queries_by_channel": queries_by_channel,
+        "channel_sources": channel_sources,
         "query_total": sum(len(v) for v in queries_by_channel.values()),
         "generated_at": datetime.date.today().strftime("%Y-%m-%d"),
     }
@@ -304,8 +328,14 @@ def generate_plan(conditions):
 # 3. 发现：多渠道检索 + 抓取 + 抽取（惰性调用 core.buyer）
 # ----------------------------------------------------------------------------
 def _discover_one_round(conditions, settings, progress=None):
-    """调用 core.buyer.run 完成一轮“搜索→去噪→抓取→抽取→评分→AI过滤”。"""
+    """调用 core.buyer.run 完成一轮“搜索→去噪→抓取→抽取→评分→AI过滤”。
+
+    本次新增：把 conditions.channels（类别）或显式 channel_ids 解析为具体渠道，
+    通过 buyer.run(channel_ids=...) 从不同途径（搜索引擎/社交媒体/行业站/论坛/招投标/地图）
+    并行搜索并采集潜在客户，结果在 buyer 内统一去重归一化。
+    """
     from core import buyer
+    from core import channels as chmod
 
     # 把引擎条件的“时间范围/站点过滤”注入本次搜索设置
     eff_settings = dict(settings or {})
@@ -313,6 +343,10 @@ def _discover_one_round(conditions, settings, progress=None):
         eff_settings["search_freshness"] = conditions["recency"]
     if conditions.get("site_scope"):
         eff_settings["search_site_filter"] = conditions["site_scope"]
+
+    # 解析本次要启用的具体渠道（类别 → 渠道 id；缺密钥的自动跳过）
+    # 若 settings 里显式给了 channel_ids（CLI --channels），则优先按显式列表解析
+    channel_ids = chmod.get_enabled_channel_ids(conditions, eff_settings, explicit=eff_settings.get("channel_ids"))
 
     keywords = conditions["specs"] + conditions["keywords"]
     markets = conditions["regions"]
@@ -331,6 +365,7 @@ def _discover_one_round(conditions, settings, progress=None):
         settings=eff_settings,
         progress=progress,
         context=context,
+        channel_ids=channel_ids,
     )
     return {
         "candidates": res.get("candidates", []),
@@ -339,6 +374,8 @@ def _discover_one_round(conditions, settings, progress=None):
             "timings": res.get("timings", {}),
             "cache_hits": res.get("cache_hits", 0),
             "filtered": res.get("filtered", 0),
+            "channel_stats": res.get("channel_stats", {}),
+            "channels_used": channel_ids,
             "errors": res.get("errors", [])[:10],
         },
     }
@@ -515,6 +552,7 @@ def build_targets(candidates, conditions, seq_start=1):
             "buyer_type": buyer_type,
             "matched_conditions": matched,
             "channel_source": str(c.get("source") or "买家发现"),
+            "channels": str(c.get("channels") or ""),
             "priority": tier,
             "fit": fit,
             "comp": comp,
@@ -797,15 +835,23 @@ def run_engine(conditions, settings=None, max_rounds=3, progress=None, seed_cand
 
 
 def _dedupe(candidates):
-    seen = set()
+    """按身份(网站/邮箱/公司名)去重；命中重复时合并各来源的 channels 渠道归因。"""
+    seen = {}
     out = []
     for c in candidates:
         key = (str(c.get("website") or "").lower(),
                str(c.get("email") or "").lower(),
                str(c.get("name") or "").strip().lower())
         if key in seen:
+            # 同一客户出现在多个渠道 → 渠道归因合并，保留最全的来源集合
+            kept = seen[key]
+            ch = str(c.get("channels") or "")
+            if ch:
+                exist = set(x for x in str(kept.get("channels") or "").split(",") if x)
+                exist.update(x for x in ch.split(",") if x)
+                kept["channels"] = ",".join(exist)
             continue
-        seen.add(key)
+        seen[key] = c
         out.append(c)
     return out
 
@@ -899,7 +945,7 @@ def verify_contacts(targets, settings, limit=20):
         done += 1
         email = phone = ""
         try:
-            html, final = crawler.fetch_page(web, timeout=12, use_jina=True, jina_timeout=12)
+            html, final = crawler.fetch_page(web, timeout=12, use_jina=True, jina_timeout=12, settings=settings)
             c = buyer.extract_contacts(html, final or web)
             email = c["emails"][0] if c["emails"] else ""
             phone = c["phones"][0] if c["phones"] else ""
@@ -909,7 +955,7 @@ def verify_contacts(targets, settings, limit=20):
             # 常见联系页兜底
             for suffix in ("/contact", "/contact-us", "/about"):
                 try:
-                    html, _ = crawler.fetch_page(web.rstrip("/") + suffix, timeout=10, use_jina=True, jina_timeout=10)
+                    html, _ = crawler.fetch_page(web.rstrip("/") + suffix, timeout=10, use_jina=True, jina_timeout=10, settings=settings)
                     c = buyer.extract_contacts(html, web + suffix)
                     email = c["emails"][0] if c["emails"] else email
                     phone = c["phones"][0] if c["phones"] else phone
@@ -994,6 +1040,14 @@ def _channel_matrix(conditions):
             "fit": "区域集中型买方（产业带集群 / 海外城市）",
             "tactic": "按城市+品类拉取园区/产业带企业 POI，补齐工商信息缺失的中小买家。",
             "ai": "AI 地图检索(mapsearch)自动归集 POI 并去重入清单。",
+        },
+        {
+            "name": "多源网络搜索（社交媒体 / 行业站 / 论坛）",
+            "stage": "挖掘", "auto": True,
+            "fit": all_bt,
+            "tactic": "按渠道并行搜索 LinkedIn / 知乎 / C114 / OFweek 等专业站点，site 限定精准锁定买方讨论与采购帖；"
+                      "跨渠道去重归一化后统一进评分，和搜索引擎/招投标同口径。",
+            "ai": "channels.run_channel_search 并行跨渠道搜索+聚合；同一客户多源命中自动合并 channels 归因。",
         },
     ]
     # 动态优先级：有招标类买方时把"搜索引擎+招投标平台"排第一
@@ -1206,6 +1260,39 @@ def build_strategy_doc(conditions, engine_result, out_dir):
         lines.append(f"| {ch['name']} | {ch['stage']} | {ch['fit']} | {ch['tactic']} | {ch['ai']} | {auto} |")
     lines.append("")
 
+    # 3.1 多源网络搜索来源配置（本次新增：从多种途径自动发起搜索）
+    ch_src = plan.get("channel_sources", [])
+    if ch_src:
+        lines.append("### 3.1 多源网络搜索来源配置（自动发起 · 可配置 · 可扩展）")
+        lines.append("")
+        lines.append("本引擎支持从**多种不同途径自动发起网络搜索并采集潜在客户信息**。每个来源是一个可独立启停、"
+                     "可配置的「渠道」，搜索结果统一经跨渠道去重与归一化后进入抓取/抽取/评分流程。")
+        lines.append("")
+        lines.append("| 渠道 | 类别 | 搜索后端 | 域名限定(site) | 关键词模板 | 需密钥 |")
+        lines.append("| --- | --- | --- | --- | --- | --- |")
+        for cs in ch_src:
+            scope = cs.get("site_scope") or "全站（不限域名）"
+            key = cs.get("requires_key") or "无（免费源）"
+            row = "| " + cs["name"] + " | " + cs["category"] + " | " + cs["provider"] + \
+                  " | " + scope + " | `" + cs["query_template"] + "` | " + key + " |"
+            lines.append(row)
+        lines.append("")
+        lines.append("**接入参数**：在 `data/channels_config.json` 配置每个渠道的 `provider`（搜索后端）/ "
+                     "`site_scope`（域名限定）/ `rate_limit`（限流）/ `freshness`（时间范围）；"
+                     "密钥统一走 settings（`search_api_key` 覆盖 SerpAPI/博查、`map_api_key` 覆盖地图 POI、`qcc_app_key` 覆盖工商库）。")
+        lines.append("")
+        lines.append("**搜索关键词配置方式**：每个渠道用 `query_template` 模板，占位符 "
+                     "`{kw}`=规格词、`{intent}`=买方意图词（采购/招标/询价…或 buyer/rfq/tender，按市场中英自动切换）、"
+                     "`{market}`=目标地区、`{site}`=自动注入的 site 限定；引擎按「关键词×市场×意图」组合生成检索式。")
+        lines.append("")
+        lines.append("**结果去重与归一化**：跨渠道按归一化 URL 去重；同一客户出现在多个渠道时合并 `channels` 归因；"
+                     "统一经噪音站点过滤 + 同行供应商信号过滤后，才进入页面抓取、联系方式抽取与双维度评分，"
+                     "确保多渠道线索口径一致、不重复计入。")
+        lines.append("")
+        lines.append("**灵活扩展**：新增一个获客途径 = 在 `channels_config.json` 的 channels 数组加一项（指定 provider/site_scope/模板），"
+                     "代码零改动即可生效；命令行可用 `--channels 搜索引擎,linkedin,zhihu` 临时指定本次启用的渠道。")
+        lines.append("")
+
     # 四、AI 工具在获客全流程中的应用
     lines.append("## 四、AI 工具在获客全流程中的应用方式")
     lines.append("")
@@ -1316,6 +1403,7 @@ def export_outputs(conditions, engine_result, out_dir, base_name="acquisition"):
                  "fit": ch["fit"], "tactic": ch["tactic"], "ai": ch["ai"]}
                 for ch in _channel_matrix(conditions)
             ],
+            "channel_sources": engine_result["plan"].get("channel_sources", []),
             "ai_playbook": [
                 {"stage": t, "tools": tool, "desc": desc}
                 for t, tool, desc in _ai_playbook(conditions, engine_result.get("ai_ready"))
@@ -1337,7 +1425,7 @@ def export_outputs(conditions, engine_result, out_dir, base_name="acquisition"):
 
     csv_path = os.path.join(out_dir, f"{base_name}_targets.csv")
     fields = ["id", "company", "company_en", "contact_name", "contact_role", "phone", "email",
-              "website", "region", "buyer_type", "matched_conditions", "channel_source",
+              "website", "region", "buyer_type", "matched_conditions", "channel_source", "channels",
               "priority", "fit", "comp", "total", "next_action", "verified", "path", "note",
               "intent_stage", "intent_urgency", "intent_next_action", "profile"]
     with open(csv_path, "w", encoding="utf-8-sig", newline="") as f:

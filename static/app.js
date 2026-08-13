@@ -2534,6 +2534,17 @@ async function renderSettings() {
       <div class="hint">推荐用博查 AI 搜索（国内稳定、结果精准，平台：open.bochaai.com）；也可用免费 360/搜狗，或 SerpAPI 走 Google（serpapi.com）。</div>
     </div>
     <div class="card">
+      <h3>🛡️ 反爬策略（参考"快启精线索"综合反爬体系）</h3>
+      <div class="form-grid">
+        <div class="field" style="grid-column:1/-1"><label>代理池（逗号分隔，如 http://1.2.3.4:8080,http://user:pass@5.6.7.8:3128）</label><input class="input full" id="s-proxy-pool" placeholder="留空走直连；配置后自动轮换 IP 规避封禁" value="${esc(s.proxy_pool)}"></div>
+        <div class="field"><label>搜索请求延时基准（秒，±50% 随机抖动）</label><input class="input full" type="number" step="0.1" min="0" id="s-delay-search" value="${esc(s.delay_search || 0.8)}"></div>
+        <div class="field"><label>页面抓取延时基准（秒）</label><input class="input full" type="number" step="0.1" min="0" id="s-delay-fetch" value="${esc(s.delay_fetch || 0.3)}"></div>
+        <div class="field"><label>失败重试次数（指数退避）</label><input class="input full" type="number" min="0" max="5" id="s-retry-max" value="${esc(s.retry_max || 2)}"></div>
+        <div class="field"><label>重试退避基准延时（秒）</label><input class="input full" type="number" step="0.5" min="0" id="s-retry-base" value="${esc(s.retry_base_delay || 1.0)}"></div>
+      </div>
+      <div class="hint">反爬体系：① 请求伪装（UA 轮换+Referer）② IP 轮换（代理池）③ 行为模拟（随机延时）④ 动态渲染（Jina 兜底）⑤ 重试退避。未配代理时仍启用 UA 轮换+延时+重试，比单一 UA 更难被识别。</div>
+    </div>
+    <div class="card">
       <h3>🗺️ 地图接口（地图获客用）</h3>
       <div class="form-grid">
         <div class="field"><label>地图源</label>
@@ -2617,6 +2628,11 @@ async function renderSettings() {
         search_engine_id: $("#s-search-cx").value.trim(),
         search_freshness: $("#s-search-fresh").value,
         search_site_filter: $("#s-search-site").value.trim(),
+        proxy_pool: $("#s-proxy-pool").value.trim(),
+        delay_search: $("#s-delay-search").value,
+        delay_fetch: $("#s-delay-fetch").value,
+        retry_max: $("#s-retry-max").value,
+        retry_base_delay: $("#s-retry-base").value,
         map_api_key: $("#s-map-key").value.trim(),
         map_provider: $("#s-map-provider").value,
         qcc_app_key: $("#s-qcc-app").value.trim(),

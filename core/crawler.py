@@ -1,10 +1,17 @@
 # -*- coding: utf-8 -*-
-"""网页采集：抓取黄页/目录页，提取公司名与电话。"""
+"""网页采集：抓取黄页/目录页，提取公司名与电话。
+
+反爬增强：集成 core.antibot 综合反爬策略（UA 轮换 + 代理池 + 随机延时 + 重试退避 + Jina 兜底）。
+- settings 透传后自动启用代理池（配置 proxy_pool/proxy_url 后生效）；
+- 未配置代理时走直连 + UA 轮换 + 重试，仍比单一 UA 更难被识别。
+"""
 import re
 import urllib.request
 from urllib.parse import urlparse
 
 from lxml import html as lh
+
+from core import antibot  # 反爬策略引擎
 
 UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -16,36 +23,39 @@ LANDLINE_RE = re.compile(r"(?<!\d)0\d{2,3}-?\d{7,8}(?!\d)")
 CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 
 
-def fetch_page(url, timeout=15, use_jina=True, jina_timeout=12):
-    """抓取网页；直接访问失败时自动降级到 Jina Reader（fetchrouter 思路）。
+def fetch_page(url, timeout=15, use_jina=True, jina_timeout=12, settings=None):
+    """抓取网页；带反爬策略 + 失败时降级到 Jina Reader（动态渲染兜底）。
+
+    反爬策略（对应"快启精线索"体系）：
+    - 请求特征伪装：每次随机 UA + Referer + Accept-Language（antibot.build_headers）
+    - IP 访问控制：配置代理池后自动轮换（antibot.ProxyPool）
+    - 行为模拟：请求前随机延时（antibot.human_delay）
+    - 重试退避：失败时指数退避重试（antibot.request_with_antibot）
+    - 动态内容抓取：直接请求失败时降级到 Jina Reader（渲染 JS 后返回纯文本）
 
     use_jina=False 时跳过 Jina 回退（直接失败，更快、避免长超时）；
-    jina_timeout 控制回退超时（默认 12s，原实现为 timeout+15，过长会拖垮并行抓取）。
+    jina_timeout 控制回退超时（默认 12s）；
+    settings 透传反爬配置（proxy_pool / delay_* / retry_*）。
     """
+    antibot.record_stats("requests_total")
     direct_err = None
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept-Language": "zh-CN,zh;q=0.9"})
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            raw = resp.read()
-            final = resp.geturl() or url
+        # 一次性走完整链路：直接请求 + 重试 + 反爬检测 + Jina 兜底
+        # （antibot.fetch_with_antibot 内部已含 Jina 降级，无需外层再包一层）
+        html_text, final = antibot.fetch_with_antibot(
+            url, settings=settings, timeout=timeout,
+            use_jina_fallback=use_jina,  # 直接把 use_jina 透传，避免双重降级
+            jina_timeout=jina_timeout, delay_key="fetch",
+        )
+        # 反爬检测：识别是否被拦截（Jina 兜底返回的内容通常已绕过反爬）
+        if antibot.detect_block(html_text):
+            antibot.record_stats("blocked_detected")
+            # 不直接 raise，让调用方根据内容判断（Jina 可能已成功但返回了拦截页提示）
+        antibot.record_stats("requests_success")
+        return html_text, final
     except Exception as e:
-        direct_err = e
-        if not use_jina:
-            raise direct_err
-        try:
-            jina_url = "https://r.jina.ai/" + url
-            jreq = urllib.request.Request(jina_url, headers={"User-Agent": UA, "Accept": "text/plain"})
-            with urllib.request.urlopen(jreq, timeout=jina_timeout) as jresp:
-                raw = jresp.read()
-                final = url
-        except Exception:
-            raise direct_err
-    for enc in ("utf-8", "gb18030", "gbk"):
-        try:
-            return raw.decode(enc), final
-        except UnicodeDecodeError:
-            continue
-    return raw.decode("utf-8", errors="replace"), final
+        antibot.record_stats("requests_failed")
+        raise
 
 
 def _clean_text(t):
@@ -115,8 +125,8 @@ def extract_candidates(html_text, source_url=""):
     return list(seen.values())
 
 
-def crawl(url=None, html_text=None):
-    """返回 (candidates, error)。"""
+def crawl(url=None, html_text=None, settings=None):
+    """返回 (candidates, error)。settings 透传反爬配置。"""
     try:
         if html_text and html_text.strip():
             src = ""
@@ -128,7 +138,7 @@ def crawl(url=None, html_text=None):
         parsed = urlparse(url)
         if not parsed.hostname:
             return [], "网址格式不正确"
-        page_html, final_url = fetch_page(url.strip())
+        page_html, final_url = fetch_page(url.strip(), settings=settings)
         candidates = extract_candidates(page_html, final_url)
         if not candidates:
             return [], "页面里没有提取到电话号码。可能页面需要登录、有验证码，或电话以图片形式展示。"

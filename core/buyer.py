@@ -21,6 +21,8 @@ from core.crawler import _clean_text, fetch_page
 from core.scorer import fit_comp_score, rule_score, tier_of
 from core import search_cache
 from core import concurrent_search
+from core import antibot  # 反爬策略：搜索请求前随机延时 + 限流退避
+from core import channels  # 惰性：channels 内部才 import 本模块，导入期安全
 
 EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+\.[A-Za-z]{2,}")
 MOBILE_RE = re.compile(r"(?<!\d)1[3-9]\d{9}(?!\d)")
@@ -231,11 +233,17 @@ def polish_plan_keywords(keywords, markets):
     return out[:12]
 
 
-def search_bing(query, count=5, qdr=""):
+def search_bing(query, count=5, qdr="", settings=None):
+    """Bing 搜索（接入反爬：随机延时 + UA 轮换 + 代理池 + 重试退避）。"""
+    antibot.human_delay(settings, key="search")  # 行为模拟：请求前随机延时
     url = ("https://www.bing.com/search?q=" + urllib.parse.quote(query)
            + "&count=" + str(max(3, min(10, count)))
            + (("&qdr=" + qdr) if qdr else ""))
-    html_text, _ = fetch_page(url)
+    html_text, _ = fetch_page(url, settings=settings)
+    # 反爬检测：被拦截时重试/降级
+    if antibot.detect_block(html_text):
+        antibot.record_stats("blocked_detected")
+        raise ValueError("Bing 检测到反爬拦截，已触发重试/降级")
     doc = lh.fromstring(html_text)
     results = []
     for li in doc.xpath("//li[contains(@class,'b_algo')]")[:count]:
@@ -253,11 +261,13 @@ def search_bing(query, count=5, qdr=""):
     return results
 
 
-def search_so(query, count=6):
+def search_so(query, count=6, settings=None):
     """360 搜索（免费，国内服务器可用）。真实地址在 data-mdurl 属性里。"""
+    antibot.human_delay(settings, key="search")
     url = "https://www.so.com/s?q=" + urllib.parse.quote(query)
-    html_text, _ = fetch_page(url)
+    html_text, _ = fetch_page(url, settings=settings)
     if len(html_text) < 12000 and ("访问异常" in html_text or "安全验证" in html_text or "captcha" in html_text.lower()):
+        antibot.record_stats("blocked_detected")
         raise ValueError("360 搜索暂时被限流（访问异常），请稍后再试，或到“设置 → 搜索接口”配置 SerpAPI 更稳定")
     doc = lh.fromstring(html_text)
     results = []
@@ -276,11 +286,13 @@ def search_so(query, count=6):
     return results
 
 
-def search_sogou(query, count=6):
+def search_sogou(query, count=6, settings=None):
     """搜狗搜索（免费备用源）。链接是 /link?url= 跳转，抓取时自动跟随。"""
+    antibot.human_delay(settings, key="search")
     url = "https://www.sogou.com/web?query=" + urllib.parse.quote(query)
-    html_text, _ = fetch_page(url)
+    html_text, _ = fetch_page(url, settings=settings)
     if len(html_text) < 12000 and any(w in html_text for w in ("访问过于频繁", "安全验证", "请输入验证码", "captcha")):
+        antibot.record_stats("blocked_detected")
         raise ValueError("搜狗搜索暂时不可用")
     doc = lh.fromstring(html_text)
     results = []
@@ -299,12 +311,13 @@ def search_sogou(query, count=6):
     return results
 
 
-def search_serpapi(query, count, api_key, tbs=""):
+def search_serpapi(query, count, api_key, tbs="", settings=None):
+    antibot.human_delay(settings, key="search")
     url = ("https://serpapi.com/search.json?engine=google&google_domain=google.com.hk"
            "&q=" + urllib.parse.quote(query) + "&num=" + str(count) + "&hl=zh-cn&gl=cn"
            + (("&tbs=" + urllib.parse.quote(tbs)) if tbs else "")
            + "&api_key=" + urllib.parse.quote(api_key))
-    html_text, _ = fetch_page(url, timeout=20)
+    html_text, _ = fetch_page(url, timeout=20, settings=settings)
     data = json.loads(html_text)
     results = []
     for item in (data.get("organic_results") or [])[:count]:
@@ -316,11 +329,12 @@ def search_serpapi(query, count, api_key, tbs=""):
     return results
 
 
-def search_google_cse(query, count, api_key, engine_id):
+def search_google_cse(query, count, api_key, engine_id, settings=None):
+    antibot.human_delay(settings, key="search")
     url = ("https://www.googleapis.com/customsearch/v1?key=" + urllib.parse.quote(api_key)
            + "&cx=" + urllib.parse.quote(engine_id) + "&q=" + urllib.parse.quote(query)
            + "&num=" + str(min(10, count)))
-    html_text, _ = fetch_page(url, timeout=20)
+    html_text, _ = fetch_page(url, timeout=20, settings=settings)
     data = json.loads(html_text)
     results = []
     for item in (data.get("items") or [])[:count]:
@@ -332,21 +346,24 @@ def search_google_cse(query, count, api_key, engine_id):
     return results
 
 
-def search_bocha(query, count, api_key, freshness="noLimit"):
+def search_bocha(query, count, api_key, freshness="noLimit", settings=None):
     """博查 AI 搜索（国内稳定，API Key 格式为 64 位 hex）。"""
+    antibot.human_delay(settings, key="search")
     payload = json.dumps({
         "query": query,
         "count": max(3, min(10, count)),
         "freshness": freshness,
         "summary": False,
     }).encode("utf-8")
+    headers = antibot.build_headers("https://api.bochaai.com", settings, with_referer=False)
+    headers.update({
+        "Content-Type": "application/json",
+        "Authorization": "Bearer " + api_key,
+    })
     req = urllib.request.Request(
         "https://api.bochaai.com/v1/web-search",
         data=payload,
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": "Bearer " + api_key,
-        },
+        headers=headers,
     )
     with urllib.request.urlopen(req, timeout=20) as resp:
         data = json.loads(resp.read().decode("utf-8", errors="replace"))
@@ -414,7 +431,7 @@ def search_web(query, count, settings=None):
         """360 → 搜狗 免费源链。"""
         errs = []
         try:
-            results = search_so(query, count)
+            results = search_so(query, count, settings=settings)
             if results:
                 return results
             errs.append("360 无结果")
@@ -422,7 +439,7 @@ def search_web(query, count, settings=None):
             errs.append(f"360：{e}")
         try:
             time.sleep(1)
-            results = search_sogou(query, count)
+            results = search_sogou(query, count, settings=settings)
             if results:
                 return results
             errs.append("搜狗无结果")
@@ -432,21 +449,21 @@ def search_web(query, count, settings=None):
 
     sources = []
     if provider == "serpapi" and key:
-        sources.append(("SerpAPI", lambda: search_serpapi(query, count, key, fp["tbs"])))
+        sources.append(("SerpAPI", lambda: search_serpapi(query, count, key, fp["tbs"], settings=settings)))
     if provider == "google_cse" and key and engine_id:
-        sources.append(("Google CSE", lambda: search_google_cse(query, count, key, engine_id)))
+        sources.append(("Google CSE", lambda: search_google_cse(query, count, key, engine_id, settings=settings)))
     if provider == "bocha" and key:
-        sources.append(("博查", lambda: search_bocha(query, count, key, fp["bocha"])))
+        sources.append(("博查", lambda: search_bocha(query, count, key, fp["bocha"], settings=settings)))
     if provider == "so_free":
         sources.append(("360/搜狗", _try_free))
     else:
-        sources.append(("Bing", lambda: search_bing(query, count, fp["qdr"])))
+        sources.append(("Bing", lambda: search_bing(query, count, fp["qdr"], settings=settings)))
 
     # 主源失败后的兜底：免费源（避免 SerpAPI 429/配额耗尽时一个都搜不到）
     if provider not in ("so_free",):
         if not any(n == "360/搜狗" for n, _ in sources):
             sources.append(("360/搜狗", _try_free))
-        sources.append(("Bing", lambda: search_bing(query, count, fp["qdr"])))
+        sources.append(("Bing", lambda: search_bing(query, count, fp["qdr"], settings=settings)))
 
     for name, fn in sources:
         try:
@@ -595,7 +612,7 @@ def _score_candidate(cand, page_text):
     return score, "；".join(reasons)
 
 
-def _to_candidate(contact, title, snippet, keyword, market, page_text):
+def _to_candidate(contact, title, snippet, keyword, market, page_text, channels=None):
     email = contact["emails"][0] if contact["emails"] else ""
     phone = contact["phones"][0] if contact["phones"] else ""
     name = contact["company"] or _clean_company(title, contact["website"]) or ""
@@ -618,6 +635,7 @@ def _to_candidate(contact, title, snippet, keyword, market, page_text):
         "next_action": "",
         "verified": False,
         "path": "官网公开信息栏 / 年报 / 行业展商名录（合法公开渠道）",
+        "channels": ",".join(channels) if channels else "",
     }
     score, reason = _score_candidate(cand, page_text)
     cand["score"] = score
@@ -689,7 +707,7 @@ def ai_filter(settings, candidates, context=""):
         return None
 
 
-def run(keywords, markets=None, max_results=6, urls=None, use_ai=False, settings=None, progress=None, context=""):
+def run(keywords, markets=None, max_results=6, urls=None, use_ai=False, settings=None, progress=None, context="", channel_ids=None):
     """执行一次买家发现，返回 {candidates, errors, filtered}。"""
     if isinstance(keywords, str):
         keywords = [k.strip() for k in keywords.splitlines() if k.strip()]
@@ -714,13 +732,27 @@ def run(keywords, markets=None, max_results=6, urls=None, use_ai=False, settings
     timings = {"search": 0.0, "fetch": 0.0, "ai": 0.0}
     cache_hits = [0]
 
+    use_cache = bool((settings or {}).get("use_search_cache", True))
+    raw_results = []
+    channel_stats = {}
     if urls:
         if isinstance(urls, str):
             urls = [u.strip() for u in urls.splitlines() if u.strip()]
         for u in urls:
             u = str(u).strip()
             if u:
-                targets.append({"url": u, "title": "", "snippet": "", "keyword": "指定网址", "market": ""})
+                raw_results.append({"url": u, "title": "", "snippet": "", "keyword": "指定网址", "market": ""})
+    elif channel_ids:
+        # 多源获客：从不同渠道（搜索引擎/社交媒体/行业站/论坛/招投标/地图…）并行搜索并聚合
+        ch_ids = [c for c in channel_ids if c]
+        if ch_ids:
+            ch_raw, channel_stats = channels.run_channel_search(
+                ch_ids, keywords=expanded, markets=markets, settings=settings,
+                progress=progress, use_cache=use_cache,
+            )
+            raw_results = ch_raw
+        if not raw_results and not keywords:
+            return {"candidates": [], "errors": ["请至少填写一个关键词"]}
     else:
         if not keywords:
             return {"candidates": [], "errors": ["请至少填写一个关键词"]}
@@ -730,7 +762,6 @@ def run(keywords, markets=None, max_results=6, urls=None, use_ai=False, settings
                 queries.extend(build_queries(kw, market))
         queries = queries[:30]
         q_total = len(queries)
-        use_cache = bool((settings or {}).get("use_search_cache", True))
         workers = max(1, min(int((settings or {}).get("max_search_workers", 8) or 8), 16))
         _stg = (settings or {}).get("search_stagger")
         stagger = 0.15 if _stg is None else float(_stg)  # 0.0 表示不限流（提交不 sleep）
@@ -764,23 +795,31 @@ def run(keywords, markets=None, max_results=6, urls=None, use_ai=False, settings
                     errors.append(msg)
                 continue
             for r in payload:
-                r["url"] = _resolve_url(r["url"])
-                if r["url"] in seen:
-                    continue
-                seen.add(r["url"])
-                if _is_noise(r["title"], r["snippet"], r["url"]):
-                    filtered += 1
-                    continue
-                cn, en, sup, strong = _text_signals(r["title"] + " " + r["snippet"])
-                # 片段里只有供应商信号、没有任何采购意向 → 大概率是同行，跳过抓取
-                if sup >= 2 and cn == 0 and en == 0 and strong == 0:
-                    filtered += 1
-                    continue
                 r["keyword"] = q.split(" ")[0]
                 r["market"] = q.split(" ", 1)[1] if " " in q else ""
-                targets.append(r)
-        if not targets:
-            return {"candidates": [], "errors": errors or ["没有找到符合条件的线索，请换个关键词或地区"]}
+                raw_results.append(r)
+
+    # ---- 统一过滤：resolve_url → URL 去重 → 噪音过滤 → 同行供应商过滤 ----
+    # 多源与单源走同一套过滤口径，保证去重/归一化一致。
+    for r in raw_results:
+        r["url"] = _resolve_url(r.get("url", ""))
+        if not r.get("url"):
+            continue
+        if r["url"] in seen:
+            continue
+        seen.add(r["url"])
+        if _is_noise(r.get("title", ""), r.get("snippet", ""), r["url"]):
+            filtered += 1
+            continue
+        cn, en, sup, strong = _text_signals(r.get("title", "") + " " + r.get("snippet", ""))
+        # 片段里只有供应商信号、没有任何采购意向 → 大概率是同行，跳过抓取
+        if sup >= 2 and cn == 0 and en == 0 and strong == 0:
+            filtered += 1
+            continue
+        r.setdefault("channels", [])
+        targets.append(r)
+    if not targets and not urls:
+        return {"candidates": [], "errors": errors or ["没有找到符合条件的线索，请换个关键词或地区"]}
 
     candidates = []
     use_jina = bool((settings or {}).get("use_jina_fallback", True))
@@ -789,11 +828,11 @@ def run(keywords, markets=None, max_results=6, urls=None, use_ai=False, settings
 
     def _fetch_worker(t):
         try:
-            html_text, final_url = fetch_page(t["url"], timeout=10, use_jina=use_jina, jina_timeout=12)
+            html_text, final_url = fetch_page(t["url"], timeout=10, use_jina=use_jina, jina_timeout=12, settings=settings)
             contact = extract_contacts(html_text, final_url or t["url"])
             page_text = re.sub(r"<script.*?</script>|<style.*?</style>", " ", html_text, flags=re.S | re.I)
             page_text = re.sub(r"<[^>]+>", " ", page_text)[:2000]
-            cand = _to_candidate(contact, t.get("title", ""), t.get("snippet", ""), t.get("keyword", ""), t.get("market", ""), page_text)
+            cand = _to_candidate(contact, t.get("title", ""), t.get("snippet", ""), t.get("keyword", ""), t.get("market", ""), page_text, t.get("channels", []))
             return ("ok", cand)
         except urllib.error.HTTPError as e:
             return ("err", f"{t['url']} 抓取失败：页面返回 {e.code}（可能已失效或需登录）")
@@ -890,4 +929,5 @@ def run(keywords, markets=None, max_results=6, urls=None, use_ai=False, settings
             continue
         keep.append(c)
     return {"candidates": keep, "errors": errors, "filtered": filtered,
-            "dropped_low": dropped_low, "timings": timings, "cache_hits": cache_hits[0]}
+            "dropped_low": dropped_low, "timings": timings, "cache_hits": cache_hits[0],
+            "channel_stats": channel_stats}
