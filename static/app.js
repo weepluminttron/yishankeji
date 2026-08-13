@@ -1331,7 +1331,7 @@ async function renderBuyer() {
   const el = $("#page-buyer");
   el.innerHTML = `
     <div class="page-title">买家发现</div>
-    <div class="page-sub">用一句话描述你的业务，AI 帮你出获客方案；也可以手动输入关键词精确搜索</div>
+    <div class="page-sub">一条流水线：① 描述业务让 AI 出方案 → ② 选“手动搜索”或“🧠 用引擎获客” → ③ 结果可再“送引擎筛选分级” → ④ 统一导入客户库</div>
     <div class="card">
       <h3>🤖 AI 获客策略助手（不限行业）</h3>
       <div class="field"><label>描述你的业务和理想客户（用大白话就行）</label>
@@ -1362,7 +1362,7 @@ async function renderBuyer() {
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         <button class="btn primary" id="acq-run">🚀 运行获客引擎</button>
         <button class="btn" id="acq-import" disabled>📥 导入客户库</button>
-        <span class="hint">引擎按你的条件自动生成多渠道检索方案、发现并筛选买家、迭代补齐缺口；完成后可一键导入客户库（保留评分与等级）。</span>
+        <span class="hint">引擎按你的条件自动生成多渠道检索方案、发现并筛选买家、迭代补齐缺口；也可接收“AI 方案”或“手动搜索”的结果做离线筛选分级；完成后可一键导入客户库（保留评分与等级）。</span>
       </div>
       <div id="acq-result" style="margin-top:12px"></div>
     </div>
@@ -1559,7 +1559,10 @@ function renderPlans(plans) {
     <div style="border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:10px">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
         <b>方案 ${"ABCDE"[i] || i + 1}：${esc(p.title)}</b>
-        <button class="btn primary sm" data-use="${i}">🚀 使用此方案搜索</button>
+        <span style="display:flex;gap:6px;flex-wrap:wrap">
+          <button class="btn primary sm" data-use="${i}">🔍 手动搜索</button>
+          <button class="btn sm" data-acq="${i}">🧠 用引擎获客</button>
+        </span>
       </div>
       <div style="margin-top:6px">🎯 目标客户：${esc(p.target_customers)}</div>
       ${p.buyer_role ? `<div class="sub" style="margin-top:2px">👤 目标角色：${esc(p.buyer_role)}</div>` : ""}
@@ -1585,8 +1588,21 @@ function renderPlans(plans) {
     const p = plans[+b.dataset.use];
     $("#buyer-kws").value = (p.keywords || []).join("\n");
     $("#buyer-markets").value = (p.markets || []).join("\n");
-    toast("已按方案填入关键词，开始搜索…", "ok");
+    toast("已按方案填入关键词，开始手动搜索…", "ok");
     $("#buyer-run").click();
+  });
+  $$("[data-acq]", box).forEach((b) => b.onclick = () => {
+    const p = plans[+b.dataset.acq];
+    // 方案 → 引擎条件：规格/市场/买方角色 一键带入并启动
+    $("#acq-products").value = p.target_customers || "";
+    $("#acq-specs").value = (p.keywords || []).slice(0, 5).join(",");
+    $("#acq-regions").value = (p.markets || []).join(",");
+    $("#acq-types").value = p.buyer_role || "";
+    $("#acq-exclude").value = "";
+    toast("已用方案填充引擎条件，开始自动获客…", "ok");
+    $("#acq-run").click();
+    const card = $("#acq-run").closest(".card");
+    if (card) card.scrollIntoView({ behavior: "smooth", block: "start" });
   });
 }
 
@@ -1706,6 +1722,7 @@ function renderBuyerResult(res) {
     <div style="margin:10px 0;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
       <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="buyer-all" checked> 全选</label>
       <button class="btn primary sm" id="buyer-add">＋ 添加选中到客户线索（自动去重）</button>
+      <button class="btn sm" id="buyer-to-acq">🧠 送引擎筛选分级</button>
       <label style="display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" id="buyer-high"> 只看 ≥6 分</label>
       <span class="hint">评分高 = 有采购意向词 + 企业邮箱/电话；含“厂家直供/批发价”等供应商信号的会扣分</span>
     </div>
@@ -1735,6 +1752,28 @@ function renderBuyerResult(res) {
     toast(`已添加 ${res.added.length} 条，跳过重复 ${res.duplicates.length} 条`, "ok");
     state.buyerCandidates = [];
     $("#buyer-result").innerHTML = `<div class="empty"><div class="ico">✅</div>处理完成，去“客户线索”里查看和跟进</div>`;
+  };
+  $("#buyer-to-acq").onclick = async () => {
+    const cands = state.buyerCandidates || [];
+    if (!cands.length) return toast("没有可送的搜索结果", "err");
+    const conditions = {
+      industry: "光纤通信 / 光器件",
+      products: $("#acq-products").value.trim() || state.buyerContext || "光通信器件与设备",
+      specs: $("#acq-specs").value.trim() || "DWDM,WDM,光模块",
+      regions: $("#acq-regions").value.trim(),
+      buyer_types: $("#acq-types").value.trim(),
+      min_tier: $("#acq-tier").value,
+      max_results: 50,
+      exclude: $("#acq-exclude").value.trim(),
+    };
+    try {
+      await api("/api/acquisition/run", { method: "POST", body: { conditions, seed: cands } });
+      $("#acq-import").disabled = true;
+      $("#acq-result").innerHTML = `<div class="empty"><div class="ico">🧠</div>正在用引擎对搜索结果做双维度筛选分级（离线，无需联网）…</div>`;
+      pollAcquisition();
+      const card = $("#acq-result").closest(".card");
+      if (card) card.scrollIntoView({ behavior: "smooth", block: "start" });
+    } catch (e) { toast(e.message, "err"); }
   };
 }
 
