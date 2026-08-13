@@ -65,6 +65,9 @@ def normalize_conditions(conditions):
     c.setdefault("max_results", 30)
     c.setdefault("allow_broad", False)
     c.setdefault("enrich_limit", 30)
+    c.setdefault("recency", "")          # 时间范围：day/week/month/year（可选）
+    c.setdefault("site_scope", "")       # 限定站点/域名：如 gov.cn,in（可选）
+    c.setdefault("verify_limit", 20)     # 官网定向抓取核验数量上限
     c["ai_plan"] = c.get("ai_plan") if isinstance(c.get("ai_plan"), dict) else {}
 
     def as_list(v):
@@ -258,9 +261,16 @@ def _discover_one_round(conditions, settings, progress=None):
     """调用 core.buyer.run 完成一轮“搜索→去噪→抓取→抽取→评分→AI过滤”。"""
     from core import buyer
 
+    # 把引擎条件的“时间范围/站点过滤”注入本次搜索设置
+    eff_settings = dict(settings or {})
+    if conditions.get("recency"):
+        eff_settings["search_freshness"] = conditions["recency"]
+    if conditions.get("site_scope"):
+        eff_settings["search_site_filter"] = conditions["site_scope"]
+
     keywords = conditions["specs"] + conditions["keywords"]
     markets = conditions["regions"]
-    use_ai = bool(settings and settings.get("openai_api_key"))
+    use_ai = bool(eff_settings.get("openai_api_key"))
     context = (
         f"我方主营：{conditions.get('products','')}。理想客户："
         f"{'、'.join(conditions.get('buyer_types', []))}。"
@@ -272,7 +282,7 @@ def _discover_one_round(conditions, settings, progress=None):
         markets=markets,
         max_results=8,
         use_ai=use_ai,
-        settings=settings,
+        settings=eff_settings,
         progress=progress,
         context=context,
     )
@@ -674,6 +684,12 @@ def run_engine(conditions, settings=None, max_rounds=3, progress=None, seed_cand
 
     targets, dropped = build_targets(_dedupe(all_candidates), conditions)
     final_gaps = analyze_gaps(targets, conditions)
+    # 官网定向抓取核验（WebFetch）：补全官网可公开抓到的联系方式
+    contact_verify = {}
+    if settings:
+        contact_verify = verify_contacts(
+            targets, settings, limit=conditions.get("verify_limit", 20),
+        )
     # 配置了企查查/天眼查密钥时，自动补全待核验目标的联系方式
     company_enrich = {}
     if settings:
@@ -690,6 +706,7 @@ def run_engine(conditions, settings=None, max_rounds=3, progress=None, seed_cand
         "warnings": warnings[:15],
         "final_gaps": [list(g) for g in final_gaps],
         "rounds": rounds,
+        "contact_verify": contact_verify,
         "company_enrich": company_enrich,
         "stats": stats,
     }
@@ -771,6 +788,62 @@ def enrich_with_company_api(targets, settings, limit=30):
             t["path"] = "企查查/天眼查工商接口（官方API）"
             updated += 1
         time.sleep(0.5)
+    return {"done": done, "updated": updated, "errors": errors}
+
+
+def verify_contacts(targets, settings, limit=20):
+    """WebFetch 定向抓取核验：抓目标官网（及 /contact 页）补全电话/邮箱。
+
+    对应“WebFetch 读原文坐实联系方式”：只处理有官网但缺联系方式的目标，
+    命中即标记 verified 并记录 path=官网定向抓取；失败静默记录。
+    """
+    settings = settings or {}
+    try:
+        from core import buyer, crawler
+    except Exception as e:
+        return {"done": 0, "updated": 0, "errors": [{"msg": f"crawler 不可用：{e}"}]}
+    done = updated = 0
+    errors = []
+    for t in targets:
+        if done >= limit:
+            break
+        if t.get("verified") or (t.get("email") and t.get("phone")):
+            continue
+        web = (t.get("website") or "").strip()
+        if not web:
+            continue
+        done += 1
+        email = phone = ""
+        try:
+            html, final = crawler.fetch_page(web, timeout=12, use_jina=True, jina_timeout=12)
+            c = buyer.extract_contacts(html, final or web)
+            email = c["emails"][0] if c["emails"] else ""
+            phone = c["phones"][0] if c["phones"] else ""
+        except Exception:
+            pass
+        if not email and not phone:
+            # 常见联系页兜底
+            for suffix in ("/contact", "/contact-us", "/about"):
+                try:
+                    html, _ = crawler.fetch_page(web.rstrip("/") + suffix, timeout=10, use_jina=True, jina_timeout=10)
+                    c = buyer.extract_contacts(html, web + suffix)
+                    email = c["emails"][0] if c["emails"] else email
+                    phone = c["phones"][0] if c["phones"] else phone
+                    if email and phone:
+                        break
+                except Exception:
+                    continue
+        changed = False
+        if email and not t.get("email"):
+            t["email"] = email
+            changed = True
+        if phone and not t.get("phone"):
+            t["phone"] = phone
+            changed = True
+        if changed:
+            t["verified"] = True
+            t["path"] = "官网定向抓取（WebFetch）"
+            updated += 1
     return {"done": done, "updated": updated, "errors": errors}
 
 

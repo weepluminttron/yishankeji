@@ -1372,6 +1372,15 @@ async function renderBuyer() {
         </select></div>
         <div class="field"><label>目标客户数</label><input class="input full" type="number" min="1" max="100" id="acq-max" value="30"></div>
         <div class="field" style="grid-column:1/-1"><label>排除词（逗号分隔）</label><input class="input full" id="acq-exclude" placeholder="自家企业,同行平台"></div>
+        <div class="field"><label>搜索时间范围（可选）</label>
+          <select class="select full" id="acq-recency">
+            <option value="">不限</option>
+            <option value="week">近 7 天</option>
+            <option value="month">近 1 个月</option>
+            <option value="year">近 1 年</option>
+          </select>
+        </div>
+        <div class="field"><label>限定站点/域名（可选）</label><input class="input full" id="acq-site" placeholder="gov.cn,in 或具体官网"></div>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         <button class="btn primary" id="acq-run">🚀 运行获客引擎</button>
@@ -1485,6 +1494,8 @@ async function renderBuyer() {
       min_tier: $("#acq-tier").value,
       max_results: $("#acq-max").value || 30,
       exclude: $("#acq-exclude").value.trim(),
+      recency: $("#acq-recency").value,
+      site_scope: $("#acq-site").value.trim(),
     };
     if (state.acqPlan) conditions.ai_plan = state.acqPlan;
     try {
@@ -1503,7 +1514,7 @@ async function renderBuyer() {
     } catch (e) { toast(e.message, "err"); }
   };
   // 手动修改引擎条件后，自动解除“AI 方案带入”状态，避免旧方案残留
-  ["acq-products", "acq-specs", "acq-seeds", "acq-regions", "acq-types", "acq-tier", "acq-max", "acq-exclude"].forEach((id) => {
+  ["acq-products", "acq-specs", "acq-seeds", "acq-regions", "acq-types", "acq-tier", "acq-max", "acq-exclude", "acq-recency", "acq-site"].forEach((id) => {
     const el = $("#" + id);
     if (el) el.addEventListener("input", () => {
       state.acqPlan = null;
@@ -1698,6 +1709,7 @@ function renderAcqResult(res) {
   const stats = res.stats || {};
   const warnings = res.warnings || [];
   const enrich = res.company_enrich || {};
+  const verify = res.contact_verify || {};
   const box = $("#acq-result");
   if (!box) return;
   const importBtn = $("#acq-import");
@@ -1713,7 +1725,7 @@ function renderAcqResult(res) {
   box.innerHTML = `
     <h3 style="margin:6px 0 8px">发现 ${targets.length} 家目标客户</h3>
     ${warnHtml}
-    <div class="hint" style="margin-bottom:8px">等级分布：${esc(tiers)} ｜ 已核验 ${stats.verified || 0} 家${enrich.updated ? ` ｜ 🏢 工商补全 ${enrich.updated} 家` : ""}${res.final_gaps && res.final_gaps.length ? ` ｜ 剩余缺口：${esc(res.final_gaps.map((g) => g.join(":")).join("；"))}` : ""}</div>
+    <div class="hint" style="margin-bottom:8px">等级分布：${esc(tiers)} ｜ 已核验 ${stats.verified || 0} 家${verify.updated ? ` ｜ 🌐 官网核验 ${verify.updated} 家` : ""}${enrich.updated ? ` ｜ 🏢 工商补全 ${enrich.updated} 家` : ""}${res.final_gaps && res.final_gaps.length ? ` ｜ 剩余缺口：${esc(res.final_gaps.map((g) => g.join(":")).join("；"))}` : ""}</div>
     ${targets.length ? `<div class="table-wrap"><table>
       <thead><tr><th>等级</th><th>公司</th><th>区域</th><th>买方类型</th><th>命中规格</th><th>建议动作</th></tr></thead>
       <tbody>${targets.slice(0, 30).map((t) => `
@@ -2508,6 +2520,16 @@ async function renderSettings() {
         </div>
         <div class="field"><label>API Key</label><input class="input full" type="password" id="s-search-key" placeholder="serpapi 或 google key" value="${esc(s.search_api_key)}"></div>
         <div class="field" style="grid-column:1/-1"><label>Google 搜索引擎 ID（cx，仅 Google 源需要）</label><input class="input full" id="s-search-cx" placeholder="0123456789abcdef" value="${esc(s.search_engine_id)}"></div>
+        <div class="field"><label>搜索时间范围（WebSearch 收窄，可选）</label>
+          <select class="select full" id="s-search-fresh">
+            <option value="" ${!s.search_freshness ? "selected" : ""}>不限</option>
+            <option value="day" ${s.search_freshness === "day" ? "selected" : ""}>近 24 小时</option>
+            <option value="week" ${s.search_freshness === "week" ? "selected" : ""}>近 7 天</option>
+            <option value="month" ${s.search_freshness === "month" ? "selected" : ""}>近 1 个月</option>
+            <option value="year" ${s.search_freshness === "year" ? "selected" : ""}>近 1 年</option>
+          </select>
+        </div>
+        <div class="field" style="grid-column:1/-1"><label>限定站点/域名（可选，逗号分隔，如 gov.cn,in 或 具体官网）</label><input class="input full" id="s-search-site" placeholder="gov.cn,in,example.com" value="${esc(s.search_site_filter)}"></div>
       </div>
       <div class="hint">推荐用博查 AI 搜索（国内稳定、结果精准，平台：open.bochaai.com）；也可用免费 360/搜狗，或 SerpAPI 走 Google（serpapi.com）。</div>
     </div>
@@ -2593,6 +2615,8 @@ async function renderSettings() {
         search_provider: $("#s-search-provider").value,
         search_api_key: $("#s-search-key").value.trim(),
         search_engine_id: $("#s-search-cx").value.trim(),
+        search_freshness: $("#s-search-fresh").value,
+        search_site_filter: $("#s-search-site").value.trim(),
         map_api_key: $("#s-map-key").value.trim(),
         map_provider: $("#s-map-provider").value,
         qcc_app_key: $("#s-qcc-app").value.trim(),

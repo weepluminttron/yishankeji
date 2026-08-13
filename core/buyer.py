@@ -231,8 +231,10 @@ def polish_plan_keywords(keywords, markets):
     return out[:12]
 
 
-def search_bing(query, count=5):
-    url = "https://www.bing.com/search?q=" + urllib.parse.quote(query) + "&count=" + str(max(3, min(10, count)))
+def search_bing(query, count=5, qdr=""):
+    url = ("https://www.bing.com/search?q=" + urllib.parse.quote(query)
+           + "&count=" + str(max(3, min(10, count)))
+           + (("&qdr=" + qdr) if qdr else ""))
     html_text, _ = fetch_page(url)
     doc = lh.fromstring(html_text)
     results = []
@@ -297,9 +299,11 @@ def search_sogou(query, count=6):
     return results
 
 
-def search_serpapi(query, count, api_key):
+def search_serpapi(query, count, api_key, tbs=""):
     url = ("https://serpapi.com/search.json?engine=google&google_domain=google.com.hk"
-           "&q=" + urllib.parse.quote(query) + "&num=" + str(count) + "&hl=zh-cn&gl=cn&api_key=" + urllib.parse.quote(api_key))
+           "&q=" + urllib.parse.quote(query) + "&num=" + str(count) + "&hl=zh-cn&gl=cn"
+           + (("&tbs=" + urllib.parse.quote(tbs)) if tbs else "")
+           + "&api_key=" + urllib.parse.quote(api_key))
     html_text, _ = fetch_page(url, timeout=20)
     data = json.loads(html_text)
     results = []
@@ -328,12 +332,12 @@ def search_google_cse(query, count, api_key, engine_id):
     return results
 
 
-def search_bocha(query, count, api_key):
+def search_bocha(query, count, api_key, freshness="noLimit"):
     """博查 AI 搜索（国内稳定，API Key 格式为 64 位 hex）。"""
     payload = json.dumps({
         "query": query,
         "count": max(3, min(10, count)),
-        "freshness": "noLimit",
+        "freshness": freshness,
         "summary": False,
     }).encode("utf-8")
     req = urllib.request.Request(
@@ -370,12 +374,40 @@ def _is_canned(results):
     return junk >= max(1, int(len(results) * 0.6))
 
 
+def _apply_search_filters(query, settings):
+    """按设置给查询加 时间范围 + 站点/域名过滤（对应 WebSearch 的时间与域名收窄）。"""
+    q = query
+    site = (settings or {}).get("search_site_filter") or ""
+    if site:
+        for d in [x.strip() for x in str(site).split(",") if x.strip()]:
+            d = d if "site:" in d else "site:" + d
+            if d not in q:
+                q = q + " " + d
+    return q.strip()
+
+
+def _freshness_params(freshness):
+    """搜索时间范围 → 各引擎参数（bocha 原值 / serpapi tbs / bing qdr）。"""
+    f = str(freshness or "").strip().lower()
+    if f in ("day", "d"):
+        return {"bocha": "day", "tbs": "qdr:d", "qdr": "d"}
+    if f in ("week", "w"):
+        return {"bocha": "week", "tbs": "qdr:w", "qdr": "w"}
+    if f in ("month", "m"):
+        return {"bocha": "month", "tbs": "qdr:m", "qdr": "m"}
+    if f in ("year", "y"):
+        return {"bocha": "year", "tbs": "qdr:y", "qdr": "y"}
+    return {"bocha": "noLimit", "tbs": "", "qdr": ""}
+
+
 def search_web(query, count, settings=None):
     """按设置选择搜索源；主源失败（限流/配额/反爬）自动降级到备用源，避免“一个都搜不到”。"""
     settings = settings or {}
     provider = settings.get("search_provider", "bing_free")
     key = settings.get("search_api_key", "")
     engine_id = settings.get("search_engine_id", "")
+    query = _apply_search_filters(query, settings)
+    fp = _freshness_params(settings.get("search_freshness") or "")
     chain = []
 
     def _try_free():
@@ -400,21 +432,21 @@ def search_web(query, count, settings=None):
 
     sources = []
     if provider == "serpapi" and key:
-        sources.append(("SerpAPI", lambda: search_serpapi(query, count, key)))
+        sources.append(("SerpAPI", lambda: search_serpapi(query, count, key, fp["tbs"])))
     if provider == "google_cse" and key and engine_id:
         sources.append(("Google CSE", lambda: search_google_cse(query, count, key, engine_id)))
     if provider == "bocha" and key:
-        sources.append(("博查", lambda: search_bocha(query, count, key)))
+        sources.append(("博查", lambda: search_bocha(query, count, key, fp["bocha"])))
     if provider == "so_free":
         sources.append(("360/搜狗", _try_free))
     else:
-        sources.append(("Bing", lambda: search_bing(query, count)))
+        sources.append(("Bing", lambda: search_bing(query, count, fp["qdr"])))
 
     # 主源失败后的兜底：免费源（避免 SerpAPI 429/配额耗尽时一个都搜不到）
     if provider not in ("so_free",):
         if not any(n == "360/搜狗" for n, _ in sources):
             sources.append(("360/搜狗", _try_free))
-        sources.append(("Bing", lambda: search_bing(query, count)))
+        sources.append(("Bing", lambda: search_bing(query, count, fp["qdr"])))
 
     for name, fn in sources:
         try:
@@ -440,12 +472,14 @@ def search_web_cached(query, count, settings):
     if not settings.get("use_search_cache", True):
         return search_web(query, count, settings)
     provider = settings.get("search_provider", "bing_free")
-    cached = search_cache.cache_get(provider, query, count)
+    # 缓存键纳入时间/站点过滤，避免不同过滤条件互相串缓存
+    cache_q = query + " [f:" + str(settings.get("search_freshness") or "") + "|" + str(settings.get("search_site_filter") or "") + "]"
+    cached = search_cache.cache_get(provider, cache_q, count)
     if cached is not None:
         return cached
     results = search_web(query, count, settings)
     if results:
-        search_cache.cache_set(provider, query, count, results)
+        search_cache.cache_set(provider, cache_q, count, results)
     return results
 
 

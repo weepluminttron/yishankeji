@@ -1,12 +1,18 @@
 # -*- coding: utf-8 -*-
 """回归测试：买方分层检索、新兴市场专项、线索核验分级、工商自动补全。"""
 import sys
+import os
+import tempfile
 
 sys.path.insert(0, ".")
 from core import acquisition, buyer  # noqa: E402
+from core import db  # noqa: E402
 
 
 def main():
+    db.DB_PATH = os.path.join(tempfile.gettempdir(), "yskt_acq_logic_test.db")
+    db.init_db()
+
     c = acquisition.normalize_conditions({
         "specs": "DWDM,玻璃管",
         "buyer_types": "光模块厂,近期招标扩容",
@@ -25,6 +31,13 @@ def main():
     qs_india = buyer.build_queries("DWDM", "印度")
     assert any("import" in q for q in qs_india) and any("tender" in q for q in qs_india), qs_india
     print("实际发现阶段海外买方查询 OK:", qs_india[:2])
+
+    # 时间范围 + 站点过滤
+    q = buyer._apply_search_filters("DWDM 采购", {"search_site_filter": "gov.cn, in"})
+    assert "site:gov.cn" in q and "site:in" in q, q
+    fp = buyer._freshness_params("month")
+    assert fp["bocha"] == "month" and fp["tbs"] == "qdr:m" and fp["qdr"] == "m"
+    print("时间范围/站点过滤 OK:", q, fp)
 
     cand = buyer._to_candidate(
         {"emails": ["buy@corp.com"], "phones": ["13800138000"], "whatsapp": [], "wechat": [],
@@ -51,6 +64,28 @@ def main():
     assert r["updated"] == 1 and t[0]["verified"] is True and t[0]["phone"] == "0591-38178242"
     assert "企查查" in t[0]["path"]
     print("工商自动补全 OK:", r)
+
+    # 官网定向抓取核验（WebFetch）
+    import core.crawler as crawler
+    import core.buyer as buyer_mod
+
+    crawler.fetch_page = lambda url, timeout=15, use_jina=True, jina_timeout=12: (
+        "<html><title>公司</title><body>buy@corp.com 010-88886666</body></html>", url,
+    )
+    buyer_mod.extract_contacts = lambda html, url="": {
+        "company": "公司", "emails": ["buy@corp.com"], "phones": ["010-88886666"],
+        "whatsapp": [], "wechat": [], "website": url,
+    }
+    t2 = [{"company": "某公司", "website": "http://corp.com", "phone": "", "email": "",
+           "address": "", "verified": False, "path": "x"}]
+    vr = acquisition.verify_contacts(t2, {}, limit=5)
+    assert vr["updated"] == 1 and t2[0]["verified"] is True and t2[0]["email"] == "buy@corp.com"
+    assert "WebFetch" in t2[0]["path"]
+    print("官网定向抓取核验 OK:", vr)
+
+    s = db.get_settings()
+    assert "search_freshness" in s and "search_site_filter" in s
+    print("设置默认值 OK")
 
     seed = [{
         "name": "某光模块厂", "note": "采购DWDM准直器玻璃毛细管 1550nm 定制送样 营收10亿 扩产 头部厂商",
