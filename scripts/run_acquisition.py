@@ -42,6 +42,10 @@ def main():
     ap.add_argument("--no-ai", action="store_true", help="即使有 key 也不调用 AI 精筛（更快、免费）")
     ap.add_argument("--manual", action="store_true",
                     help="额外启用手动搜索（高级）：用 core.mapsearch 按城市拉取 POI 线索（需地图 Key）")
+    ap.add_argument("--no-cache", action="store_true",
+                    help="禁用搜索结果缓存（每次重新爬取，便于对比提速效果）")
+    ap.add_argument("--workers", type=int, default=8,
+                    help="搜索/抓取并发线程数（默认 8；免费源易被限流时可调小）")
     args = ap.parse_args()
 
     # 解析 conditions：文件 or 内联
@@ -62,6 +66,11 @@ def main():
             settings = db.get_settings()
         except Exception:
             settings = {}
+    settings = settings or {}
+    settings["max_search_workers"] = args.workers
+    settings["max_fetch_workers"] = args.workers
+    if args.no_cache:
+        settings["use_search_cache"] = False
 
     seed = None
     if args.seed:
@@ -82,6 +91,12 @@ def main():
 
     paths = acquisition.export_outputs(conditions, result, args.out, base_name=args.base_name)
     stats = result["stats"]
+    if result.get("discovery"):
+        print("\n== 发现阶段耗时（性能瓶颈定位）==")
+        for i, d in enumerate(result["discovery"], 1):
+            t = d.get("timings", {})
+            print(f"  第{i}轮：搜索 {t.get('search', 0):.1f}s | 抓取 {t.get('fetch', 0):.1f}s | "
+                  f"AI {t.get('ai', 0):.1f}s | 缓存命中 {d.get('cache_hits', 0)} 次 | 过滤噪音 {d.get('filtered', 0)}")
     print("\n== 完成 ==")
     print(f"目标客户总数：{stats['total']}（目标 ≥ {stats['target_count']}）")
     print(f"等级分布：{stats['by_tier']}")

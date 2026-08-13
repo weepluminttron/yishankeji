@@ -16,8 +16,12 @@ LANDLINE_RE = re.compile(r"(?<!\d)0\d{2,3}-?\d{7,8}(?!\d)")
 CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 
 
-def fetch_page(url, timeout=15):
-    """抓取网页；直接访问失败时自动降级到 Jina Reader（fetchrouter 思路）。"""
+def fetch_page(url, timeout=15, use_jina=True, jina_timeout=12):
+    """抓取网页；直接访问失败时自动降级到 Jina Reader（fetchrouter 思路）。
+
+    use_jina=False 时跳过 Jina 回退（直接失败，更快、避免长超时）；
+    jina_timeout 控制回退超时（默认 12s，原实现为 timeout+15，过长会拖垮并行抓取）。
+    """
     direct_err = None
     try:
         req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept-Language": "zh-CN,zh;q=0.9"})
@@ -26,10 +30,12 @@ def fetch_page(url, timeout=15):
             final = resp.geturl() or url
     except Exception as e:
         direct_err = e
+        if not use_jina:
+            raise direct_err
         try:
             jina_url = "https://r.jina.ai/" + url
             jreq = urllib.request.Request(jina_url, headers={"User-Agent": UA, "Accept": "text/plain"})
-            with urllib.request.urlopen(jreq, timeout=timeout + 15) as jresp:
+            with urllib.request.urlopen(jreq, timeout=jina_timeout) as jresp:
                 raw = jresp.read()
                 final = url
         except Exception:

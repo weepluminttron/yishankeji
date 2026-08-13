@@ -208,7 +208,15 @@ def _discover_one_round(conditions, settings, progress=None):
         progress=progress,
         context=context,
     )
-    return res.get("candidates", []), res.get("errors", [])
+    return {
+        "candidates": res.get("candidates", []),
+        "errors": res.get("errors", []),
+        "info": {
+            "timings": res.get("timings", {}),
+            "cache_hits": res.get("cache_hits", 0),
+            "filtered": res.get("filtered", 0),
+        },
+    }
 
 
 def _discover_manual(conditions, settings, progress=None):
@@ -552,14 +560,16 @@ def run_engine(conditions, settings=None, max_rounds=3, progress=None, seed_cand
 
     rounds = 0
     gaps_history = []
+    discovery_info = []
     if not seed_candidates:
         # 手动搜索（高级）一次性补充，避免每轮重复调用地图接口
         if use_manual:
             all_candidates = _discover_manual(conditions, settings, progress) + all_candidates
         for rnd in range(1, max_rounds + 1):
             rounds = rnd
-            cands, errors = _discover_one_round(conditions, settings, progress)
-            all_candidates.extend(cands)
+            dres = _discover_one_round(conditions, settings, progress)
+            all_candidates.extend(dres["candidates"])
+            discovery_info.append(dres["info"])
             targets, _ = build_targets(_dedupe(all_candidates), conditions)
             gaps = analyze_gaps(targets, conditions)
             gaps_history.append({"round": rnd, "targets": len(targets), "gaps": [list(g) for g in gaps]})
@@ -585,6 +595,7 @@ def run_engine(conditions, settings=None, max_rounds=3, progress=None, seed_cand
         "dropped": dropped,
         "plan": plan,
         "gaps_history": gaps_history,
+        "discovery": discovery_info,
         "final_gaps": [list(g) for g in final_gaps],
         "rounds": rounds,
         "stats": stats,

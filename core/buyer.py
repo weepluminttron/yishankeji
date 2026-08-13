@@ -19,6 +19,8 @@ from lxml import html as lh
 
 from core.crawler import _clean_text, fetch_page
 from core.scorer import fit_comp_score, rule_score, tier_of
+from core import search_cache
+from core import concurrent_search
 
 EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+\.[A-Za-z]{2,}")
 MOBILE_RE = re.compile(r"(?<!\d)1[3-9]\d{9}(?!\d)")
@@ -396,6 +398,21 @@ def search_web(query, count, settings=None):
     return results
 
 
+def search_web_cached(query, count, settings):
+    """带落盘缓存的搜索：命中缓存直接返回（增量复用，避免重复爬取）。"""
+    settings = settings or {}
+    if not settings.get("use_search_cache", True):
+        return search_web(query, count, settings)
+    provider = settings.get("search_provider", "bing_free")
+    cached = search_cache.cache_get(provider, query, count)
+    if cached is not None:
+        return cached
+    results = search_web(query, count, settings)
+    if results:
+        search_cache.cache_set(provider, query, count, results)
+    return results
+
+
 def _is_noise(title, snippet, url):
     if is_blocked(url):
         return True
@@ -611,6 +628,8 @@ def run(keywords, markets=None, max_results=6, urls=None, use_ai=False, settings
     filtered = 0
     seen = set()
     targets = []
+    timings = {"search": 0.0, "fetch": 0.0, "ai": 0.0}
+    cache_hits = [0]
 
     if urls:
         if isinstance(urls, str):
@@ -628,19 +647,40 @@ def run(keywords, markets=None, max_results=6, urls=None, use_ai=False, settings
                 queries.extend(build_queries(kw, market))
         queries = queries[:30]
         q_total = len(queries)
-        for qi, q in enumerate(queries, 1):
+        use_cache = bool((settings or {}).get("use_search_cache", True))
+        workers = max(1, min(int((settings or {}).get("max_search_workers", 8) or 8), 16))
+        _stg = (settings or {}).get("search_stagger")
+        stagger = 0.15 if _stg is None else float(_stg)  # 0.0 表示不限流（提交不 sleep）
+
+        def _search_worker(q):
             try:
-                results = search_web(q, max_results, settings)
+                provider = (settings or {}).get("search_provider", "bing_free")
+                if use_cache and search_cache.cache_get(provider, q, max_results) is not None:
+                    cache_hits[0] += 1
+                    return ("ok", search_web_cached(q, max_results, settings), q)
+                # 仅真正发起网络请求前做小幅限流；缓存命中则跳过 sleep，刷新即瞬时
+                if stagger:
+                    time.sleep(stagger)
+                return ("ok", search_web_cached(q, max_results, settings), q)
             except Exception as e:
-                msg = f"搜索“{q}”失败：{e}"
+                return ("err", str(e), q)
+
+        t0 = time.time()
+        res_list = concurrent_search.parallel_map(
+            _search_worker, queries, max_workers=workers, stagger=0.0,
+            desc="正在搜索方案词", progress=progress,
+        )
+        timings["search"] = time.time() - t0
+        for res in res_list:
+            if res is None or isinstance(res, Exception):
+                continue
+            status, payload, q = res
+            if status == "err":
+                msg = f"搜索“{q}”失败：{payload}"
                 if msg not in errors:
                     errors.append(msg)
-                time.sleep(2)
                 continue
-            if progress:
-                progress({"stage": "正在搜索方案词", "done": qi, "total": q_total, "message": q})
-            time.sleep(2)
-            for r in results:
+            for r in payload:
                 r["url"] = _resolve_url(r["url"])
                 if r["url"] in seen:
                     continue
@@ -660,26 +700,44 @@ def run(keywords, markets=None, max_results=6, urls=None, use_ai=False, settings
             return {"candidates": [], "errors": errors or ["没有找到符合条件的线索，请换个关键词或地区"]}
 
     candidates = []
+    use_jina = bool((settings or {}).get("use_jina_fallback", True))
     fetch_targets = targets[:30]
-    for i, t in enumerate(fetch_targets, 1):
+    workers = max(1, min(int((settings or {}).get("max_fetch_workers", 8) or 8), 16))
+
+    def _fetch_worker(t):
         try:
-            html_text, final_url = fetch_page(t["url"], timeout=10)
+            html_text, final_url = fetch_page(t["url"], timeout=10, use_jina=use_jina, jina_timeout=12)
             contact = extract_contacts(html_text, final_url or t["url"])
             page_text = re.sub(r"<script.*?</script>|<style.*?</style>", " ", html_text, flags=re.S | re.I)
             page_text = re.sub(r"<[^>]+>", " ", page_text)[:2000]
             cand = _to_candidate(contact, t.get("title", ""), t.get("snippet", ""), t.get("keyword", ""), t.get("market", ""), page_text)
-            candidates.append(cand)
+            return ("ok", cand)
         except urllib.error.HTTPError as e:
-            errors.append(f"{t['url']} 抓取失败：页面返回 {e.code}（可能已失效或需登录）")
+            return ("err", f"{t['url']} 抓取失败：页面返回 {e.code}（可能已失效或需登录）")
         except Exception as e:
-            errors.append(f"{t['url']} 抓取失败：{e}")
-        if progress:
-            progress({"stage": "正在分析页面", "done": i, "total": len(fetch_targets), "message": t["url"]})
+            return ("err", f"{t['url']} 抓取失败：{e}")
+
+    t0 = time.time()
+    futs = concurrent_search.parallel_map(
+        _fetch_worker, fetch_targets, max_workers=workers, stagger=0.0,
+        desc="正在分析页面", progress=progress,
+    )
+    timings["fetch"] = time.time() - t0
+    for res in futs:
+        if res is None or isinstance(res, Exception):
+            continue
+        status, payload = res
+        if status == "err":
+            errors.append(payload)
+        else:
+            candidates.append(payload)
 
     if use_ai:
         if progress:
             progress({"stage": "AI 智能筛选", "done": 0, "total": len(candidates)})
+        ta = time.time()
         ai_map = ai_filter(settings, candidates, context)
+        timings["ai"] = time.time() - ta
         if ai_map:
             keep = []
             for i, c in enumerate(candidates):
@@ -748,4 +806,5 @@ def run(keywords, markets=None, max_results=6, urls=None, use_ai=False, settings
             dropped_low += 1
             continue
         keep.append(c)
-    return {"candidates": keep, "errors": errors, "filtered": filtered, "dropped_low": dropped_low}
+    return {"candidates": keep, "errors": errors, "filtered": filtered,
+            "dropped_low": dropped_low, "timings": timings, "cache_hits": cache_hits[0]}
