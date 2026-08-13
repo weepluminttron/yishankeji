@@ -63,6 +63,7 @@ def normalize_conditions(conditions):
     c.setdefault("channels", ["web_search", "company_db", "exhibition", "procurement"])
     c.setdefault("max_results", 30)
     c.setdefault("allow_broad", False)
+    c["ai_plan"] = c.get("ai_plan") if isinstance(c.get("ai_plan"), dict) else {}
 
     def as_list(v):
         if isinstance(v, str):
@@ -71,6 +72,35 @@ def normalize_conditions(conditions):
 
     for k in ("specs", "keywords", "regions", "buyer_types", "exclude", "channels"):
         c[k] = as_list(c.get(k))
+
+    # AI 获客策略助手方案（ai_plan）自动补全缺失条件，保留全部方案信息
+    plan = c["ai_plan"]
+    _DEFAULT_REGIONS = ["中国大陆", "亚太", "欧美", "中东非洲拉美"]
+    _DEFAULT_TYPES = ["光无源器件厂", "光模块厂", "系统集成商", "近期招标扩容"]
+    if plan:
+        if not c["products"] and plan.get("target_customers"):
+            c["products"] = str(plan.get("target_customers"))[:200]
+        if not c["keywords"]:
+            c["keywords"] = as_list(plan.get("keywords"))
+        if (not c["regions"] or c["regions"] == _DEFAULT_REGIONS) and plan.get("markets"):
+            c["regions"] = as_list(plan.get("markets"))
+        if (not c["buyer_types"] or c["buyer_types"] == _DEFAULT_TYPES) and plan.get("buyer_role"):
+            c["buyer_types"] = as_list(plan.get("buyer_role"))
+        _PLAN_CHANNEL_MAP = [
+            ("展会", "exhibition"), ("招投标", "procurement"), ("招标", "procurement"),
+            ("B2B", "company_db"), ("平台", "company_db"), ("社群", "web_search"),
+            ("邮件", "web_search"), ("搜索引擎", "web_search"),
+        ]
+        mapped = []
+        for ch in as_list(plan.get("channels")):
+            chl = str(ch).lower()
+            for key, eng in _PLAN_CHANNEL_MAP:
+                if key.lower() in chl:
+                    if eng not in mapped:
+                        mapped.append(eng)
+                    break
+        if mapped and c["channels"] == ["web_search", "company_db", "exhibition", "procurement"]:
+            c["channels"] = mapped + [x for x in ("web_search", "procurement") if x not in mapped]
 
     # specs 同时作为检索种子；keywords 补充额外词
     c["specs"] = [s.strip() for s in c["specs"] if s.strip()]
@@ -817,6 +847,44 @@ def build_strategy_doc(conditions, engine_result, out_dir):
                  "销售只需聚焦 S/A 级热线索，人均可触达客户量级提升数倍。")
     lines.append("")
 
+    # 方案来源：AI 获客策略助手的完整信息
+    plan_src = conditions.get("ai_plan") or {}
+    if plan_src.get("title"):
+        lines.append("## 方案来源（AI 获客策略助手）")
+        lines.append("")
+        lines.append(f"- **方案标题**：{plan_src.get('title')}")
+        if plan_src.get("buyer_role"):
+            lines.append(f"- **目标角色**：{plan_src.get('buyer_role')}")
+        if plan_src.get("target_customers"):
+            lines.append(f"- **目标客户**：{plan_src.get('target_customers')}")
+
+        def _stars(n):
+            try:
+                n = int(n)
+            except Exception:
+                n = 0
+            n = max(0, min(5, n))
+            return "★" * n + "☆" * (5 - n)
+
+        ratings = []
+        if plan_src.get("profit") is not None:
+            ratings.append(f"利润 {_stars(plan_src.get('profit'))}")
+        if plan_src.get("brand") is not None:
+            ratings.append(f"知名度 {_stars(plan_src.get('brand'))}")
+        if plan_src.get("demand") is not None:
+            ratings.append(f"需求量 {_stars(plan_src.get('demand'))}")
+        if ratings:
+            lines.append("- **方案评级**：" + " ｜ ".join(ratings))
+        if plan_src.get("strategy"):
+            lines.append(f"- **策略建议**：{plan_src.get('strategy')}")
+        if plan_src.get("cooperation"):
+            lines.append(f"- **合作模式**：{plan_src.get('cooperation')}")
+        if plan_src.get("channels"):
+            lines.append(f"- **获客渠道**：{'、'.join(str(x) for x in plan_src.get('channels'))}")
+        if plan_src.get("risks"):
+            lines.append(f"- **风险提示**：{'；'.join(str(x) for x in plan_src.get('risks'))}")
+        lines.append("")
+
     # 二、目标客户画像
     lines.append("## 二、目标客户画像（我们想找谁）")
     lines.append("")
@@ -948,6 +1016,7 @@ def export_outputs(conditions, engine_result, out_dir, base_name="acquisition"):
             "rounds": engine_result["rounds"],
             "target_count": conditions["max_results"],
             "stats": engine_result["stats"],
+            "ai_plan": conditions.get("ai_plan") or {},
         },
         "strategy": {
             "channels": [

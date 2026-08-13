@@ -1379,6 +1379,7 @@ async function renderBuyer() {
         <label style="display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" id="acq-manual"> 🗺️ 同时用地图POI补充（需地图Key）</label>
         <span class="hint">引擎按你的条件自动生成多渠道检索方案、发现并筛选买家、迭代补齐缺口；也可接收“AI 方案”或“手动搜索”的结果做离线筛选分级；完成后可一键导入客户库（保留评分与等级）。</span>
       </div>
+      <div id="acq-plan-tag" style="display:none;margin-top:8px;padding:8px 10px;background:#eaf3fd;border:1px solid #bcd9f5;border-radius:8px;font-size:12px"></div>
       <div id="acq-result" style="margin-top:12px"></div>
     </div>
     <div class="card">
@@ -1485,6 +1486,7 @@ async function renderBuyer() {
       max_results: $("#acq-max").value || 30,
       exclude: $("#acq-exclude").value.trim(),
     };
+    if (state.acqPlan) conditions.ai_plan = state.acqPlan;
     try {
       await api("/api/acquisition/run", { method: "POST", body: { conditions, use_manual: $("#acq-manual").checked } });
       $("#acq-result").innerHTML = `<div class="empty"><div class="ico">🧠</div>获客引擎已启动，正在发现并筛选买家…（进度看右上角任务栏）</div>`;
@@ -1500,6 +1502,15 @@ async function renderBuyer() {
       box.innerHTML += `<div class="hint" style="margin-top:8px">✅ 已导入 ${r.added} 家客户（跳过重复 ${r.duplicates} 家），去“客户线索”查看</div>`;
     } catch (e) { toast(e.message, "err"); }
   };
+  // 手动修改引擎条件后，自动解除“AI 方案带入”状态，避免旧方案残留
+  ["acq-products", "acq-specs", "acq-seeds", "acq-regions", "acq-types", "acq-tier", "acq-max", "acq-exclude"].forEach((id) => {
+    const el = $("#" + id);
+    if (el) el.addEventListener("input", () => {
+      state.acqPlan = null;
+      const tag = $("#acq-plan-tag");
+      if (tag) tag.style.display = "none";
+    });
+  });
   // 恢复获客引擎任务状态（切走再回来不丢）
   api("/api/acquisition").then((d) => {
     const job = d.job || {};
@@ -1610,6 +1621,7 @@ function renderPlans(plans) {
   $$("[data-acq]", box).forEach((b) => b.onclick = () => {
     const p = plans[+b.dataset.acq];
     // 方案 → 引擎条件：规格/市场/买方角色 一键带入并启动
+    state.acqPlan = p;  // 完整方案（标题/评级/策略/合作/渠道/风险）随引擎一起传递
     $("#acq-products").value = p.target_customers || "";
     // 方案关键词是“搜索式”（如 DWDM 招标公告），放到检索种子词，不做必中规格硬过滤
     $("#acq-specs").value = "";
@@ -1617,6 +1629,11 @@ function renderPlans(plans) {
     $("#acq-regions").value = (p.markets || []).join(",");
     $("#acq-types").value = p.buyer_role || "";
     $("#acq-exclude").value = "";
+    const tag = $("#acq-plan-tag");
+    if (tag) {
+      tag.style.display = "block";
+      tag.textContent = `📋 已带入 AI 方案：${p.title || ""}${p.profit ? ` ｜ 利润${"★".repeat(Math.max(0, Math.min(5, p.profit)))}` : ""}${p.channels && p.channels.length ? ` ｜ 渠道：${p.channels.join("、")}` : ""}${p.risks && p.risks.length ? ` ｜ 风险：${p.risks.join("；")}` : ""}`;
+    }
     toast("已用方案填充引擎条件，开始自动获客…", "ok");
     $("#acq-run").click();
     const card = $("#acq-run").closest(".card");
