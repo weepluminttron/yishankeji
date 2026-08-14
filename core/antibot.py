@@ -529,6 +529,9 @@ def request_with_antibot(url, settings=None, timeout=15, method="GET", data=None
             last_err = e
             if pool and used_proxy:
                 pool.mark_bad(used_proxy)
+            # 代理本身挂了（连接失败/超时）：不重试，立即交给上层直连兜底，避免整轮搜索卡几分钟
+            if used_proxy and is_retryable_error(e):
+                raise
             if not is_retryable_error(e) or attempt >= max_retries:
                 raise
             # 指数退避
