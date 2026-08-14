@@ -954,30 +954,15 @@ def verify_contacts(targets, settings, limit=20):
                 res = smart.scrape_sync(web, settings)
                 c = {"emails": res.get("emails") or [], "phones": res.get("phones") or []}
             else:
-                from core import crawler
+                from core import crawler, contact_probe
                 html, final = crawler.fetch_page(web, timeout=12, use_jina=True, jina_timeout=12, settings=settings)
                 c = buyer.extract_contacts(html, final or web)
+                probe = contact_probe.probe_contacts(web, settings=settings, max_pages=2, main_html=html)
+                c = contact_probe.merge_contact_sets([c, probe])
             email = c["emails"][0] if c["emails"] else ""
             phone = c["phones"][0] if c["phones"] else ""
         except Exception:
             pass
-        if not email and not phone:
-            # 常见联系页兜底
-            for suffix in ("/contact", "/contact-us", "/about"):
-                try:
-                    if smart is not None:
-                        res = smart.scrape_sync(web.rstrip("/") + suffix, settings)
-                        c = {"emails": res.get("emails") or [], "phones": res.get("phones") or []}
-                    else:
-                        from core import crawler
-                        html, _ = crawler.fetch_page(web.rstrip("/") + suffix, timeout=10, use_jina=True, jina_timeout=10, settings=settings)
-                        c = buyer.extract_contacts(html, web + suffix)
-                    email = c["emails"][0] if c["emails"] else email
-                    phone = c["phones"][0] if c["phones"] else phone
-                    if email and phone:
-                        break
-                except Exception:
-                    continue
         changed = False
         if email and not t.get("email"):
             t["email"] = email
@@ -987,7 +972,7 @@ def verify_contacts(targets, settings, limit=20):
             changed = True
         if changed:
             t["verified"] = True
-            t["path"] = "官网定向抓取（WebFetch）"
+            t["path"] = "官网定向抓取（WebFetch/联系页深挖）"
             updated += 1
     return {"done": done, "updated": updated, "errors": errors}
 

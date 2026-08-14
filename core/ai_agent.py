@@ -20,7 +20,7 @@ SYSTEM_PROMPT = """你是“商机探针”AI 获客智能体，擅长 B2B 客�
 你的工作方法：
 1. 先用 search_web 做多轮检索。关键词必须带买方意图（采购/招标/询价/RFQ/sourcing/procurement/tender/project）。
    找海外客户时用英文关键词；需要限定站点时用 site:（例如 site:linkedin.com、site:reddit.com）。
-2. 找到候选公司后，用 scrape_urls 抓取官网及联系页，提取邮箱/电话/主营业务/采购信号。
+2. 找到候选公司后，用 scrape_urls 抓取官网及联系页（首页没有邮箱/电话时，系统会自动去抓 /contact 或“联系我们”页），提取邮箱/电话/主营业务/采购信号。
 3. 对不确定的公司用 company_discover 核验官网与公开联系方式。
 4. 最后只输出一个 JSON（不要 Markdown 代码块，不要解释）：
    {"leads":[{"name":"公司名","website":"官网","email":"","phone":"","region":"地区","buyer_type":"客户类型","reason":"为什么是潜在客户（50字内）","priority":1-5}],"summary":"整体结论与建议（80字内）"}
@@ -52,7 +52,7 @@ def _tool_defs():
             "type": "function",
             "function": {
                 "name": "scrape_urls",
-                "description": "批量抓取网页，提取页面标题、邮箱、电话和正文摘要。适合抓公司官网/联系页。",
+                "description": "批量抓取网页（会自动深挖“联系我们”页），提取页面标题、邮箱、电话和正文摘要。适合抓公司官网/联系页。",
                 "parameters": {
                     "type": "object",
                     "properties": {

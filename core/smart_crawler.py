@@ -53,28 +53,25 @@ def _proxy_from_settings(settings):
 
 
 def _extract_contacts(html_text, text, url=""):
-    """从渲染后 HTML/纯文本中提取邮箱、电话、tel 链接（去重）。"""
+    """从渲染后 HTML/纯文本中提取邮箱、电话、tel 链接（清洗去重，企业邮箱优先）。"""
+    from core import contact_probe
     hay = (html_text or "") + " " + (text or "")
-    emails = list(dict.fromkeys(EMAIL_RE.findall(hay)))
-    # mailto: 里也有邮箱
+    emails = []
+    # mailto: 里的邮箱信号最强，排最前
     for m in re.finditer(r'href=["\']mailto:([^"\']+)', html_text or ""):
         e = m.group(1).strip().split("?")[0]
-        if EMAIL_RE.match(e) and e not in emails:
+        if EMAIL_RE.match(e):
             emails.append(e)
-    phones = []
-    seen = set()
-    for p in PHONE_CN_RE.findall(text or "") + PHONE_INTL_RE.findall(text or ""):
-        digits = re.sub(r"\D", "", p)
-        if len(digits) < 7 or len(digits) > 15:
-            continue
-        if digits not in seen:
-            seen.add(digits)
-            phones.append(p.strip())
+    emails += EMAIL_RE.findall(hay)
+    phones = PHONE_CN_RE.findall(text or "") + PHONE_INTL_RE.findall(text or "")
     for m in re.finditer(r'href=["\']tel:([^"\']+)', html_text or ""):
         p = m.group(1).strip()
-        if p and p not in phones:
+        if p:
             phones.append(p)
-    return {"emails": emails[:20], "phones": phones[:20]}
+    return {
+        "emails": contact_probe.clean_emails(emails)[:20],
+        "phones": contact_probe.clean_phones(phones)[:20],
+    }
 
 
 class SmartCrawler:
@@ -157,6 +154,21 @@ class SmartCrawler:
                 text = page_data.get("text") or ""
                 title = page_data.get("title") or ""
                 contacts = _extract_contacts(html_text, text, url)
+                if str((settings or {}).get("crawler_probe_contacts", "1")) != "0" and not (contacts["emails"] and contacts["phones"]):
+                    try:
+                        from core import contact_probe
+                        max_pages = 1
+                        try:
+                            max_pages = max(0, min(int((settings or {}).get("crawler_probe_pages") or 1), 3))
+                        except Exception:
+                            max_pages = 1
+                        probe = contact_probe.probe_contacts(
+                            url, settings=settings, max_pages=max_pages,
+                            smart=None, main_html=html_text,
+                        )
+                        contacts = contact_probe.merge_contact_sets([contacts, probe])
+                    except Exception:
+                        pass
                 return {
                     "success": True,
                     "url": url,
@@ -188,6 +200,7 @@ class SmartCrawler:
         if not urls:
             return []
         try:
+            self._semaphore = None  # 每次调用重建信号量，跨线程/跨事件循环复用安全
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             try:

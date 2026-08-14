@@ -2613,6 +2613,26 @@ async function renderSettings() {
         </div>
         <div class="field" style="grid-column:1/-1"><label>限定站点/域名（可选，逗号分隔，如 gov.cn,in 或 具体官网）</label><input class="input full" id="s-search-site" placeholder="gov.cn,in,example.com" value="${esc(s.search_site_filter)}"></div>
       </div>
+        <div class="field"><label>自动深挖“联系我们”页（首页没电话/邮箱时自动抓联系页）</label>
+          <select class="select full" id="s-probe-contact">
+            <option value="1" ${(s.probe_contact_pages || "1") !== "0" ? "selected" : ""}>开启（推荐）</option>
+            <option value="0" ${s.probe_contact_pages === "0" ? "selected" : ""}>关闭</option>
+          </select>
+        </div>
+        <div class="field"><label>单轮联系页探测上限</label><input class="input full" type="number" min="0" max="60" id="s-probe-limit" value="${esc(s.contact_probe_limit || 12)}"></div>
+        <div class="field"><label>免费源并行兜底</label>
+          <select class="select full" id="s-parallel-free">
+            <option value="1" ${(s.parallel_free_search || "1") !== "0" ? "selected" : ""}>开启（推荐，更快更全）</option>
+            <option value="0" ${s.parallel_free_search === "0" ? "selected" : ""}>关闭（串行）</option>
+          </select>
+        </div>
+        <div class="field"><label>site: 全失败时去掉限定重试</label>
+          <select class="select full" id="s-site-fallback">
+            <option value="1" ${(s.site_fallback_search || "1") !== "0" ? "selected" : ""}>开启（推荐）</option>
+            <option value="0" ${s.site_fallback_search === "0" ? "selected" : ""}>关闭</option>
+          </select>
+        </div>
+      </div>
       <div class="hint">推荐用博查 AI 搜索（国内稳定、结果精准，平台：open.bochaai.com）；也可用免费 百度/360/搜狗/Bing，或 SerpAPI 走 Google（serpapi.com）。</div>
       <div class="toolbar" style="margin-top:10px;margin-bottom:0">
         <button class="btn" id="s-search-test">🧪 检测搜索源</button>
@@ -2715,6 +2735,11 @@ async function renderSettings() {
         search_engine_id: $("#s-search-cx").value.trim(),
         search_freshness: $("#s-search-fresh").value,
         search_site_filter: $("#s-search-site").value.trim(),
+        probe_contact_pages: $("#s-probe-contact").value,
+        contact_probe_limit: $("#s-probe-limit").value.trim() || "12",
+        parallel_free_search: $("#s-parallel-free").value,
+        site_fallback_search: $("#s-site-fallback").value,
+        crawler_probe_contacts: $("#s-probe-contact").value,
         proxy_pool: $("#s-proxy-pool").value.trim(),
         delay_search: $("#s-delay-search").value,
         delay_fetch: $("#s-delay-fetch").value,

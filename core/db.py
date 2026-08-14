@@ -702,6 +702,13 @@ def get_settings():
         "delay_default": "0.5",    # 默认随机延时基准（秒）
         "retry_max": "2",          # 失败重试次数（指数退避：1s → 2s → 4s）
         "retry_base_delay": "1.0", # 重试退避基准延时（秒）
+        # ---- 获客增强：联系页深挖 / 并行搜索兜底 ----
+        "probe_contact_pages": "1",   # 首页缺联系方式时自动深挖“联系我们”页
+        "contact_probe_limit": "12",  # 单轮最多探测的联系页数量
+        "parallel_free_search": "1",  # 免费搜索源并行兜底（更快更全）
+        "site_fallback_search": "1",  # site: 全部失败时去掉限定重试
+        "crawler_probe_contacts": "1",# AI 智能爬虫自动深挖联系页
+        "crawler_probe_pages": "1",   # 智能爬虫每个站点最多抓的联系页数
     }
     merged = dict(defaults)
     merged.update(saved)
@@ -729,6 +736,9 @@ def save_settings(values):
         "proxy_pool", "proxy_url",
         "delay_search", "delay_fetch", "delay_page", "delay_default",
         "retry_max", "retry_base_delay",
+        "probe_contact_pages", "contact_probe_limit",
+        "parallel_free_search", "site_fallback_search",
+        "crawler_probe_contacts", "crawler_probe_pages",
     ]
     conn = get_conn()
     try:

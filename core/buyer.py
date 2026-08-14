@@ -15,6 +15,9 @@ import urllib.parse
 import urllib.request
 from collections import Counter
 
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 from lxml import html as lh
 
 from core.crawler import _clean_text, fetch_page
@@ -23,6 +26,7 @@ from core import search_cache
 from core import concurrent_search
 from core import antibot  # 反爬策略：搜索请求前随机延时 + 限流退避
 from core import channels  # 惰性：channels 内部才 import 本模块，导入期安全
+from core import contact_probe
 
 EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+\.[A-Za-z]{2,}")
 MOBILE_RE = re.compile(r"(?<!\d)1[3-9]\d{9}(?!\d)")
@@ -146,7 +150,8 @@ INDUSTRY_PRESETS = {
 
 # 搜索源被反爬时固定返回的“罐头结果”域名
 JUNK_DOMAINS = ("baike.baidu.com", "zhihu.com", "zhuanlan.zhihu.com", "csdn.net",
-                "toutiao.com", "1688.com", "b2bwiki.baidu.com", "sohu.com")
+                "toutiao.com", "1688.com", "b2bwiki.baidu.com", "sohu.com",
+                "recommend_list.baidu.com")
 
 
 def _domain(url):
@@ -268,8 +273,43 @@ def polish_plan_keywords(keywords, markets):
     return out[:12]
 
 
+def search_bing_rss(query, count=5, qdr="", settings=None):
+    """Bing RSS 订阅接口：比 HTML 版更稳，反爬拦截少；失败时由调用方降级。"""
+    antibot.human_delay(settings, key="search")
+    last_err = ""
+    for host in ("https://www.bing.com/search?", "https://cn.bing.com/search?"):
+        url = (host + "format=rss&q=" + urllib.parse.quote(query)
+               + "&count=" + str(max(3, min(10, count)))
+               + (("&qdr=" + qdr) if qdr else ""))
+        try:
+            html_text, _ = fetch_page(url, timeout=12, use_jina=False, settings=settings)
+        except Exception as e:
+            last_err = str(e)[:100]
+            continue
+        if "<rss" not in html_text[:3000].lower() and "<item>" not in html_text.lower():
+            last_err = "未返回 RSS 内容（可能被反爬）"
+            continue
+        doc = lh.fromstring(html_text.encode("utf-8", errors="replace"))
+        results = []
+        for item in doc.xpath("//item")[:count]:
+            title = _clean_text(item.findtext("title") or "")
+            link = (item.findtext("link") or "").strip()
+            desc = _clean_text(item.findtext("description") or "")
+            if not title or not link.startswith("http"):
+                continue
+            results.append({"title": title, "url": link, "snippet": desc[:220]})
+        if results:
+            return results
+        last_err = "RSS 无有效结果"
+    raise ValueError("Bing RSS 无有效结果（" + last_err + "）")
+
+
 def search_bing(query, count=5, qdr="", settings=None):
-    """Bing 搜索（接入反爬：随机延时 + UA 轮换 + 代理池 + 重试退避）。"""
+    """Bing 搜索：优先 RSS 订阅接口（反爬更稳），失败再走 HTML。"""
+    try:
+        return search_bing_rss(query, count, qdr, settings=settings)
+    except Exception:
+        pass
     antibot.human_delay(settings, key="search")  # 行为模拟：请求前随机延时
     common = ("&count=" + str(max(3, min(10, count)))
               + "&mkt=zh-CN&setlang=zh-hans"
@@ -681,61 +721,84 @@ def search_web(query, count, settings=None):
     fp = _freshness_params(settings.get("search_freshness") or "")
     chain = []
 
-    def _try_free():
-        """360 → 搜狗 → 头条 → 百度 免费源链。"""
-        errs = []
-        try:
-            results = search_so(query, count, settings=settings)
-            if results:
-                return results
-            errs.append("360 无结果")
-        except Exception as e:
-            errs.append(f"360：{e}")
-        try:
-            time.sleep(1)
-            results = search_sogou(query, count, settings=settings)
-            if results:
-                return results
-            errs.append("搜狗无结果")
-        except Exception as e:
-            errs.append(f"搜狗：{e}")
-        try:
-            time.sleep(1)
-            results = search_toutiao(query, count, settings=settings)
-            if results:
-                return results
-            errs.append("头条无结果")
-        except Exception as e:
-            errs.append(f"头条：{e}")
-        try:
-            time.sleep(1)
-            results = search_baidu(query, count, settings=settings)
-            if results:
-                return results
-            errs.append("百度无结果")
-        except Exception as e:
-            errs.append(f"百度：{e}")
-        raise ValueError("免费搜索源不可用（" + "；".join(errs) + "）")
+    def _try_free(q=None):
+        """免费源并行兜底：360/搜狗/头条/百度/Bing RSS 并发，命中即合并返回。"""
+        q = q or query
+        s = settings
+        attempts = [
+            ("360", lambda: search_so(q, count, settings=s)),
+            ("搜狗", lambda: search_sogou(q, count, settings=s)),
+            ("头条", lambda: search_toutiao(q, count, settings=s)),
+            ("百度", lambda: search_baidu(q, count, settings=s)),
+            ("Bing RSS", lambda: search_bing_rss(q, count, "", settings=s)),
+        ]
+        if str(s.get("parallel_free_search", "1")) == "0":
+            errs = []
+            for name, fn in attempts:
+                try:
+                    got = fn()
+                    if got:
+                        return got
+                    errs.append(name + " 无结果")
+                except Exception as e:
+                    errs.append(f"{name}：{e}")
+            raise ValueError("免费搜索源不可用（" + "；".join(errs) + "）")
 
-    def _try_direct():
+        def _one(item):
+            name, fn = item
+            try:
+                return name, fn(), ""
+            except Exception as e:
+                return name, [], str(e)[:100]
+
+        results = []
+        errs = []
+        rlock = threading.Lock()
+        with ThreadPoolExecutor(max_workers=3) as ex:
+            futs = [ex.submit(_one, it) for it in attempts]
+            for fut in as_completed(futs):
+                name, got, err = fut.result()
+                if got:
+                    with rlock:
+                        results.extend(got)
+                else:
+                    errs.append(f"{name}：{err}" if err else name + " 无结果")
+        if results:
+            seen = set()
+            merged = []
+            for r in results:
+                u = _resolve_url(r.get("url", ""))
+                if u in seen:
+                    continue
+                seen.add(u)
+                if is_blocked(u) or _is_vpn_link(u) or _is_noise(r.get("title", ""), r.get("snippet", ""), u):
+                    continue
+                merged.append(r)
+                if len(merged) >= count * 2:
+                    break
+            return merged
+        raise ValueError("免费搜索源并行兜底不可用（" + "；".join(errs) + "）")
+
+    def _try_direct(q=None, s=None):
         """代理被限流/风控时，清空代理用服务器直连重试（直连对搜狗通常可用）。"""
-        ds = dict(settings)
-        ds["proxy_pool"] = ""
-        ds["proxy_url"] = ""
+        q = q or query
+        s = dict(s or settings)
+        s["proxy_pool"] = ""
+        s["proxy_url"] = ""
         errs = []
         for name, fn in (
-            ("搜狗直连", lambda: search_sogou(query, count, settings=ds)),
-            ("头条直连", lambda: search_toutiao(query, count, settings=ds)),
-            ("百度直连", lambda: search_baidu(query, count, settings=ds)),
-            ("Bing直连", lambda: search_bing(query, count, fp["qdr"], settings=ds)),
+            ("搜狗直连", lambda: search_sogou(q, count, settings=s)),
+            ("头条直连", lambda: search_toutiao(q, count, settings=s)),
+            ("百度直连", lambda: search_baidu(q, count, settings=s)),
+            ("Bing直连", lambda: search_bing(q, count, fp["qdr"], settings=s)),
         ):
             try:
                 results = fn()
                 if not results:
                     errs.append(name + " 无结果")
                     continue
-                if name == "Bing直连" and _is_canned(results):
-                    errs.append("Bing直连被反爬（只返回通用结果）")
+                if _is_canned(results):
+                    errs.append(name + " 被反爬（只返回通用结果）")
                     continue
                 if not _matches_site_scope(query, results):
                     errs.append(name + " 未返回 site: 限定站点结果")
@@ -757,26 +820,23 @@ def search_web(query, count, settings=None):
         sources.append(("博查", lambda: search_bocha(query, count, key, fp["bocha"], settings=settings)))
     if provider == "toutiao":
         sources.append(("头条", lambda: search_toutiao(query, count, settings=settings)))
-    if provider == "so_free":
-        sources.append(("360/搜狗/头条/百度", _try_free))
     elif provider == "baidu_free":
         sources.append(("百度", lambda: search_baidu(query, count, settings=settings)))
-    else:
+    elif provider not in ("serpapi", "google_cse", "bocha"):
         sources.append(("Bing", lambda: search_bing(query, count, fp["qdr"], settings=settings)))
 
-    # 主源失败后的兜底：免费源（避免 SerpAPI 429/配额耗尽时一个都搜不到）
-    if provider not in ("so_free", "baidu_free"):
-        if not any(n == "360/搜狗/头条/百度" for n, _ in sources):
-            sources.append(("360/搜狗/头条/百度", _try_free))
-        sources.append(("Bing", lambda: search_bing(query, count, fp["qdr"], settings=settings)))
-    elif provider == "baidu_free":
-        if not any(n == "360/搜狗/头条/百度" for n, _ in sources):
-            sources.append(("360/搜狗/头条/百度", _try_free))
+    # 通用兜底：免费链 + Bing，保证任何主源失败都有备用
+    if not any(n == "360/搜狗/头条/百度" for n, _ in sources):
+        sources.append(("360/搜狗/头条/百度", _try_free))
+    if not any(n == "Bing" for n, _ in sources):
         sources.append(("Bing", lambda: search_bing(query, count, fp["qdr"], settings=settings)))
 
     # 最后一道兜底：代理被限流时用服务器直连重试一次
     if settings.get("proxy_pool") or settings.get("proxy_url"):
         sources.append(("直连重试", _try_direct))
+    # site: 限定全部失败时，去掉限定重试一次（海外站点国内免费源不索引）
+    if _site_scopes(query) and str(settings.get("site_fallback_search", "1")) != "0":
+        sources.append(("去掉site限定重试", lambda: _try_free(q=re.sub(r"site:[\w.\-]+", " ", query))))
 
     for name, fn in sources:
         try:
@@ -784,10 +844,10 @@ def search_web(query, count, settings=None):
             if not results:
                 chain.append(f"{name} 无结果")
                 continue
-            if name == "Bing" and _is_canned(results):
-                chain.append("Bing 被反爬（只返回通用结果）")
+            if _is_canned(results):
+                chain.append(f"{name} 被反爬（只返回通用结果）")
                 continue
-            if not _matches_site_scope(query, results):
+            if name != "去掉site限定重试" and not _matches_site_scope(query, results):
                 chain.append(f"{name} 未返回 site: 限定站点结果")
                 continue
             if not _results_relevant(query, results):
@@ -869,8 +929,8 @@ def _looks_verified(cand):
 def extract_contacts(html_text, url=""):
     text = re.sub(r"<script.*?</script>|<style.*?</style>", " ", html_text, flags=re.S | re.I)
     text = re.sub(r"<[^>]+>", " ", text)
-    emails = sorted(set(m.lower() for m in EMAIL_RE.findall(text)))
-    phones = sorted(set(m.replace("-", "") for m in MOBILE_RE.findall(text) + LANDLINE_RE.findall(text)))
+    emails = contact_probe.clean_emails(m.lower() for m in EMAIL_RE.findall(text))
+    phones = contact_probe.clean_phones(m.replace("-", "") for m in MOBILE_RE.findall(text) + LANDLINE_RE.findall(text))
     whatsapp = sorted(set(m for m in WHATSAPP_RE.findall(text)))
     wechat = sorted(set(m for m in WECHAT_RE.findall(text)))
     doc = lh.fromstring(html_text)
@@ -973,6 +1033,51 @@ def _to_candidate(contact, title, snippet, keyword, market, page_text, channels=
     cand["tier"] = fc["tier"]
     cand["tags"] = ",".join(t for t in [keyword, fc["tier"] + "级"] if t)
     return cand
+
+
+def _merge_same_domain(cands):
+    """同域名线索合并：合并邮箱/电话，保留评分最高的一条。"""
+    groups = {}
+    order = []
+    for c in cands or []:
+        host = _domain(c.get("website") or "")
+        name = str(c.get("name") or "").strip().lower()
+        shared = any(host == h or host.endswith("." + h) for h in contact_probe.SHARED_HOSTS)
+        key = "n:" + name if (not host or shared) else "h:" + host
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append(c)
+    out = []
+    for key in order:
+        group = groups[key]
+        if len(group) == 1:
+            out.append(group[0])
+            continue
+        best = max(group, key=lambda c: c.get("score", 0) or 0)
+        emails, phones, whats, wechats, urls = [], [], [], [], []
+        for c in group:
+            if c.get("email") and c["email"] not in emails:
+                emails.append(c["email"])
+            if c.get("phone") and c["phone"] not in phones:
+                phones.append(c["phone"])
+            if c.get("whatsapp") and c["whatsapp"] not in whats:
+                whats.append(c["whatsapp"])
+            if c.get("wechat") and c["wechat"] not in wechats:
+                wechats.append(c["wechat"])
+            if c.get("website") and c["website"] not in urls:
+                urls.append(c["website"])
+        best = dict(best)
+        best["email"] = ",".join(emails[:6])
+        best["phone"] = ",".join(phones[:4])
+        best["whatsapp"] = ",".join(whats[:3])
+        best["wechat"] = ",".join(wechats[:3])
+        if urls:
+            best["website"] = urls[0]
+        best["score_reason"] = (best.get("score_reason") or "") + "；已合并同域名线索×%d" % len(group)
+        best["verified"] = _looks_verified(best)
+        out.append(best)
+    return out
 
 
 def ai_filter(settings, candidates, context=""):
@@ -1160,6 +1265,19 @@ def run(keywords, markets=None, max_results=6, urls=None, use_ai=False, settings
         return {"candidates": [], "errors": errors or ["没有找到符合条件的线索，请换个关键词或地区"]}
 
     candidates = []
+    probe_contact_pages = str((settings or {}).get("probe_contact_pages", "1")) != "0"
+    probe_limit = 12
+    try:
+        probe_limit = max(0, min(int((settings or {}).get("contact_probe_limit") or 12), 60))
+    except Exception:
+        probe_limit = 12
+    probes_used = [0]
+    probes_lock = threading.Lock()
+    try:
+        from core.smart_crawler import SmartCrawler
+        _probe_smart = SmartCrawler(max_concurrent=2)
+    except Exception:
+        _probe_smart = None
     use_jina = bool((settings or {}).get("use_jina_fallback", True))
     fetch_targets = targets[:30]
     workers = max(1, min(int((settings or {}).get("max_fetch_workers", 8) or 8), 16))
@@ -1168,6 +1286,22 @@ def run(keywords, markets=None, max_results=6, urls=None, use_ai=False, settings
         try:
             html_text, final_url = fetch_page(t["url"], timeout=10, use_jina=use_jina, jina_timeout=12, settings=settings)
             contact = extract_contacts(html_text, final_url or t["url"])
+            if probe_contact_pages and not (contact["emails"] and contact["phones"]):
+                with probes_lock:
+                    if probes_used[0] < probe_limit:
+                        probes_used[0] += 1
+                        allow_probe = True
+                    else:
+                        allow_probe = False
+                if allow_probe:
+                    try:
+                        probe = contact_probe.probe_contacts(
+                            t["url"], settings=settings, max_pages=2, main_html=html_text,
+                            smart=_probe_smart,
+                        )
+                        contact = contact_probe.merge_contact_sets([contact, probe])
+                    except Exception:
+                        pass
             page_text = re.sub(r"<script.*?</script>|<style.*?</style>", " ", html_text, flags=re.S | re.I)
             page_text = re.sub(r"<[^>]+>", " ", page_text)[:2000]
             cand = _to_candidate(contact, t.get("title", ""), t.get("snippet", ""), t.get("keyword", ""), t.get("market", ""), page_text, t.get("channels", []))
@@ -1191,6 +1325,8 @@ def run(keywords, markets=None, max_results=6, urls=None, use_ai=False, settings
             errors.append(payload)
         else:
             candidates.append(payload)
+
+    candidates = _merge_same_domain(candidates)
 
     if use_ai:
         if progress:
