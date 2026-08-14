@@ -489,6 +489,18 @@ def _match_specs(text, specs):
     return hit
 
 
+# 强采购机会信号：招标/询价/求购公告类页面即使没有公司资料，也按可跟进线索保留
+_TENDER_SIGNALS = (
+    "采购公告", "询价公告", "招标公告", "采购项目", "招标项目",
+    "采购需求", "采购计划", "招标采购", "采购邀请", "求购", "中标",
+)
+
+
+def _has_tender_signal(text):
+    t = (text or "").lower()
+    return any(sig in t for sig in _TENDER_SIGNALS)
+
+
 def build_targets(candidates, conditions, seq_start=1):
     """把原始线索（core.buyer 产出或外部 seed）按用户条件筛选、分级、标注。
 
@@ -516,6 +528,12 @@ def build_targets(candidates, conditions, seq_start=1):
             dropped.append((name or "未命名", "命中排除名单"))
             continue
 
+        # 1.1) 错误页/反爬验证页直接丢弃（页面抓取后才暴露的“错误页面”标题）
+        _err_mark = ("错误页面", "404", "access verification", "安全验证", "人机验证")
+        if any(m in (name + " " + note).lower() for m in _err_mark):
+            dropped.append((name or "未命名", "错误页/验证页，非有效线索"))
+            continue
+
         # 2) 评分/分级（以 note+name+tags 为文本，统一口径）
         fc = scorer.fit_comp_score({"note": note, "tags": tags, "name": name})
         fit, comp, total, tier = fc["fit"], fc["comp"], fc["total"], fc["tier"]
@@ -530,8 +548,12 @@ def build_targets(candidates, conditions, seq_start=1):
         # 5) 过滤：等级、规格命中
         reasons = []
         if tier_rank.get(tier, 9) > min_rank:
-            dropped.append((name or "未命名", f"等级低于阈值({tier}<{min_tier})"))
-            continue
+            # 招标/询价/求购公告类线索：等级虽低（C），但采购信号真实，按可跟进机会保留
+            if _has_tender_signal(text):
+                reasons.append("强采购机会信号（等级C，按公告跟进）")
+            else:
+                dropped.append((name or "未命名", f"等级低于阈值({tier}<{min_tier})"))
+                continue
         if not matched:
             if allow_broad:
                 reasons.append("泛行业相关（未命中具体规格）")

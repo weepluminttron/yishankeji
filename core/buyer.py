@@ -64,12 +64,34 @@ SUPPLIER_WORDS = ["厂家直供", "厂家直销", "现货供应", "批发价", "
 NOISE_WORDS = ["黄页", "百科", "招聘", "求职", "文库", "下载", "登录", "注册", "论坛", "博客",
                "新闻", "资讯", "峰会", "大会", "展会", "知道", "问答", "教程", "视频", "小说",
                "论文", "期刊", "高校", "大学", "学院", "学术", "学报",
-               "企业库", "名录", "大全", "厂商名录", "公司库", "联系方式大全"]
+               "企业库", "名录", "大全", "厂商名录", "公司库", "联系方式大全",
+               # 页面级噪音：错误页/反爬验证页/招标门户/免费发布平台
+               "错误页面", "404", "access verification", "安全验证", "人机验证",
+               "招标网", "采购网", "千里马", "优云优客", "免费发布"]
 
 # 商业搜索源熔断：配额用完/鉴权失败后暂停该源，避免每个查询都白等几十秒
 _PROVIDER_BLOCKED_UNTIL = {}
 _PROVIDER_BLOCK_SECONDS = 600
 _COMMERCIAL_NAMES = ("SerpAPI", "博查", "Google CSE")
+
+# 商业搜索源并发排队限速：同一接口的并发请求串行化，避免瞬时并发触发 429
+_PROVIDER_GATES = {
+    "SerpAPI": {"lock": threading.Lock(), "last": 0.0, "min_interval": 0.9},
+    "博查": {"lock": threading.Lock(), "last": 0.0, "min_interval": 1.1},
+    "Google CSE": {"lock": threading.Lock(), "last": 0.0, "min_interval": 0.6},
+}
+
+
+def _gate_wait(name):
+    """同一商业搜索源请求间的最小间隔（线程安全，超出的等待直接进入）。"""
+    g = _PROVIDER_GATES.get(name)
+    if not g:
+        return
+    with g["lock"]:
+        wait = g["min_interval"] - (time.time() - g["last"])
+        if wait > 0:
+            time.sleep(wait)
+        g["last"] = time.time()
 
 
 def _provider_blocked(name):
@@ -84,9 +106,12 @@ def _provider_blocked(name):
 
 
 def _mark_provider_blocked(name, err):
-    """配额/鉴权类错误触发熔断（429/401/403/quota/无效等）。"""
+    """配额/鉴权类错误触发熔断；429 属于短期限流只暂停 60 秒，真没额度/鉴权失败才熔断 10 分钟。"""
     text = str(err).lower()
-    if any(k in text for k in ("429", "401", "403", "quota", "too many", "unauthorized",
+    if "429" in text or "too many" in text:
+        _PROVIDER_BLOCKED_UNTIL[name] = time.time() + 60
+        return True
+    if any(k in text for k in ("401", "403", "quota", "unauthorized",
                                "forbidden", "配额", "无效", "鉴权")):
         _PROVIDER_BLOCKED_UNTIL[name] = time.time() + _PROVIDER_BLOCK_SECONDS
         return True
@@ -104,6 +129,8 @@ BLOCKED_DOMAINS = (
     "infoq.cn", "eefocus.com", "elecfans.com", "21ic.com", "zhipin.com", "liepin.com",
     "51job.com", "c114.com.cn",
     "gongchang.com", "11467.com", "ofweek.com", "cnpp.com",
+    # 黄页/免费信息站/招标门户类域名（多为噪音或反爬拦截页）
+    "huangye88.com", "chaomiw.com", "fengj.com", "qianlima.com",
 )
 
 WEBMAILS = {"qq.com", "163.com", "126.com", "gmail.com", "outlook.com", "hotmail.com",
@@ -499,6 +526,7 @@ def search_baidu(query, count=6, settings=None):
 
 def search_serpapi(query, count, api_key, tbs="", settings=None):
     antibot.human_delay(settings, key="search")
+    _gate_wait("SerpAPI")
     url = ("https://serpapi.com/search.json?engine=google&google_domain=google.com.hk"
            "&q=" + urllib.parse.quote(query) + "&num=" + str(count) + "&hl=zh-cn&gl=cn"
            + (("&tbs=" + urllib.parse.quote(tbs)) if tbs else "")
@@ -526,6 +554,7 @@ def search_serpapi(query, count, api_key, tbs="", settings=None):
 
 def search_google_cse(query, count, api_key, engine_id, settings=None):
     antibot.human_delay(settings, key="search")
+    _gate_wait("Google CSE")
     url = ("https://www.googleapis.com/customsearch/v1?key=" + urllib.parse.quote(api_key)
            + "&cx=" + urllib.parse.quote(engine_id) + "&q=" + urllib.parse.quote(query)
            + "&num=" + str(min(10, count)))
@@ -550,8 +579,9 @@ def search_google_cse(query, count, api_key, engine_id, settings=None):
 
 
 def search_bocha(query, count, api_key, freshness="noLimit", settings=None):
-    """博查 AI 搜索（国内稳定，API Key 格式为 64 位 hex）。"""
+    """博查 AI 搜索（国内稳定，密钥在博查控制台获取）。"""
     antibot.human_delay(settings, key="search")
+    _gate_wait("博查")
     payload = json.dumps({
         "query": query,
         "count": max(3, min(10, count)),
@@ -569,7 +599,13 @@ def search_bocha(query, count, api_key, freshness="noLimit", settings=None):
         headers=headers,
     )
     with urllib.request.urlopen(req, timeout=20) as resp:
-        data = json.loads(resp.read().decode("utf-8", errors="replace"))
+        raw = resp.read()
+        enc = (resp.headers.get("Content-Encoding") or "").lower()
+        if "gzip" in enc:
+            import gzip as _gzip
+            import io as _io
+            raw = _gzip.GzipFile(fileobj=_io.BytesIO(raw)).read()
+        data = json.loads(raw.decode("utf-8", errors="replace"))
     if data.get("code") not in (None, 200, 0):
         raise ValueError(f"博查搜索返回错误：{data.get('message') or data.get('msg') or data}")
     results = []
@@ -998,9 +1034,9 @@ def _score_candidate(cand, page_text):
 
 
 def _to_candidate(contact, title, snippet, keyword, market, page_text, channels=None):
-    email = contact["emails"][0] if contact["emails"] else ""
-    phone = contact["phones"][0] if contact["phones"] else ""
-    name = contact["company"] or _clean_company(title, contact["website"]) or ""
+    email = (contact.get("emails") or [""])[0]
+    phone = (contact.get("phones") or [""])[0]
+    name = contact.get("company") or _clean_company(title, contact.get("website") or "") or ""
     if not name or name.lower() in ("undefined", "none", "null"):
         name = "未命名"
     cand = {
@@ -1012,9 +1048,9 @@ def _to_candidate(contact, title, snippet, keyword, market, page_text, channels=
         "type": "终端客户",
         "source": "买家发现",
         "tags": keyword,
-        "website": contact["website"],
-        "whatsapp": ",".join(contact["whatsapp"][:3]),
-        "wechat": ",".join(contact["wechat"][:3]),
+        "website": contact.get("website") or "",
+        "whatsapp": ",".join((contact.get("whatsapp") or [])[:3]),
+        "wechat": ",".join((contact.get("wechat") or [])[:3]),
         "snippet": snippet[:200],
         "note": (title + "。" + snippet)[:300],
         "next_action": "",

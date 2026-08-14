@@ -169,19 +169,25 @@ def _extract_raw(html_text):
 
 
 def merge_contact_sets(sets):
-    """合并多个页面提取结果，统一清洗去重。"""
+    """合并多个页面提取结果，统一清洗去重；保留首份的联系人主体信息（公司名/网址）。"""
     emails, phones, whats, wechats = [], [], [], []
     for s in sets or []:
         emails += list(s.get("emails") or [])
         phones += list(s.get("phones") or [])
         whats += list(s.get("whatsapp") or [])
         wechats += list(s.get("wechat") or [])
-    return {
+    merged = {
         "emails": clean_emails(emails),
         "phones": clean_phones(phones),
         "whatsapp": _uniq(whats)[:6],
         "wechat": _uniq(wechats)[:6],
     }
+    for k in ("company", "website"):
+        for s in sets or []:
+            if s.get(k):
+                merged[k] = s[k]
+                break
+    return merged
 
 
 def _fetch_text(url, settings, smart):

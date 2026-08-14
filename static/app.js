@@ -2713,8 +2713,8 @@ async function renderSettings() {
       if (searchKey && (searchKey.length > 100 || /[\u4e00-\u9fff]/.test(searchKey) || /\s/.test(searchKey))) {
         throw new Error("搜索 API 密钥格式不正确：只填密钥本身，不要粘贴说明文字或带空格");
       }
-      if ((searchProv === "serpapi" || searchProv === "bocha") && searchKey && !/^[a-fA-F0-9]{64}$/.test(searchKey)) {
-        throw new Error("SerpAPI/博查密钥应为 64 位十六进制字符，请检查是否粘贴了其它内容");
+      if (searchProv === "serpapi" && searchKey && !/^[a-fA-F0-9]{64}$/.test(searchKey)) {
+        throw new Error("SerpAPI 密钥应为 64 位十六进制字符，请检查是否粘贴了其它内容");
       }
       await api("/api/settings", { method: "POST", body: { settings: {
         company_name: $("#s-company").value.trim(),
