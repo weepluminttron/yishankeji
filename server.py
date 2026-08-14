@@ -24,7 +24,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from core import ai, buyer, company_api, company_intel, crawler, db, followup, importer, llm_cache, mailer, mapsearch, notify, scorer
+from core import ai, buyer, company_api, company_intel, crawler, db, followup, importer, llm_cache, mailer, mapsearch, notify, public_company, scorer
 from core import intent as intent_mod, analytics as analytics_mod, automation as automation_mod, log_helper, acquisition
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -707,20 +707,30 @@ def _company_note_text(info):
         ("地址", info.get("address", "")),
         ("联系电话", info.get("phone", "")),
         ("邮箱", info.get("email", "")),
+        ("标签", "、".join(info.get("tags") or [])),
+        ("公开来源", "；".join(f"{s.get('type', '')}｜{s.get('title', '')} {s.get('url', '')}" for s in (info.get("sources") or [])[:8])),
     ]
     return "\n".join(f"{k}：{v}" for k, v in rows if v)
 
 
 def _company_worker(task_id, keyword, lead_id, provider):
-    """后台线程：企查查 / 天眼查 工商信息查询。"""
+    """后台线程：工商信息查询（官方 API 优先，失败自动降级为公开信息聚合）。"""
     task_start(task_id, f"工商信息查询：{str(keyword)[:20]}")
     task_progress(task_id, stage="正在查询工商信息")
     try:
         settings = db.get_settings()
-        info = company_api.query_company(settings, keyword, provider=provider or "auto")
+        lead0 = db.get_lead(lead_id) if lead_id else None
+        try:
+            info = company_api.query_company(settings, keyword, provider=provider or "auto")
+        except Exception as api_err:
+            task_progress(task_id, stage="官方API不可用，改用公开信息聚合（政府公示/招投标/官网）")
+            profile = public_company.discover(keyword, region=(lead0 or {}).get("region", "") or "", settings=settings)
+            if not profile.get("sources"):
+                raise ValueError("工商API：" + str(api_err) + "；公开信息聚合也未找到该公司的公开页面")
+            info = public_company.to_company_info(profile)
         _tasks[task_id]["result"] = info
         if lead_id:
-            lead = db.get_lead(lead_id)
+            lead = lead0 or db.get_lead(lead_id)
             if not lead:
                 task_finish(task_id, "失败", "线索不存在")
                 return

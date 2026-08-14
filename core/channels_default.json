@@ -372,41 +372,43 @@
     },
     {
       "id": "zhaopin",
-      "name": "???????/????????",
-      "category": "procurement",
+      "name": "招聘网（扩张信号）",
+      "category": "company_db",
       "provider": "bing",
       "site_scope": "zhipin.com,liepin.com,51job.com",
-      "query_template": "{kw} ?? ?? {site}",
+      "query_template": "{kw} 招聘 {site}",
       "enabled_default": true,
       "requires_key": "",
       "rate_limit": 0.3,
       "freshness": "",
       "access_params": {
-        "??": "??????????????????????????",
-        "endpoint": "???? site: ??"
+        "说明": "招聘网站公开岗位，识别企业扩张/招人信号（有预算、在扩张）。只用搜索结果摘要，不抓登录后页面。",
+        "endpoint": "搜索引擎 site: 限定",
+        "限制": "招聘平台有反爬，仅用公开摘要；命中标签'招聘扩张'。"
       },
-      "keyword_config": "???? ??/??/??? ?????????"
+      "keyword_config": "关键词 {kw}=公司名/品类，自动补'招聘'，site 限定招聘域名。"
     },
     {
       "id": "cninfo",
-      "name": "??????/??",
+      "name": "巨潮资讯（上市公司公告）",
       "category": "company_db",
       "provider": "bing",
       "site_scope": "cninfo.com.cn",
-      "query_template": "{kw} ?? ?? ?? {site}",
+      "query_template": "{kw} 公告 中标 采购 {site}",
       "enabled_default": true,
       "requires_key": "",
       "rate_limit": 0.3,
       "freshness": "month",
       "access_params": {
-        "??": "????????????/???????",
-        "endpoint": "???? site: ??"
+        "说明": "上市公司公告/中标/采购披露（巨潮资讯网），识别大额采购与扩产信号。",
+        "endpoint": "搜索引擎 site: 限定",
+        "限制": "仅公开公告摘要；命中标签'上市公司'。"
       },
-      "keyword_config": "???? ??/??/??/????"
+      "keyword_config": "关键词 {kw} + 公告/中标/采购；site 限定 cninfo.com.cn。"
     },
     {
       "id": "prnews",
-      "name": "???/PR?????????",
+      "name": "新闻/PR（扩张信号）",
       "category": "industry_site",
       "provider": "bing",
       "site_scope": "prnewswire.com,businesswire.com,globenewswire.com",
@@ -416,14 +418,15 @@
       "rate_limit": 0.3,
       "freshness": "month",
       "access_params": {
-        "??": "??????????????",
-        "endpoint": "???? site: ??"
+        "说明": "海外新闻稿/PR 通稿，识别企业扩产、采购、建厂等动态。",
+        "endpoint": "搜索引擎 site: 限定",
+        "限制": "命中标签'扩张/采购动态'。"
       },
-      "keyword_config": "???? ??/??/???/???/expansion/procurement?"
+      "keyword_config": "关键词 {kw} + 意图词（expansion/procurement/factory）。"
     },
     {
       "id": "eu_gov",
-      "name": "?????TED?",
+      "name": "欧盟招标（TED）",
       "category": "procurement",
       "provider": "bing",
       "site_scope": "ted.europa.eu",
@@ -433,14 +436,15 @@
       "rate_limit": 0.3,
       "freshness": "month",
       "access_params": {
-        "??": "????????????",
-        "endpoint": "???? site: ??"
+        "说明": "欧盟官方招标公告（TED），强采购意向。",
+        "endpoint": "搜索引擎 site: 限定",
+        "限制": "命中标签'正在招标'；适合海外市场。"
       },
-      "keyword_config": "???? tender/procurement/rfq?"
+      "keyword_config": "关键词 {kw} + tender/procurement/rfq。"
     },
     {
       "id": "us_gov",
-      "name": "???????SAM?",
+      "name": "美国政府采购（SAM.gov）",
       "category": "procurement",
       "provider": "bing",
       "site_scope": "sam.gov",
@@ -450,10 +454,11 @@
       "rate_limit": 0.3,
       "freshness": "month",
       "access_params": {
-        "??": "??????????",
-        "endpoint": "???? site: ??"
+        "说明": "美国联邦政府采购机会（SAM.gov），强采购意向。",
+        "endpoint": "搜索引擎 site: 限定",
+        "限制": "命中标签'正在招标'。"
       },
-      "keyword_config": "???? tender/opportunity/contract?"
+      "keyword_config": "关键词 {kw} + tender/opportunity/contract。"
     }
   ]
 }

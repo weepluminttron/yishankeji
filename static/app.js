@@ -939,6 +939,8 @@ function showCompanyInfo(info) {
     ["来源", info.source], ["公司名称", info.company], ["统一社会信用代码", info.credit_code],
     ["法定代表人", info.legal_person], ["注册资本", info.reg_capital], ["成立时间", info.estiblish_time],
     ["经营状态", info.reg_status], ["地址", info.address], ["联系电话", info.phone], ["邮箱", info.email],
+    ...(info.tags && info.tags.length ? [["标签", info.tags.join("、")]] : []),
+    ...(info.sources && info.sources.length ? [["公开来源", info.sources.slice(0, 8).map((s) => `${s.type}｜${s.title || s.url}`).join("\n")]] : []),
   ].filter(([, v]) => v);
   openModal(`
     <div class="modal-head"><h2>🏢 工商信息（${esc(info.source || "")}）</h2><button class="close-x" onclick="closeModal()">×</button></div>
@@ -2589,7 +2591,7 @@ async function renderSettings() {
         <div class="field"><label>企查查 SecretKey</label><input class="input full" type="password" id="s-qcc-secret" placeholder="openapi.qcc.com 申请的 SecretKey" value="${esc(s.qcc_secret_key)}"></div>
         <div class="field" style="grid-column:1/-1"><label>天眼查 Token</label><input class="input full" type="password" id="s-tyc-token" placeholder="open.tianyancha.com 申请的 Token" value="${esc(s.tyc_token)}"></div>
       </div>
-      <div class="hint">至少配置一家（推荐两家都配）：客户详情页点“🏢 查工商”会优先用已配置的一家，失败自动切换另一家。申请地址：企查查开放平台 openapi.qcc.com、天眼查开放平台 open.tianyancha.com。密钥只保存在你自己的服务器。</div>
+      <div class="hint">至少配置一家（推荐两家都配）：客户详情页点“🏢 查工商”会优先用已配置的一家，失败自动切换另一家。申请地址：企查查开放平台 openapi.qcc.com、天眼查开放平台 open.tianyancha.com。密钥只保存在你自己的服务器。未配置密钥或接口失败时，会自动改用公开信息聚合（政府公示/招投标/官网/招聘），无需密钥也能看到公开线索。</div>
     </div>
     <div class="card">
       <h3>📱 短信服务商备注</h3>

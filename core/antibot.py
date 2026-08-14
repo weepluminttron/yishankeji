@@ -200,27 +200,31 @@ class ProxyPool:
             }
 
 
-# 进程内单例代理池（多线程共享）
-_pool_singleton = None
+# 进程内代理池缓存（按代理配置分别缓存，不同配置可同时并存、互不污染）
+_pool_cache = {}
 _pool_lock = threading.Lock()
 
 
+def _proxy_key(settings):
+    s = settings or {}
+    return str(s.get("proxy_pool") or s.get("proxy_url") or "")
+
+
 def get_proxy_pool(settings=None):
-    """获取进程内单例代理池（首次调用时初始化）。"""
-    global _pool_singleton
-    if _pool_singleton is None:
-        with _pool_lock:
-            if _pool_singleton is None:
-                _pool_singleton = ProxyPool(settings)
-    return _pool_singleton
+    """获取进程内代理池（按代理配置缓存；空配置=直连池，与代理池互不影响）。"""
+    key = _proxy_key(settings)
+    with _pool_lock:
+        if key not in _pool_cache:
+            _pool_cache[key] = ProxyPool(settings)
+        return _pool_cache[key]
 
 
 def reset_proxy_pool(settings=None):
     """重置代理池（配置变更后重新加载）。"""
-    global _pool_singleton
+    key = _proxy_key(settings)
     with _pool_lock:
-        _pool_singleton = ProxyPool(settings)
-    return _pool_singleton
+        _pool_cache[key] = ProxyPool(settings)
+    return _pool_cache[key]
 
 
 # ----------------------------------------------------------------------------

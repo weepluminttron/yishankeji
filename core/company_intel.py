@@ -9,7 +9,7 @@
 import re
 import urllib.parse
 
-from core import ai, crawler
+from core import ai, crawler, public_company
 
 
 def _fetch_context(company, region="", settings=None):
@@ -44,6 +44,14 @@ def brief(company, settings, region=""):
     product = settings.get("product_name", "") or "我们的产品"
 
     ctx, ctx_err = _fetch_context(company, region, settings=settings)
+    if not ctx:
+        # 联网搜索不可用时，改用多源公开信息聚合（政府公示/招投标/官网/招聘）
+        try:
+            profile = public_company.discover(company, region, settings=settings)
+            if profile.get("sources"):
+                ctx = public_company.summary_text(profile)
+        except Exception:
+            pass
     inferred = not ctx
     ctx_block = (
         f"【联网获取的公司相关信息】\n{ctx}\n" if ctx
