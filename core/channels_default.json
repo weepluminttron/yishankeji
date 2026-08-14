@@ -65,6 +65,24 @@
       "keyword_config": "同 Bing。"
     },
     {
+      "id": "toutiao",
+      "name": "头条搜索",
+      "category": "search_engine",
+      "provider": "toutiao",
+      "site_scope": "",
+      "query_template": "{kw} {intent} {market}",
+      "enabled_default": true,
+      "requires_key": "",
+      "rate_limit": 0.3,
+      "freshness": "",
+      "access_params": {
+        "说明": "国内免费源，无需密钥。对“采购/中标/订单/招标”类商机信息命中质量高，且不易被限流。",
+        "endpoint": "https://so.toutiao.com/search",
+        "限制": "偏新闻/资讯聚合，采购公告类结果需结合意图过滤。"
+      },
+      "keyword_config": "同 Bing；配合 招标/采购/中标 意图词效果最佳。"
+    },
+    {
       "id": "baidu",
       "name": "百度搜索",
       "category": "search_engine",

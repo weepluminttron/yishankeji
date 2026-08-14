@@ -340,9 +340,9 @@ def search_channel(channel, query, count, settings, use_cache=True):
         return _search_map(channel, query, eff)
     # provider 名 → buyer.search_web 认识的搜索源（bing→bing_free、so→so_free）
     _PROV_TO_WEB = {"bing": "bing_free", "so": "so_free", "sogou": "sogou", "baidu": "baidu_free",
-                    "serpapi": "serpapi", "google_cse": "google_cse", "bocha": "bocha"}
+                    "serpapi": "serpapi", "google_cse": "google_cse", "bocha": "bocha",
+                    "toutiao": "toutiao"}
     prov = _PROV_TO_WEB.get(prov, "bing_free" if prov not in _WEB_PROVIDERS else prov)
-    eff["search_provider"] = prov
     # 合并 site 限定：渠道自带 + 全局 site_scope
     scopes = []
     if channel.get("site_scope"):
@@ -352,9 +352,28 @@ def search_channel(channel, query, count, settings, use_cache=True):
     eff["search_site_filter"] = ",".join(scopes)
     if channel.get("freshness"):
         eff["search_freshness"] = channel["freshness"]
+
+    # 已配置商业搜索 API（SerpAPI/博查/Google CSE）时沿用全局 provider：
+    # search_web 内部会自动“商业源 → 免费源 → 直连兜底”。
+    # 否则 reddit/x/linkedin/facebook 等海外渠道被强制覆盖成免费源后必然搜不到。
+    if not _commercial_provider(eff):
+        eff["search_provider"] = prov
     if use_cache:
         return buyer.search_web_cached(query, count, eff)
     return buyer.search_web(query, count, eff)
+
+
+def _commercial_provider(settings):
+    """settings 中已配置且可用的商业搜索 API 名；无则返回空串。"""
+    sp = settings.get("search_provider")
+    key = settings.get("search_api_key") or ""
+    if sp == "serpapi" and key:
+        return "serpapi"
+    if sp == "bocha" and key:
+        return "bocha"
+    if sp == "google_cse" and key and settings.get("search_engine_id"):
+        return "google_cse"
+    return ""
 
 
 def _search_map(channel, query, settings):

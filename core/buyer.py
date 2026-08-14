@@ -62,6 +62,32 @@ NOISE_WORDS = ["黄页", "百科", "招聘", "求职", "文库", "下载", "登�
                "论文", "期刊", "高校", "大学", "学院", "学术", "学报",
                "企业库", "名录", "大全", "厂商名录", "公司库", "联系方式大全"]
 
+# 商业搜索源熔断：配额用完/鉴权失败后暂停该源，避免每个查询都白等几十秒
+_PROVIDER_BLOCKED_UNTIL = {}
+_PROVIDER_BLOCK_SECONDS = 600
+_COMMERCIAL_NAMES = ("SerpAPI", "博查", "Google CSE")
+
+
+def _provider_blocked(name):
+    """商业搜索源是否处于熔断窗口内。"""
+    until = _PROVIDER_BLOCKED_UNTIL.get(name)
+    if not until:
+        return False
+    if time.time() < until:
+        return True
+    _PROVIDER_BLOCKED_UNTIL.pop(name, None)
+    return False
+
+
+def _mark_provider_blocked(name, err):
+    """配额/鉴权类错误触发熔断（429/401/403/quota/无效等）。"""
+    text = str(err).lower()
+    if any(k in text for k in ("429", "401", "403", "quota", "too many", "unauthorized",
+                               "forbidden", "配额", "无效", "鉴权")):
+        _PROVIDER_BLOCKED_UNTIL[name] = time.time() + _PROVIDER_BLOCK_SECONDS
+        return True
+    return False
+
 BLOCKED_DOMAINS = (
     "alibaba.com", "made-in-china.com", "1688.com", "taobao.com", "tmall.com", "jd.com",
     "baidu.com", "zhihu.com", "xiaohongshu.com", "douyin.com", "bilibili.com",
@@ -274,20 +300,6 @@ def search_bing(query, count=5, qdr="", settings=None):
             results.append({"title": title, "url": href, "snippet": snippet})
         if results:
             return results
-        # 兜底：抓取通用标题链接
-        fallback = []
-        seen = set()
-        for a in doc.xpath("//h2/a | //h3/a | //li//a[@href]")[:count * 2]:
-            href = (a.get("href") or "").strip()
-            title = _clean_text(a.text_content())
-            if not title or len(title) < 4 or not href.startswith("http") or href in seen:
-                continue
-            seen.add(href)
-            fallback.append({"title": title, "url": href, "snippet": ""})
-            if len(fallback) >= count:
-                break
-        if fallback:
-            return fallback
     raise ValueError("Bing 检测到反爬拦截，已触发重试/降级")
 
 
@@ -451,7 +463,16 @@ def search_serpapi(query, count, api_key, tbs="", settings=None):
            "&q=" + urllib.parse.quote(query) + "&num=" + str(count) + "&hl=zh-cn&gl=cn"
            + (("&tbs=" + urllib.parse.quote(tbs)) if tbs else "")
            + "&api_key=" + urllib.parse.quote(api_key))
-    html_text, _ = fetch_page(url, timeout=20, settings=settings)
+    try:
+        # API 返回 JSON，不走 Jina（Jina 只会浪费 12s 超时）
+        html_text, _ = fetch_page(url, timeout=20, use_jina=False, settings=settings)
+    except urllib.error.HTTPError as e:
+        if e.code == 429:
+            raise ValueError("SerpAPI 配额已用完（429 Too Many Requests），已自动暂停该源 10 分钟；"
+                             "请到“设置 → 搜索接口”充值或更换 Key")
+        if e.code in (401, 403):
+            raise ValueError("SerpAPI 鉴权失败（HTTP %d），请检查 search_api_key 是否正确" % e.code)
+        raise
     data = json.loads(html_text)
     results = []
     for item in (data.get("organic_results") or [])[:count]:
@@ -468,7 +489,15 @@ def search_google_cse(query, count, api_key, engine_id, settings=None):
     url = ("https://www.googleapis.com/customsearch/v1?key=" + urllib.parse.quote(api_key)
            + "&cx=" + urllib.parse.quote(engine_id) + "&q=" + urllib.parse.quote(query)
            + "&num=" + str(min(10, count)))
-    html_text, _ = fetch_page(url, timeout=20, settings=settings)
+    try:
+        html_text, _ = fetch_page(url, timeout=20, use_jina=False, settings=settings)
+    except urllib.error.HTTPError as e:
+        if e.code == 429:
+            raise ValueError("Google CSE 配额已用完（429），已自动暂停该源 10 分钟；"
+                             "请到“设置 → 搜索接口”查看配额")
+        if e.code in (401, 403):
+            raise ValueError("Google CSE 鉴权失败（HTTP %d），请检查 Key/引擎 ID" % e.code)
+        raise
     data = json.loads(html_text)
     results = []
     for item in (data.get("items") or [])[:count]:
@@ -513,6 +542,53 @@ def search_bocha(query, count, api_key, freshness="noLimit", settings=None):
     return results
 
 
+def _js_unescape(s):
+    """反转义 JSON 字符串里的 \\u003c 等转义（头条结果内嵌 JSON 常见）。"""
+    if not s:
+        return ""
+    try:
+        return json.loads('"' + s.replace('"', '\\"') + '"')
+    except Exception:
+        return s.replace("\\u003c", "<").replace("\\u003e", ">").replace("\\/", "/")
+
+
+def search_toutiao(query, count=6, settings=None):
+    """头条搜索（国内免费源，命中“采购/中标/订单”类商机信息质量高）。"""
+    antibot.human_delay(settings, key="search")
+    url = ("https://so.toutiao.com/search?dvpf=pc&source=input&keyword="
+           + urllib.parse.quote(query) + "&pd=synthesis")
+    html_text, _ = fetch_page(url, timeout=12, use_jina=False, settings=settings)
+    if "emphasized" not in html_text and '"title"' not in html_text:
+        raise ValueError("头条搜索无有效结果（可能被风控）")
+    items = []
+    seen = set()
+    # 每个 emphasized.title 即一条结果：标题在前，source_url 在它前面的同一 JSON 对象里
+    for mt in re.finditer(r'"emphasized"\s*:\s*\{[^{}]*"title"\s*:\s*"((?:[^"\\]|\\.)*)"', html_text):
+        title = _js_unescape(mt.group(1)).strip()
+        seg = html_text[max(0, mt.start() - 5000):mt.end()]
+        url = ""
+        for pat in (r'"source_url"\s*:\s*"(https?://[^"]+)"',
+                    r'"share_url"\s*:\s*"(https?://[^"]+)"',
+                    r'"media_url"\s*:\s*"(https?://[^"]+)"'):
+            mu = re.findall(pat, seg)
+            if mu:
+                url = _js_unescape(mu[-1])
+                break
+        snippet = ""
+        ms = re.search(r'"summary"\s*:\s*"((?:[^"\\]|\\.)*)"', html_text[mt.start():mt.end() + 3000])
+        if ms:
+            snippet = _js_unescape(ms.group(1)).strip()
+        if not title or not url.startswith("http") or url in seen:
+            continue
+        seen.add(url)
+        items.append({"title": title, "url": url, "snippet": snippet[:300]})
+        if len(items) >= count:
+            break
+    if not items:
+        raise ValueError("头条搜索无有效结果（页面结构变化或风控）")
+    return items
+
+
 def _is_canned(results):
     """判断搜索源是否返回了反爬“罐头结果”（全是百科/知乎/内容站）。"""
     if not results:
@@ -523,6 +599,50 @@ def _is_canned(results):
         if any(d == j or d.endswith("." + j) for j in JUNK_DOMAINS):
             junk += 1
     return junk >= max(1, int(len(results) * 0.6))
+
+
+def _site_scopes(query):
+    """提取查询里的 site: 限定域名列表。"""
+    return [m.lower() for m in re.findall(r"site:([\w.\-]+)", query or "")]
+
+
+def _matches_site_scope(query, results):
+    """site: 限定查询必须返回限定站点结果，否则视为反爬/无结果（Bing 国内版常见）。"""
+    scopes = _site_scopes(query)
+    if not scopes or not results:
+        return True
+    hit = 0
+    for r in results:
+        u = (r.get("url") or "").lower()
+        if any(d in u for d in scopes):
+            hit += 1
+    return hit >= max(1, len(results) // 2)
+
+
+def _query_tokens(query):
+    """提取查询里的有效关键词（去掉 site: 限定；中文 2 字起、英文 3 字符起）。"""
+    q = re.sub(r"site:[\w.\-]+", " ", query or "").lower()
+    toks = set()
+    for t in re.findall(r"[\w\u4e00-\u9fff]+", q):
+        if re.search(r"[\u4e00-\u9fff]", t):
+            if len(t) >= 2:
+                toks.add(t)
+        elif len(t) >= 3:
+            toks.add(t)
+    return toks
+
+
+def _results_relevant(query, results):
+    """结果里必须至少有一半命中查询关键词；否则判定为通用/无关结果（Bing 常见）。"""
+    toks = _query_tokens(query)
+    if not toks or not results:
+        return True
+    hit = 0
+    for r in results:
+        text = ("%s %s %s" % (r.get("title") or "", r.get("snippet") or "", r.get("url") or "")).lower()
+        if any(t in text for t in toks):
+            hit += 1
+    return hit >= max(1, int(len(results) * 0.5))
 
 
 def _apply_search_filters(query, settings):
@@ -562,7 +682,7 @@ def search_web(query, count, settings=None):
     chain = []
 
     def _try_free():
-        """360 → 搜狗 → 百度 免费源链。"""
+        """360 → 搜狗 → 头条 → 百度 免费源链。"""
         errs = []
         try:
             results = search_so(query, count, settings=settings)
@@ -581,6 +701,14 @@ def search_web(query, count, settings=None):
             errs.append(f"搜狗：{e}")
         try:
             time.sleep(1)
+            results = search_toutiao(query, count, settings=settings)
+            if results:
+                return results
+            errs.append("头条无结果")
+        except Exception as e:
+            errs.append(f"头条：{e}")
+        try:
+            time.sleep(1)
             results = search_baidu(query, count, settings=settings)
             if results:
                 return results
@@ -597,6 +725,7 @@ def search_web(query, count, settings=None):
         errs = []
         for name, fn in (
             ("搜狗直连", lambda: search_sogou(query, count, settings=ds)),
+            ("头条直连", lambda: search_toutiao(query, count, settings=ds)),
             ("百度直连", lambda: search_baidu(query, count, settings=ds)),
             ("Bing直连", lambda: search_bing(query, count, fp["qdr"], settings=ds)),
         ):
@@ -608,20 +737,28 @@ def search_web(query, count, settings=None):
                 if name == "Bing直连" and _is_canned(results):
                     errs.append("Bing直连被反爬（只返回通用结果）")
                     continue
+                if not _matches_site_scope(query, results):
+                    errs.append(name + " 未返回 site: 限定站点结果")
+                    continue
+                if not _results_relevant(query, results):
+                    errs.append(name + " 返回与查询无关的通用结果")
+                    continue
                 return results
             except Exception as e:
                 errs.append(name + "：" + str(e)[:100])
         raise ValueError("直连重试也失败（" + "；".join(errs) + "）")
 
     sources = []
-    if provider == "serpapi" and key:
+    if provider == "serpapi" and key and not _provider_blocked("SerpAPI"):
         sources.append(("SerpAPI", lambda: search_serpapi(query, count, key, fp["tbs"], settings=settings)))
-    if provider == "google_cse" and key and engine_id:
+    if provider == "google_cse" and key and engine_id and not _provider_blocked("Google CSE"):
         sources.append(("Google CSE", lambda: search_google_cse(query, count, key, engine_id, settings=settings)))
-    if provider == "bocha" and key:
+    if provider == "bocha" and key and not _provider_blocked("博查"):
         sources.append(("博查", lambda: search_bocha(query, count, key, fp["bocha"], settings=settings)))
+    if provider == "toutiao":
+        sources.append(("头条", lambda: search_toutiao(query, count, settings=settings)))
     if provider == "so_free":
-        sources.append(("360/搜狗/百度", _try_free))
+        sources.append(("360/搜狗/头条/百度", _try_free))
     elif provider == "baidu_free":
         sources.append(("百度", lambda: search_baidu(query, count, settings=settings)))
     else:
@@ -629,12 +766,12 @@ def search_web(query, count, settings=None):
 
     # 主源失败后的兜底：免费源（避免 SerpAPI 429/配额耗尽时一个都搜不到）
     if provider not in ("so_free", "baidu_free"):
-        if not any(n == "360/搜狗/百度" for n, _ in sources):
-            sources.append(("360/搜狗/百度", _try_free))
+        if not any(n == "360/搜狗/头条/百度" for n, _ in sources):
+            sources.append(("360/搜狗/头条/百度", _try_free))
         sources.append(("Bing", lambda: search_bing(query, count, fp["qdr"], settings=settings)))
     elif provider == "baidu_free":
-        if not any(n == "360/搜狗/百度" for n, _ in sources):
-            sources.append(("360/搜狗/百度", _try_free))
+        if not any(n == "360/搜狗/头条/百度" for n, _ in sources):
+            sources.append(("360/搜狗/头条/百度", _try_free))
         sources.append(("Bing", lambda: search_bing(query, count, fp["qdr"], settings=settings)))
 
     # 最后一道兜底：代理被限流时用服务器直连重试一次
@@ -650,13 +787,25 @@ def search_web(query, count, settings=None):
             if name == "Bing" and _is_canned(results):
                 chain.append("Bing 被反爬（只返回通用结果）")
                 continue
+            if not _matches_site_scope(query, results):
+                chain.append(f"{name} 未返回 site: 限定站点结果")
+                continue
+            if not _results_relevant(query, results):
+                chain.append(f"{name} 返回与查询无关的通用结果")
+                continue
             return results
         except Exception as e:
             chain.append(f"{name}：{str(e)[:120]}")
-    raise ValueError(
-        "所有搜索源均不可用（" + "；".join(chain) + "）。"
-        "建议到“设置 → 搜索接口”更换或补充分配额（SerpAPI/博查）后重试"
-    )
+            if name in _COMMERCIAL_NAMES and _mark_provider_blocked(name, e):
+                chain.append(f"{name} 已熔断 10 分钟（配额/鉴权失败）")
+    hint = ""
+    if _site_scopes(query):
+        hint = (" 当前查询带 site: 限定；国内免费源通常不索引海外站"
+                "（reddit/x/linkedin/facebook 等），请在“设置 → 搜索接口”"
+                "配置可用配额的 SerpAPI/博查，或给服务器配置海外出口代理后重试")
+    else:
+        hint = "建议到“设置 → 搜索接口”更换或补充分配额（SerpAPI/博查）后重试"
+    raise ValueError("所有搜索源均不可用（" + "；".join(chain) + "）。" + hint)
 
 
 def search_web_cached(query, count, settings):
