@@ -10,8 +10,16 @@
 - 单页失败不拖垮整批，逐条返回 success/error。
 """
 import asyncio
+import os
 import random
 import re
+
+# Playwright 浏览器目录：优先使用服务器上已安装的 /ms-playwright（避免去用户目录找空目录）
+if not os.environ.get("PLAYWRIGHT_BROWSERS_PATH"):
+    for _pw_dir in ("/ms-playwright", "/data/yishankeji/.cache/ms-playwright"):
+        if os.path.isdir(_pw_dir):
+            os.environ["PLAYWRIGHT_BROWSERS_PATH"] = _pw_dir
+            break
 
 EMAIL_RE = re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[A-Za-z]{2,}")
 PHONE_CN_RE = re.compile(r"(?<!\d)(?:0\d{2,3}-?)?\d{7,8}(?!\d)")
