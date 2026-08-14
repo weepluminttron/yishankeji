@@ -589,6 +589,30 @@ def search_web(query, count, settings=None):
             errs.append(f"百度：{e}")
         raise ValueError("免费搜索源不可用（" + "；".join(errs) + "）")
 
+    def _try_direct():
+        """代理被限流/风控时，清空代理用服务器直连重试（直连对搜狗通常可用）。"""
+        ds = dict(settings)
+        ds["proxy_pool"] = ""
+        ds["proxy_url"] = ""
+        errs = []
+        for name, fn in (
+            ("搜狗直连", lambda: search_sogou(query, count, settings=ds)),
+            ("百度直连", lambda: search_baidu(query, count, settings=ds)),
+            ("Bing直连", lambda: search_bing(query, count, fp["qdr"], settings=ds)),
+        ):
+            try:
+                results = fn()
+                if not results:
+                    errs.append(name + " 无结果")
+                    continue
+                if name == "Bing直连" and _is_canned(results):
+                    errs.append("Bing直连被反爬（只返回通用结果）")
+                    continue
+                return results
+            except Exception as e:
+                errs.append(name + "：" + str(e)[:100])
+        raise ValueError("直连重试也失败（" + "；".join(errs) + "）")
+
     sources = []
     if provider == "serpapi" and key:
         sources.append(("SerpAPI", lambda: search_serpapi(query, count, key, fp["tbs"], settings=settings)))
@@ -612,6 +636,10 @@ def search_web(query, count, settings=None):
         if not any(n == "360/搜狗/百度" for n, _ in sources):
             sources.append(("360/搜狗/百度", _try_free))
         sources.append(("Bing", lambda: search_bing(query, count, fp["qdr"], settings=settings)))
+
+    # 最后一道兜底：代理被限流时用服务器直连重试一次
+    if settings.get("proxy_pool") or settings.get("proxy_url"):
+        sources.append(("直连重试", _try_direct))
 
     for name, fn in sources:
         try:
