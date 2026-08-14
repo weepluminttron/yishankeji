@@ -304,6 +304,36 @@ _cookie_jar = CookieJar()
 _cookie_processor = urllib.request.HTTPCookieProcessor(_cookie_jar)
 _opener = urllib.request.build_opener(_cookie_processor)
 
+# 带认证代理的手动请求路径不经过 urllib CookieProcessor，这里单独按域名保存 Cookie
+_proxy_cookie_jar = {}
+_proxy_cookie_lock = threading.Lock()
+
+
+def _merge_cookies(*lists):
+    """按 Cookie 名去重合并多个 Cookie 列表（后者覆盖同名）。"""
+    out, seen = [], set()
+    for lst in lists:
+        for c in lst or []:
+            name = c.split("=", 1)[0]
+            if name and name not in seen:
+                seen.add(name)
+                out.append(c)
+    return out
+
+
+def _host_cookies(host):
+    with _proxy_cookie_lock:
+        return list(_proxy_cookie_jar.get((host or "").lower(), []))
+
+
+def _save_cookies(host, values):
+    if not values:
+        return
+    host = (host or "").lower()
+    with _proxy_cookie_lock:
+        cur = [c for c in _proxy_cookie_jar.get(host, []) if c.split("=", 1)[0] not in {v.split("=", 1)[0] for v in values}]
+        _proxy_cookie_jar[host] = cur + list(values)
+
 
 def _safe_float(v, default):
     """安全解析浮点配置，非法值回退默认，避免一个坏配置让搜索直接崩溃。"""
@@ -354,40 +384,81 @@ class _ProxyResponse:
         return self._r.status
 
 
-def _open_with_proxy(req, proxy_url, timeout):
-    """通过代理发起请求：HTTPS 走显式 CONNECT 隧道（把 Proxy-Authorization 传给代理）。
+def _open_with_proxy(req, proxy_url, timeout, max_redirects=5):
+    """通过代理发起请求（HTTP/HTTPS 都支持，自动跟随跳转并传递代理认证）。
 
-    urllib 的 HTTPS 代理隧道不会转发手动添加的 Proxy-Authorization 头（已知限制），
-    这里用 http.client.set_tunnel(headers=...) 解决带认证代理的 407 问题。
+    HTTPS 走显式 CONNECT 隧道（把 Proxy-Authorization 传给代理），解决
+    urllib 的 HTTPS 代理隧道不转发手动认证头导致的 407；同时手动跟随 3xx
+    跳转，避免跳转后的请求重新走 urllib 丢失认证。
     """
     proxy_clean, proxy_auth = _proxy_parts(proxy_url)
     p = urllib.parse.urlparse(proxy_clean)
     phost = p.hostname
     pport = p.port or 80
-    target = urllib.parse.urlparse(req.full_url)
-    thost = target.hostname
-    tport = target.port or (443 if target.scheme == "https" else 80)
-    if target.scheme != "https":
-        return None  # HTTP 走 urllib（非隧道，手动头即可）
-    conn = http.client.HTTPSConnection(phost, pport, timeout=timeout)
-    try:
-        tunnel = {"Proxy-Authorization": proxy_auth} if proxy_auth else {}
-        conn.set_tunnel(thost, tport, headers=tunnel)
+    current = req
+    local_cookies = []
+    for _ in range(max_redirects + 1):
+        target = urllib.parse.urlparse(current.full_url)
+        thost = target.hostname
+        tport = target.port or (443 if target.scheme == "https" else 80)
         path = target.path or "/"
         if target.query:
             path += "?" + target.query
-        headers = {k: v for k, v in req.headers.items() if k.lower() != "proxy-authorization"}
-        conn.request(req.get_method(), path, body=req.data, headers=headers)
-        resp = conn.getresponse()
-        if resp.status in (407, 403, 429, 502, 503):
-            raise urllib.error.HTTPError(
-                req.full_url, resp.status, http.client.responses.get(resp.status, "error"),
-                resp.headers, None,
-            )
-        return _ProxyResponse(resp, req.full_url)
-    except Exception:
-        conn.close()
-        raise
+        headers = {k: v for k, v in current.headers.items() if k.lower() != "proxy-authorization"}
+        headers.pop("Host", None)
+        merged_cookies = _merge_cookies(local_cookies, _host_cookies(thost))
+        if merged_cookies:
+            headers["Cookie"] = "; ".join(merged_cookies)
+        conn = None
+        try:
+            if target.scheme == "https":
+                conn = http.client.HTTPSConnection(phost, pport, timeout=timeout)
+                tunnel = {"Proxy-Authorization": proxy_auth} if proxy_auth else {}
+                conn.set_tunnel(thost, tport, headers=tunnel)
+                conn.request(current.get_method(), path, body=current.data, headers=headers)
+            else:
+                conn = http.client.HTTPConnection(phost, pport, timeout=timeout)
+                req_headers = dict(headers)
+                if proxy_auth:
+                    req_headers["Proxy-Authorization"] = proxy_auth
+                conn.request(current.get_method(), current.full_url, body=current.data, headers=req_headers)
+            resp = conn.getresponse()
+            if hasattr(resp, "getheaders"):
+                for k, v in resp.getheaders():
+                    if k.lower() == "set-cookie":
+                        piece = v.split(";", 1)[0]
+                        _save_cookies(thost, [piece])
+                        local_cookies = _merge_cookies(local_cookies, [piece])
+            if resp.status in (301, 302, 303, 307, 308):
+                loc = resp.getheader("Location")
+                conn.close()
+                conn = None
+                if not loc:
+                    raise urllib.error.HTTPError(
+                        current.full_url, resp.status, "redirect without location", resp.headers, None)
+                new_url = urllib.parse.urljoin(current.full_url, loc)
+                new_method = current.get_method()
+                if resp.status in (302, 303) and new_method != "GET":
+                    new_method = "GET"
+                new_headers = dict(headers)
+                next_host = urllib.parse.urlparse(new_url).hostname
+                next_cookies = _merge_cookies(local_cookies, _host_cookies(next_host))
+                if next_cookies:
+                    new_headers["Cookie"] = "; ".join(next_cookies)
+                current = urllib.request.Request(
+                    new_url, data=None if new_method == "GET" else current.data,
+                    headers=new_headers, method=new_method)
+                continue
+            if resp.status in (407, 403, 429, 502, 503):
+                raise urllib.error.HTTPError(
+                    current.full_url, resp.status, http.client.responses.get(resp.status, "error"),
+                    resp.headers, None)
+            return _ProxyResponse(resp, current.full_url)
+        except Exception:
+            if conn is not None:
+                conn.close()
+            raise
+    raise urllib.error.URLError("proxy redirect loop")
 
 
 def request_with_antibot(url, settings=None, timeout=15, method="GET", data=None,
@@ -428,8 +499,8 @@ def request_with_antibot(url, settings=None, timeout=15, method="GET", data=None
             if used_proxy:
                 # 带代理的请求：每次新建 opener（代理可能不同）
                 proxy_clean, proxy_auth = _proxy_parts(used_proxy)
-                if proxy_auth and urllib.parse.urlparse(url).scheme == "https":
-                    # HTTPS 隧道：显式传认证头，避免 urllib CONNECT 不带认证导致 407
+                if proxy_auth:
+                    # 带认证代理：HTTP/HTTPS 都走手动请求（含跳转跟随），避免 urllib 丢认证
                     resp = _open_with_proxy(req, used_proxy, timeout)
                     if pool:
                         pool.mark_good(used_proxy)
@@ -465,6 +536,33 @@ def request_with_antibot(url, settings=None, timeout=15, method="GET", data=None
     raise last_err
 
 
+def _maybe_decompress(raw, headers):
+    """按 Content-Encoding 解压 gzip/deflate（urllib 不会自动解压，不解压解析全是乱码）。"""
+    if not raw:
+        return raw
+    try:
+        enc = (headers.get("Content-Encoding") or "").lower()
+    except Exception:
+        enc = ""
+    if "gzip" in enc:
+        import gzip as _gzip
+        import io as _io
+        try:
+            return _gzip.GzipFile(fileobj=_io.BytesIO(raw)).read()
+        except Exception:
+            return raw
+    if "deflate" in enc:
+        import zlib as _zlib
+        try:
+            return _zlib.decompress(raw)
+        except Exception:
+            try:
+                return _zlib.decompress(raw, -_zlib.MAX_WBITS)
+            except Exception:
+                return raw
+    return raw
+
+
 def fetch_with_antibot(url, settings=None, timeout=15, use_jina_fallback=True,
                        jina_timeout=12, delay_key="fetch"):
     """带反爬策略的页面抓取（返回 (html_text, final_url)）。
@@ -481,7 +579,7 @@ def fetch_with_antibot(url, settings=None, timeout=15, use_jina_fallback=True,
             url, settings=settings, timeout=timeout, delay_key=delay_key,
             max_retries=_safe_int(settings.get("retry_max"), 2),
         )
-        raw = resp.read()
+        raw = _maybe_decompress(resp.read(), resp.headers)
         final = resp.geturl() or url
         for enc in ("utf-8", "gb18030", "gbk"):
             try:
@@ -500,7 +598,7 @@ def fetch_with_antibot(url, settings=None, timeout=15, use_jina_fallback=True,
             jheaders["Accept"] = "text/plain"
             jreq = urllib.request.Request(jina_url, headers=jheaders)
             with urllib.request.urlopen(jreq, timeout=jina_timeout) as jresp:
-                raw = jresp.read()
+                raw = _maybe_decompress(jresp.read(), jresp.headers)
                 final = url
             for enc in ("utf-8", "gb18030", "gbk"):
                 try:

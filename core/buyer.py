@@ -298,11 +298,13 @@ def search_so(query, count=6, settings=None):
     for host in ("https://www.so.com/s?", "https://m.so.com/s?"):
         url = host + "q=" + urllib.parse.quote(query)
         try:
-            html_text, _ = fetch_page(url, settings=settings)
+            html_text, final = fetch_page(url, settings=settings)
         except Exception:
             continue
-        if len(html_text) < 12000 and ("访问异常" in html_text or "安全验证" in html_text or "captcha" in html_text.lower()):
+        if "qcaptcha" in (final or "").lower() or "访问异常" in html_text or "安全验证" in html_text or "captcha" in html_text.lower():
             antibot.record_stats("blocked_detected")
+            raise ValueError("360 搜索被风控（验证码拦截）：当前 IP 被 360 限制，请更换代理 IP 或稍后再试")
+        if len(html_text) < 12000:
             continue
         doc = lh.fromstring(html_text)
         results = []
@@ -339,32 +341,44 @@ def search_so(query, count=6, settings=None):
 def search_sogou(query, count=6, settings=None):
     """搜狗搜索（免费备用源）。链接是 /link?url= 跳转，抓取时自动跟随。"""
     antibot.human_delay(settings, key="search")
+    # 先访问搜狗首页种下 SNUID 等 Cookie，降低首次请求触发安全验证的概率
+    try:
+        fetch_page("https://www.sogou.com/", settings=settings, use_jina=False, timeout=8)
+    except Exception:
+        pass
     url = "https://www.sogou.com/web?query=" + urllib.parse.quote(query) + "&ie=utf8"
-    html_text, _ = fetch_page(url, settings=settings)
-    if len(html_text) < 12000 and any(w in html_text for w in ("访问过于频繁", "安全验证", "请输入验证码", "captcha")):
-        antibot.record_stats("blocked_detected")
-        raise ValueError("搜狗搜索暂时不可用")
-    doc = lh.fromstring(html_text)
-    results = []
-    for a in doc.xpath("//h3/a | //a[contains(@class,'vr-title')]")[:count]:
-        href = (a.get("href") or "").strip()
-        title = _clean_text(a.text_content())
-        if not title or len(title) < 4:
+    last_err = ""
+    for attempt in range(3):
+        html_text, _ = fetch_page(url, settings=settings, use_jina=False, timeout=15)
+        if ("antispider" in html_text.lower() or "访问过于频繁" in html_text
+                or "安全验证" in html_text or "请输入验证码" in html_text or "captcha" in html_text.lower()):
+            antibot.record_stats("blocked_detected")
+            last_err = "触发安全验证"
+            time.sleep(2 + attempt)
             continue
-        if href.startswith("/"):
-            href = "https://www.sogou.com" + href
-        if not href.startswith("http"):
-            continue
-        block = _clean_text(a.xpath("ancestor::li[1]")[0].text_content()) if a.xpath("ancestor::li[1]") else title
-        snippet = block.replace(title, "", 1).strip()[:160]
-        results.append({"title": title, "url": href, "snippet": snippet})
-    if not results:
-        fallback = []
-        seen = set()
-        for a in doc.xpath("//a[@href]")[:count * 2]:
+        doc = lh.fromstring(html_text)
+        results = []
+        for a in doc.xpath("//h3/a | //a[contains(@class,'vr-title')]")[:count]:
             href = (a.get("href") or "").strip()
             title = _clean_text(a.text_content())
-            if not title or len(title) < 4 or href in seen:
+            if not title or len(title) < 4:
+                continue
+            if href.startswith("/"):
+                href = "https://www.sogou.com" + href
+            if not href.startswith("http"):
+                continue
+            block = _clean_text(a.xpath("ancestor::li[1]")[0].text_content()) if a.xpath("ancestor::li[1]") else title
+            snippet = block.replace(title, "", 1).strip()[:160]
+            results.append({"title": title, "url": href, "snippet": snippet})
+        if results:
+            return results
+        # 兜底：跳过 javascript 与站内导航链接
+        fallback = []
+        seen = set()
+        for a in doc.xpath("//a[@href]")[:count * 4]:
+            href = (a.get("href") or "").strip()
+            title = _clean_text(a.text_content())
+            if not title or len(title) < 4 or href.startswith("javascript") or href in seen:
                 continue
             seen.add(href)
             if href.startswith("/"):
@@ -374,8 +388,11 @@ def search_sogou(query, count=6, settings=None):
             fallback.append({"title": title, "url": href, "snippet": ""})
             if len(fallback) >= count:
                 break
-        return fallback
-    return results
+        if fallback:
+            return fallback
+        last_err = "页面无搜索结果"
+        time.sleep(1 + attempt)
+    raise ValueError("搜狗搜索暂时不可用：" + last_err)
 
 
 def search_serpapi(query, count, api_key, tbs="", settings=None):
