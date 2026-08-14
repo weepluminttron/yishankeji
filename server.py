@@ -48,6 +48,7 @@ _map_job = {"running": False, "message": "", "started": "", "result": None}
 _touch_job = {"running": False, "message": "", "enrolled": 0, "skipped": 0, "last_run": ""}
 _acq_job = {"running": False, "message": "", "stage": "", "started": "", "result": None}
 _search_test_job = {"running": False, "message": "", "started": "", "result": None}
+_agent_job = {"running": False, "message": "", "stage": "", "started": "", "result": None}
 _login_attempts = {}
 _tasks = {}
 
@@ -383,6 +384,75 @@ def _acquisition_worker(conditions, seed=None, use_manual=False):
     except Exception as e:
         _acq_job.update(running=False, result=None, message=str(e))
         task_finish("acq", "失败", str(e))
+
+
+def start_agent_job(data):
+    """启动 AI 智能爬虫（DeepSeek 大脑 + 爬虫手脚）。"""
+    if _agent_job.get("running"):
+        return False, "已有 AI 智能爬虫任务在运行，请等待完成"
+    _agent_job.update(
+        running=True, result=None, message="", stage="准备中",
+        started=time.strftime("%Y-%m-%d %H:%M:%S"),
+    )
+    threading.Thread(target=_agent_worker, args=(data,), daemon=True).start()
+    return True, "AI 智能爬虫已启动"
+
+
+def _agent_worker(data):
+    """后台线程：AI 智能爬虫（自然语言 → AI 决策 → 搜索/抓取 → 结论入库）。"""
+    from core import ai_agent, db
+    task_start("agent", "AI 智能爬虫")
+    _agent_job.update(running=True, stage="AI 分析需求中")
+    task_progress("agent", stage="AI 分析需求中")
+
+    def cb(stage):
+        _agent_job["stage"] = stage
+        task_progress("agent", stage=stage, message=stage)
+
+    try:
+        settings = db.get_settings()
+        message = str(data.get("message") or "").strip()
+        if not message:
+            raise ValueError("请先描述你要找的客户")
+        max_steps = max(2, min(int(data.get("max_steps") or 8), 15))
+        result = ai_agent.run_lead_agent(
+            message, settings=settings, max_steps=max_steps, progress=cb,
+        )
+        if not result.get("ok"):
+            raise ValueError(result.get("msg") or "AI 智能爬虫运行失败")
+        leads = result.get("leads") or []
+        saved = 0
+        for ld in leads:
+            name = str(ld.get("name") or "").strip()
+            if not name:
+                continue
+            note_lines = [
+                f"【AI 判断】{ld.get('reason') or ''}",
+                f"【优先级】{ld.get('priority') or ''}/5",
+                f"【客户类型】{ld.get('buyer_type') or ''}",
+                f"【官网】{ld.get('website') or ''}",
+            ]
+            ok, msg = db.create_lead({
+                "name": name,
+                "contact": "",
+                "phone": ld.get("phone") or "",
+                "email": ld.get("email") or "",
+                "region": ld.get("region") or "",
+                "type": ld.get("buyer_type") or "其他",
+                "status": "新线索",
+                "source": "AI智能爬虫",
+                "tags": "AI智能爬虫",
+                "address": "",
+                "note": "\n".join(x for x in note_lines if x and x.strip("【】:").strip()),
+                "reminder_date": "",
+            })
+            if ok:
+                saved += 1
+        _agent_job.update(running=False, result=result, message="")
+        task_finish("agent", "成功", f"AI 智能爬虫完成，发现 {len(leads)} 家，新入库 {saved} 家")
+    except Exception as e:
+        _agent_job.update(running=False, result=None, message=str(e))
+        task_finish("agent", "失败", str(e))
 
 
 def _acq_target_to_lead(t):
@@ -1123,6 +1193,8 @@ class Handler(BaseHTTPRequestHandler):
             return send_json(self, {"ok": True, "task": task_snapshot("strategy")})
         if api == "buyer":
             return send_json(self, {"ok": True, "job": dict(_buyer_job)})
+        if api == "agent" and len(parts) > 2 and parts[2] == "lead":
+            return send_json(self, {"ok": True, "job": dict(_agent_job)})
         if api == "tasks":
             tasks = [dict(v) for v in _tasks.values()]
             tasks.sort(key=lambda t: (0 if t["status"] == "运行中" else 1, t.get("started", "")), reverse=True)
@@ -1226,6 +1298,12 @@ class Handler(BaseHTTPRequestHandler):
             if not ok:
                 return send_json(self, {"ok": False, "msg": msg}, 400)
             return send_json(self, {"ok": True, "msg": msg, "job": dict(_buyer_job)})
+        if api == "agent" and len(parts) > 2 and parts[2] == "lead":
+            data = read_json_body(self)
+            ok, msg = start_agent_job(data)
+            if not ok:
+                return send_json(self, {"ok": False, "msg": msg}, 400)
+            return send_json(self, {"ok": True, "msg": msg, "job": dict(_agent_job)})
         if api == "ai" and len(parts) > 2 and parts[2] == "followup":
             return self._ai_followup()
         if api == "ai" and len(parts) > 2 and parts[2] == "company_intel":

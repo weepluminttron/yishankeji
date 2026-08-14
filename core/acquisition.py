@@ -926,14 +926,17 @@ def enrich_with_company_api(targets, settings, limit=30):
 def verify_contacts(targets, settings, limit=20):
     """WebFetch 定向抓取核验：抓目标官网（及 /contact 页）补全电话/邮箱。
 
-    对应“WebFetch 读原文坐实联系方式”：只处理有官网但缺联系方式的目标，
-    命中即标记 verified 并记录 path=官网定向抓取；失败静默记录。
+    对应“WebFetch 读原文坐实联系方式”：只处理有官网但缺联系方式的目标；
+    优先用智能爬虫（Playwright 渲染 + urllib 兜底，自动提取邮箱/电话），
+    未安装 Playwright 时自动降级 urllib；命中即标记 verified 并记录 path。
     """
     settings = settings or {}
     try:
-        from core import buyer, crawler
+        from core import buyer
+        from core.smart_crawler import SmartCrawler
+        smart = SmartCrawler(max_concurrent=3)
     except Exception as e:
-        return {"done": 0, "updated": 0, "errors": [{"msg": f"crawler 不可用：{e}"}]}
+        smart = None
     done = updated = 0
     errors = []
     for t in targets:
@@ -947,8 +950,13 @@ def verify_contacts(targets, settings, limit=20):
         done += 1
         email = phone = ""
         try:
-            html, final = crawler.fetch_page(web, timeout=12, use_jina=True, jina_timeout=12, settings=settings)
-            c = buyer.extract_contacts(html, final or web)
+            if smart is not None:
+                res = smart.scrape_sync(web, settings)
+                c = {"emails": res.get("emails") or [], "phones": res.get("phones") or []}
+            else:
+                from core import crawler
+                html, final = crawler.fetch_page(web, timeout=12, use_jina=True, jina_timeout=12, settings=settings)
+                c = buyer.extract_contacts(html, final or web)
             email = c["emails"][0] if c["emails"] else ""
             phone = c["phones"][0] if c["phones"] else ""
         except Exception:
@@ -957,8 +965,13 @@ def verify_contacts(targets, settings, limit=20):
             # 常见联系页兜底
             for suffix in ("/contact", "/contact-us", "/about"):
                 try:
-                    html, _ = crawler.fetch_page(web.rstrip("/") + suffix, timeout=10, use_jina=True, jina_timeout=10, settings=settings)
-                    c = buyer.extract_contacts(html, web + suffix)
+                    if smart is not None:
+                        res = smart.scrape_sync(web.rstrip("/") + suffix, settings)
+                        c = {"emails": res.get("emails") or [], "phones": res.get("phones") or []}
+                    else:
+                        from core import crawler
+                        html, _ = crawler.fetch_page(web.rstrip("/") + suffix, timeout=10, use_jina=True, jina_timeout=10, settings=settings)
+                        c = buyer.extract_contacts(html, web + suffix)
                     email = c["emails"][0] if c["emails"] else email
                     phone = c["phones"][0] if c["phones"] else phone
                     if email and phone:

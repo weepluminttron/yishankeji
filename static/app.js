@@ -342,6 +342,7 @@ async function renderDashboard() {
         <div class="action-btn" onclick="location.href='/analytics.html'"><span class="ico">📈</span>获客分析</div>
         <div class="action-btn" id="home-intent-btn"><span class="ico">🧭</span>意向分级</div>
         <div class="action-btn" id="home-touch-btn"><span class="ico">🤖</span>自动首触</div>
+        <div class="action-btn" id="home-agent-btn"><span class="ico">🕷️</span>AI 智能爬虫</div>
       </div>
     </div>
     ${onboarding}
@@ -393,6 +394,65 @@ async function renderDashboard() {
       toast(r.msg || "自动首触巡检已启动", "ok");
     } catch (e) { toast(e.message, "err"); }
   };
+  $("#home-agent-btn").onclick = () => {
+    const html = `<div class="modal-head"><h3>🕷️ AI 智能爬虫</h3><span class="close-btn" onclick="closeModal()">×</span></div>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div style="font-size:13px;color:#667">用一句话描述你要找的客户，AI 会自动搜索 → 抓取官网 → 提取联系方式 → 存入客户库。例如：<i>“我卖数据中心光模块，想找东南亚有数据中心项目的系统集成商”</i></div>
+      <textarea id="agent-message" rows="4" style="width:100%;box-sizing:border-box;padding:10px;border:1px solid var(--line);border-radius:8px" placeholder="描述你的产品 + 想找的客户类型 + 地区…"></textarea>
+      <div id="agent-result" style="font-size:12px;color:#667;white-space:pre-wrap;max-height:340px;overflow:auto"></div>
+    </div>
+    <div class="modal-foot"><button class="btn" onclick="closeModal()">关闭</button><button class="btn primary" id="agent-start-btn">🚀 开始</button></div>`;
+    openModal(html, "wide");
+    $("#agent-start-btn").onclick = startAgentCrawl;
+  };
+}
+
+let agentTimer = null;
+async function startAgentCrawl() {
+  const msg = ($("#agent-message").value || "").trim();
+  if (!msg) return toast("请先描述你要找的客户", "err");
+  const btn = $("#agent-start-btn");
+  btn.disabled = true; btn.textContent = "运行中…";
+  const box = $("#agent-result");
+  box.textContent = "AI 正在分析需求…";
+  try {
+    await api("/api/agent/lead", { method: "POST", body: { message: msg } });
+    agentTimer = setInterval(pollAgent, 2000);
+  } catch (e) {
+    box.textContent = "启动失败：" + e.message;
+    btn.disabled = false; btn.textContent = "🚀 开始";
+  }
+}
+
+async function pollAgent() {
+  try {
+    const d = await api("/api/agent/lead");
+    const job = d.job || {};
+    const box = $("#agent-result");
+    if (!box) { clearInterval(agentTimer); agentTimer = null; return; }
+    if (job.running) {
+      box.textContent = "⏳ " + (job.stage || "运行中");
+      return;
+    }
+    clearInterval(agentTimer); agentTimer = null;
+    const btn = $("#agent-start-btn");
+    if (btn) { btn.disabled = false; btn.textContent = "🚀 开始"; }
+    const res = job.result;
+    if (!res || !res.ok) {
+      box.textContent = "任务失败：" + (job.message || "未知错误");
+      return;
+    }
+    const leads = res.leads || [];
+    const steps = (res.steps || []).map((s) => `第${s.step}步 · ${s.name} ${s.args}`).join("\n");
+    const rows = leads.map((l) => `• ${l.name}（${l.region || "—"}）${l.email ? " 📧" + l.email : ""}${l.phone ? " 📞" + l.phone : ""} 优先级${l.priority || "?"}/5\n  ${l.reason || ""}`).join("\n");
+    box.textContent = "✅ 完成：发现 " + leads.length + " 家，已自动存入客户库（来源：AI智能爬虫）\n\n【AI 过程】\n" + steps + "\n\n【线索】\n" + rows + "\n\n【AI 结论】\n" + (res.answer || "");
+  } catch (e) {
+    clearInterval(agentTimer); agentTimer = null;
+    const box = $("#agent-result");
+    if (box) box.textContent = "查询失败：" + e.message;
+    const btn = $("#agent-start-btn");
+    if (btn) { btn.disabled = false; btn.textContent = "🚀 开始"; }
+  }
 }
 
 async function sendMailTo(id) {

@@ -111,3 +111,102 @@ def _extract_json(text):
         return json.loads(m.group(0)), None
     except Exception as e:
         return None, f"AI 返回解析失败：{e}"
+
+
+def _chat_request(api_key, model, messages, api_base=None, tools=None, timeout=120):
+    """OpenAI 兼容 /chat/completions 请求，支持 tools（function calling）。
+
+    返回 choices[0].message（dict，可能含 tool_calls）。
+    """
+    base = (api_base or DEFAULT_API_BASE).rstrip("/")
+    if base.endswith("/chat/completions"):
+        url = base
+    else:
+        url = base + "/chat/completions"
+    payload = {
+        "model": model or "gpt-4o-mini",
+        "messages": messages,
+        "temperature": 0.3,
+    }
+    if tools:
+        payload["tools"] = tools
+        payload["tool_choice"] = "auto"
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+    return data["choices"][0]["message"]
+
+
+def run_tool_loop(api_key, model, system, user, tools, execute_tool,
+                  api_base=None, max_steps=6, timeout=120):
+    """AI 工具调用循环：模型决定调用工具 → 执行 → 回填 → 直到给出最终回答。
+
+    参数：
+      tools        OpenAI 格式的工具定义列表（含 name/description/parameters）
+      execute_tool 函数 (tool_name, args_dict) -> str/dict
+    返回：
+      (final_text, steps, err)  steps 为 [{step, name, args, result_head}] 过程记录
+    """
+    if not api_key:
+        return "", [], "未配置 AI 密钥"
+    messages = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user},
+    ]
+    steps = []
+    for step_no in range(1, max_steps + 1):
+        try:
+            msg = _chat_request(api_key, model, messages, api_base, tools=tools, timeout=timeout)
+        except urllib.error.HTTPError as e:
+            detail = e.read().decode("utf-8", errors="replace")
+            return "", steps, f"接口返回错误 {e.code}：{detail[:200]}"
+        except Exception as e:
+            return "", steps, f"请求失败：{e}"
+        tool_calls = msg.get("tool_calls") or []
+        if not tool_calls:
+            return msg.get("content") or "", steps, None
+        # 回填助手消息（含工具调用）
+        messages.append({"role": "assistant", "content": msg.get("content"), "tool_calls": tool_calls})
+        step_records = []
+        for tc in tool_calls:
+            fn = tc.get("function") or {}
+            name = fn.get("name") or ""
+            try:
+                args = json.loads(fn.get("arguments") or "{}")
+            except Exception:
+                args = {}
+            try:
+                result = execute_tool(name, args)
+            except Exception as e:
+                result = {"error": str(e)}
+            if not isinstance(result, str):
+                result = json.dumps(result, ensure_ascii=False, default=str)
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tc.get("id") or "",
+                "content": result[:12000],
+            })
+            step_records.append({
+                "step": step_no,
+                "name": name,
+                "args": json.dumps(args, ensure_ascii=False)[:200],
+                "result_head": result[:300],
+            })
+        steps.extend(step_records)
+    # 达到轮数上限：强制模型基于已收集信息给出最终结论（不再调用工具）
+    messages.append({
+        "role": "user",
+        "content": "工具调用轮数已到上限。请立即基于以上所有工具结果直接输出最终结论，不要调用任何工具、不要解释、不要 Markdown 代码块。",
+    })
+    try:
+        final_msg = _chat_request(api_key, model, messages, api_base, tools=None, timeout=timeout)
+        return final_msg.get("content") or "", steps, None
+    except Exception as e:
+        return "", steps, f"最终结论生成失败：{e}"
