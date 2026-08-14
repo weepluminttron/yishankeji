@@ -2,6 +2,12 @@ data/
 venv/
 __pycache__/
 .git/
+.github/
+outputs/
+.workbuddy/
+_check.py
+deploy/
 *.log
+*.pyc
 server.env
 test_fixture/

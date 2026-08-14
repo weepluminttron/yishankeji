@@ -247,13 +247,17 @@ def get_enabled_channel_ids(conditions=None, settings=None, explicit=None):
             if r:
                 cats.add(r)
         ids = []
+        main_engine = _provider_channel_for_web_search(settings)
         for cat, chs in by_cat.items():
             if cat not in cats:
                 continue
             for ch in chs:
+                # 搜索引擎类别只跑配置的主引擎（如 SerpAPI/博查/Bing），
+                # 避免多引擎重复搜索、烧 API 配额、触发免费源限流；
+                # 其它类别（招投标/行业站/地图等）保持全量。
+                if cat == "search_engine" and ch["id"] != main_engine:
+                    continue
                 ids.append(ch["id"])
-        # 注：search_engine 类别下所有可达渠道（bing/so/sogou/serpapi/bocha…）都作为独立来源并行搜索；
-        # 跨渠道去重会合并同一客户的重复命中，因此多源并行不会造成重复计入。
     else:
         ids = [_provider_channel_for_web_search(settings)]
 

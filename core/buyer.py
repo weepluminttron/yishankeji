@@ -832,7 +832,7 @@ def search_web(query, count, settings=None):
         sources.append(("Bing", lambda: search_bing(query, count, fp["qdr"], settings=settings)))
 
     # 最后一道兜底：代理被限流时用服务器直连重试一次
-    if settings.get("proxy_pool") or settings.get("proxy_url"):
+    if settings.get("proxy_pool") or settings.get("proxy_url") or settings.get("proxy_api_url"):
         sources.append(("直连重试", _try_direct))
     # site: 限定全部失败时，去掉限定重试一次（海外站点国内免费源不索引）
     if _site_scopes(query) and str(settings.get("site_fallback_search", "1")) != "0":
@@ -1181,6 +1181,7 @@ def run(keywords, markets=None, max_results=6, urls=None, use_ai=False, settings
             ch_raw, channel_stats = channels.run_channel_search(
                 ch_ids, keywords=expanded, markets=markets, settings=settings,
                 progress=progress, use_cache=use_cache,
+                max_per_channel=int(settings.get("channel_max_per_channel") or 12),
             )
             raw_results = ch_raw
             # 把渠道级失败/跳过原因汇入 errors，避免“找不到客户”却看不到哪个渠道失败

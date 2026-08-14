@@ -1498,7 +1498,16 @@ class Handler(BaseHTTPRequestHandler):
             return self._search_test_start(data)
         if api == "settings":
             data = read_json_body(self)
-            settings = db.save_settings(data.get("settings", {}))
+            settings_in = data.get("settings", {})
+            _key = str(settings_in.get("search_api_key") or "").strip()
+            _prov = str(settings_in.get("search_provider") or "").strip()
+            _bad = (len(_key) > 100 or re.search(r"[\u4e00-\u9fff]", _key)
+                    or any(ch.isspace() for ch in _key))
+            if _prov in ("serpapi", "bocha") and _key and not re.fullmatch(r"[a-fA-F0-9]{64}", _key):
+                return send_json(self, {"ok": False, "msg": "搜索 API 密钥格式不正确：SerpAPI/博查密钥应为 64 位十六进制字符，只填密钥本身，不要粘贴说明文字或其它密钥"}, 400)
+            if _key and _bad:
+                return send_json(self, {"ok": False, "msg": "搜索 API 密钥格式不正确：只填密钥本身，不要粘贴说明文字或带空格"}, 400)
+            settings = db.save_settings(settings_in)
             # 反爬配置变更后重新加载代理池（proxy_pool / proxy_url）
             try:
                 from core import antibot

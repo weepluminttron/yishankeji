@@ -61,7 +61,7 @@ def normalize_conditions(conditions):
     c.setdefault("buyer_types", ["光无源器件厂", "光模块厂", "系统集成商", "近期招标扩容"])
     c.setdefault("min_tier", "B")
     c.setdefault("exclude", [])
-    c.setdefault("channels", ["web_search", "social_media", "industry_site", "forum", "company_db", "procurement", "exhibition"])
+    c.setdefault("channels", ["web_search", "procurement", "exhibition"])
     c.setdefault("max_results", 30)
     c.setdefault("allow_broad", False)
     c.setdefault("enrich_limit", 30)
@@ -343,6 +343,8 @@ def _discover_one_round(conditions, settings, progress=None):
         eff_settings["search_freshness"] = conditions["recency"]
     if conditions.get("site_scope"):
         eff_settings["search_site_filter"] = conditions["site_scope"]
+    # 引擎限流：每个渠道最多检索式数量，避免一次跑上百个查询烧 API 配额
+    eff_settings["channel_max_per_channel"] = str(conditions.get("max_queries_per_channel") or 6)
 
     # 解析本次要启用的具体渠道（类别 → 渠道 id；缺密钥的自动跳过）
     # 若 settings 里显式给了 channel_ids（CLI --channels），则优先按显式列表解析
