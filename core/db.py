@@ -696,6 +696,8 @@ def get_settings():
         # ---- 反爬策略配置（对应"快启精线索"综合反爬体系）----
         "proxy_pool": "",          # 代理池：逗号分隔的代理 URL（http://ip:port 或 http://user:pass@ip:port）
         "proxy_url": "",           # 单个代理 URL（与 proxy_pool 二选一，优先级低于 pool）
+        "proxy_api_url": "",       # 动态代理 API（有代理/快代理等短效IP接口，池空自动拉取）
+        "proxy_api_refresh": "3",  # 动态代理刷新间隔（分钟）
         "delay_search": "0.8",      # 搜索请求前随机延时基准（秒，±50% 抖动）
         "delay_fetch": "0.3",      # 页面抓取前随机延时基准（秒）
         "delay_page": "1.5",      # 翻页/连续抓取延时基准（秒）
@@ -733,7 +735,7 @@ def save_settings(values):
         "auto_intent_enabled", "auto_intent_use_ai",
         "auto_touch_enabled", "auto_touch_score", "auto_touch_delay", "auto_touch_channel",
         # 反爬策略配置
-        "proxy_pool", "proxy_url",
+        "proxy_pool", "proxy_url", "proxy_api_url", "proxy_api_refresh",
         "delay_search", "delay_fetch", "delay_page", "delay_default",
         "retry_max", "retry_base_delay",
         "probe_contact_pages", "contact_probe_limit",

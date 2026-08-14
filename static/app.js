@@ -2644,6 +2644,8 @@ async function renderSettings() {
       <h3>🛡️ 反爬策略（参考"快启精线索"综合反爬体系）</h3>
       <div class="form-grid">
         <div class="field" style="grid-column:1/-1"><label>代理池（逗号分隔，如 http://1.2.3.4:8080,http://user:pass@5.6.7.8:3128）</label><input class="input full" id="s-proxy-pool" placeholder="留空走直连；配置后自动轮换 IP 规避封禁" value="${esc(s.proxy_pool)}"></div>
+        <div class="field" style="grid-column:1/-1"><label>动态代理 API（有代理/快代理等短效IP接口，留空关闭；代理池空了会自动拉取）</label><input class="input full" id="s-proxy-api" placeholder="https://api.youdaili.com/v1/proxy/get?app_key=...&app_secret=..." value="${esc(s.proxy_api_url)}"></div>
+        <div class="field"><label>动态代理刷新间隔（分钟）</label><input class="input full" type="number" min="1" max="60" id="s-proxy-api-refresh" value="${esc(s.proxy_api_refresh || 3)}"></div>
         <div class="field"><label>搜索请求延时基准（秒，±50% 随机抖动）</label><input class="input full" type="number" step="0.1" min="0" id="s-delay-search" value="${esc(s.delay_search || 0.8)}"></div>
         <div class="field"><label>页面抓取延时基准（秒）</label><input class="input full" type="number" step="0.1" min="0" id="s-delay-fetch" value="${esc(s.delay_fetch || 0.3)}"></div>
         <div class="field"><label>失败重试次数（指数退避）</label><input class="input full" type="number" min="0" max="5" id="s-retry-max" value="${esc(s.retry_max || 2)}"></div>
@@ -2741,6 +2743,8 @@ async function renderSettings() {
         site_fallback_search: $("#s-site-fallback").value,
         crawler_probe_contacts: $("#s-probe-contact").value,
         proxy_pool: $("#s-proxy-pool").value.trim(),
+        proxy_api_url: $("#s-proxy-api").value.trim(),
+        proxy_api_refresh: $("#s-proxy-api-refresh").value.trim() || "3",
         delay_search: $("#s-delay-search").value,
         delay_fetch: $("#s-delay-fetch").value,
         retry_max: $("#s-retry-max").value,

@@ -129,8 +129,13 @@ class ProxyPool:
     """
     def __init__(self, settings=None):
         self._lock = threading.Lock()
+        self._api_lock = threading.Lock()
         self._proxies = []  # [{url, fails, last_used, last_ok}]
         self._idx = 0
+        self._api_url = ""
+        self._api_refresh_sec = 180
+        self._api_last_msg = ""
+        self._last_api_fetch = 0.0
         self._load(settings or {})
 
     def _load(self, settings):
@@ -145,15 +150,74 @@ class ProxyPool:
         single = (settings.get("proxy_url") or "").strip()
         if single and not any(p["url"] == single for p in self._proxies):
             self._proxies.append({"url": single, "fails": 0, "last_used": 0, "last_ok": 0})
+        # 动态代理 API（有代理/快代理等短效IP接口）：池空时自动拉取
+        self._api_url = str(settings.get("proxy_api_url") or "").strip()
+        try:
+            self._api_refresh_sec = max(60, int(float(settings.get("proxy_api_refresh") or 3) * 60))
+        except Exception:
+            self._api_refresh_sec = 180
 
     def __bool__(self):
         return bool(self._proxies)
 
+    @staticmethod
+    def _parse_api_text(raw):
+        """解析代理 API 文本：支持 ip:port、user:pass@ip:port、http://ip:port。"""
+        out = []
+        for line in re.split(r"[\r\n;；,，]", raw or ""):
+            line = line.strip()
+            if not line:
+                continue
+            if "://" in line:
+                out.append(line)
+                continue
+            parts = line.split(":")
+            if len(parts) == 4 and parts[1].isdigit():
+                out.append("http://%s:%s@%s:%s" % (parts[2], parts[3], parts[0], parts[1]))
+            elif len(parts) == 2 and parts[1].isdigit():
+                out.append("http://" + line)
+            elif len(parts) > 2 and parts[-1].isdigit():
+                out.append("http://" + ":".join(parts[:-1]) + ":" + parts[-1])
+        return out[:50]
+
+    def _refresh_from_api(self, force=False):
+        """从动态代理 API 拉取短效 IP（失败静默，不阻塞主流程）。"""
+        if not self._api_url:
+            return False
+        with self._api_lock:
+            now = time.time()
+            if not force and (now - self._last_api_fetch) < self._api_refresh_sec:
+                return False
+            self._last_api_fetch = now
+            try:
+                req = urllib.request.Request(
+                    self._api_url,
+                    headers={"User-Agent": random_ua(), "Accept": "text/plain"},
+                )
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    raw = resp.read().decode("utf-8", errors="replace")
+            except Exception as e:
+                self._api_last_msg = "接口请求失败: " + str(e)[:120]
+                return False
+            self._api_last_msg = re.sub(r"\s+", " ", raw or "").strip()[:200]
+        parsed = self._parse_api_text(raw)
+        if not parsed:
+            return False
+        with self._lock:
+            existing = {p["url"] for p in self._proxies}
+            for u in parsed:
+                if u not in existing:
+                    self._proxies.append({"url": u, "fails": 0, "last_used": 0, "last_ok": 0})
+                    existing.add(u)
+        return True
+
     def get(self):
-        """获取下一个可用代理（轮询 + 跳过失败次数过高的）。
+        """获取下一个可用代理（轮询 + 跳过失败次数过高的；池空时自动从 API 拉取）。
 
         返回代理 URL 字符串；无可用代理时返回 None（走直连）。
         """
+        if not self._proxies and self._api_url:
+            self._refresh_from_api()
         if not self._proxies:
             return None
         with self._lock:
@@ -197,6 +261,9 @@ class ProxyPool:
                 "total": len(self._proxies),
                 "healthy": sum(1 for p in self._proxies if p["fails"] < 3),
                 "details": [{"url": p["url"], "fails": p["fails"]} for p in self._proxies],
+                "api_url": (self._api_url or "")[:80],
+                "api_refresh_sec": self._api_refresh_sec,
+                "api_last_msg": (self._api_last_msg or "")[:200],
             }
 
 
@@ -207,7 +274,7 @@ _pool_lock = threading.Lock()
 
 def _proxy_key(settings):
     s = settings or {}
-    return str(s.get("proxy_pool") or s.get("proxy_url") or "")
+    return str(s.get("proxy_pool") or s.get("proxy_url") or "") + "|api:" + str(s.get("proxy_api_url") or "")
 
 
 def get_proxy_pool(settings=None):
