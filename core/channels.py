@@ -45,7 +45,7 @@ _CONFIG_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "channels_c
 _DEFAULT_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "channels_default.json")
 
 # provider 取值 → 是否由 buyer 的“网页搜索后端”承接（需要走 search_web 的 provider 选择/缓存）
-_WEB_PROVIDERS = ("bing", "so", "sogou", "serpapi", "google_cse", "bocha")
+_WEB_PROVIDERS = ("bing", "so", "sogou", "baidu", "serpapi", "google_cse", "bocha")
 # 类别别名：中文短标签 / 英文 key 都能识别（CLI --channels 与 conditions.channels 通用）
 _CATEGORY_ALIASES = {
     "搜索引擎": "search_engine", "搜索": "search_engine", "search_engine": "search_engine",
@@ -60,14 +60,14 @@ _CATEGORY_ALIASES = {
     "exhibition": "map", "展会": "map",
 }
 # 国内免费源（无需密钥即可用，作为搜索引擎类别的可达候选）
-_FREE_PROVIDERS = ("bing", "so", "sogou")
+_FREE_PROVIDERS = ("bing", "so", "sogou", "baidu")
 # settings.search_provider 取值 → 渠道 id 映射（web_search 类别只选一个主引擎，避免重复）
 _PROVIDER_TO_CHANNEL = {
-    "bing_free": "bing", "so_free": "so360", "sogou": "sogou",
+    "bing_free": "bing", "so_free": "so360", "sogou": "sogou", "baidu_free": "baidu",
     "serpapi": "serpapi", "google_cse": "google_cse", "bocha": "bocha",
 }
 
-# 内置兜底配置：即使 channels_config.json 缺失也能跑（仅搜索引擎 3 个免费源）
+# 内置兜底配置：即使 channels_config.json 缺失也能跑（仅搜索引擎 4 个免费源）
 _BUILTIN = {
     "categories": {
         "search_engine": "通用搜索引擎", "social_media": "社交媒体",
@@ -82,6 +82,9 @@ _BUILTIN = {
          "site_scope": "", "query_template": "{kw} {intent} {market}", "enabled_default": True,
          "requires_key": "", "rate_limit": 0.3, "freshness": ""},
         {"id": "sogou", "name": "搜狗搜索", "category": "search_engine", "provider": "sogou",
+         "site_scope": "", "query_template": "{kw} {intent} {market}", "enabled_default": True,
+         "requires_key": "", "rate_limit": 0.3, "freshness": ""},
+        {"id": "baidu", "name": "百度搜索", "category": "search_engine", "provider": "baidu",
          "site_scope": "", "query_template": "{kw} {intent} {market}", "enabled_default": True,
          "requires_key": "", "rate_limit": 0.3, "freshness": ""},
     ],
@@ -336,7 +339,7 @@ def search_channel(channel, query, count, settings, use_cache=True):
     if prov == "map":
         return _search_map(channel, query, eff)
     # provider 名 → buyer.search_web 认识的搜索源（bing→bing_free、so→so_free）
-    _PROV_TO_WEB = {"bing": "bing_free", "so": "so_free", "sogou": "sogou",
+    _PROV_TO_WEB = {"bing": "bing_free", "so": "so_free", "sogou": "sogou", "baidu": "baidu_free",
                     "serpapi": "serpapi", "google_cse": "google_cse", "bocha": "bocha"}
     prov = _PROV_TO_WEB.get(prov, "bing_free" if prov not in _WEB_PROVIDERS else prov)
     eff["search_provider"] = prov

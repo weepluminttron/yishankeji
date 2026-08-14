@@ -395,6 +395,56 @@ def search_sogou(query, count=6, settings=None):
     raise ValueError("搜狗搜索暂时不可用：" + last_err)
 
 
+
+
+def search_baidu(query, count=6, settings=None):
+    """百度搜索（免费，国内服务器+代理可用）。真实地址在结果块 li/div 的 mu 属性里。"""
+    antibot.human_delay(settings, key="search")
+    url = "https://www.baidu.com/s?wd=" + urllib.parse.quote(query) + "&ie=utf-8"
+    html_text, _ = fetch_page(url, settings=settings)
+    head = html_text[:5000]
+    if len(html_text) < 8000 or any(w in head for w in ("安全验证", "访问异常", "captcha", "验证码")):
+        antibot.record_stats("blocked_detected")
+        raise ValueError("百度搜索被风控（验证码/安全验证），当前 IP 被限制，请更换代理 IP 或稍后再试")
+    doc = lh.fromstring(html_text)
+    results = []
+    seen = set()
+    for li in doc.xpath("//div[contains(@class,'result')] | //li[contains(@class,'result')] | //div[contains(@class,'c-container')]")[:count * 2]:
+        a = li.xpath(".//h3/a | .//a")
+        if not a:
+            continue
+        a = a[0]
+        title = _clean_text(a.text_content())
+        if not title or len(title) < 4:
+            continue
+        href = (a.get("href") or "").strip()
+        real = (li.get("mu") or "").strip()
+        if real.startswith("http"):
+            href = real
+        elif href.startswith("/link?"):
+            href = "https://www.baidu.com" + href
+        if not href.startswith("http") or href in seen:
+            continue
+        seen.add(href)
+        block = _clean_text(li.text_content())
+        snippet = block.replace(title, "", 1).strip()[:160]
+        results.append({"title": title, "url": href, "snippet": snippet})
+        if len(results) >= count:
+            break
+    if results:
+        return results
+    fallback = []
+    for a in doc.xpath("//h3/a")[:count * 2]:
+        href = (a.get("href") or "").strip()
+        title = _clean_text(a.text_content())
+        if not title or len(title) < 4 or not href.startswith("http") or href in seen:
+            continue
+        seen.add(href)
+        fallback.append({"title": title, "url": href, "snippet": ""})
+        if len(fallback) >= count:
+            break
+    return fallback
+
 def search_serpapi(query, count, api_key, tbs="", settings=None):
     antibot.human_delay(settings, key="search")
     url = ("https://serpapi.com/search.json?engine=google&google_domain=google.com.hk"
@@ -512,7 +562,7 @@ def search_web(query, count, settings=None):
     chain = []
 
     def _try_free():
-        """360 → 搜狗 免费源链。"""
+        """360 → 搜狗 → 百度 免费源链。"""
         errs = []
         try:
             results = search_so(query, count, settings=settings)
@@ -529,6 +579,14 @@ def search_web(query, count, settings=None):
             errs.append("搜狗无结果")
         except Exception as e:
             errs.append(f"搜狗：{e}")
+        try:
+            time.sleep(1)
+            results = search_baidu(query, count, settings=settings)
+            if results:
+                return results
+            errs.append("百度无结果")
+        except Exception as e:
+            errs.append(f"百度：{e}")
         raise ValueError("免费搜索源不可用（" + "；".join(errs) + "）")
 
     sources = []
@@ -539,14 +597,20 @@ def search_web(query, count, settings=None):
     if provider == "bocha" and key:
         sources.append(("博查", lambda: search_bocha(query, count, key, fp["bocha"], settings=settings)))
     if provider == "so_free":
-        sources.append(("360/搜狗", _try_free))
+        sources.append(("360/搜狗/百度", _try_free))
+    elif provider == "baidu_free":
+        sources.append(("百度", lambda: search_baidu(query, count, settings=settings)))
     else:
         sources.append(("Bing", lambda: search_bing(query, count, fp["qdr"], settings=settings)))
 
     # 主源失败后的兜底：免费源（避免 SerpAPI 429/配额耗尽时一个都搜不到）
-    if provider not in ("so_free",):
-        if not any(n == "360/搜狗" for n, _ in sources):
-            sources.append(("360/搜狗", _try_free))
+    if provider not in ("so_free", "baidu_free"):
+        if not any(n == "360/搜狗/百度" for n, _ in sources):
+            sources.append(("360/搜狗/百度", _try_free))
+        sources.append(("Bing", lambda: search_bing(query, count, fp["qdr"], settings=settings)))
+    elif provider == "baidu_free":
+        if not any(n == "360/搜狗/百度" for n, _ in sources):
+            sources.append(("360/搜狗/百度", _try_free))
         sources.append(("Bing", lambda: search_bing(query, count, fp["qdr"], settings=settings)))
 
     for name, fn in sources:

@@ -1743,6 +1743,7 @@ class Handler(BaseHTTPRequestHandler):
                 _run("博查（当前主源）", lambda: buyer.search_bocha(q, 3, key, "noLimit", test))
             _run("360（免费）", lambda: buyer.search_so(q, 3, test))
             _run("搜狗（免费）", lambda: buyer.search_sogou(q, 3, test))
+            _run("百度（免费）", lambda: buyer.search_baidu(q, 3, test))
             _run("Bing（免费）", lambda: buyer.search_bing(q, 3, "", test))
             if settings.get("map_api_key"):
                 _run("地图POI（高德）", lambda: mapsearch.run_map_search(

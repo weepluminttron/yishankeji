@@ -2531,7 +2531,8 @@ async function renderSettings() {
         <div class="field"><label>搜索源</label>
           <select class="select full" id="s-search-provider">
             <option value="bocha" ${s.search_provider === "bocha" ? "selected" : ""}>博查 AI 搜索（推荐，国内稳定）</option>
-            <option value="so_free" ${(s.search_provider || "so_free") === "so_free" ? "selected" : ""}>免费搜索（360+搜狗自动切换，推荐）</option>
+            <option value="so_free" ${(s.search_provider || "so_free") === "so_free" ? "selected" : ""}>免费搜索（360+搜狗+百度自动切换，推荐）</option>
+            <option value="baidu_free" ${s.search_provider === "baidu_free" ? "selected" : ""}>百度（免费，国内可用）</option>
             <option value="bing_free" ${s.search_provider === "bing_free" ? "selected" : ""}>免费 Bing（可能被限制）</option>
             <option value="serpapi" ${s.search_provider === "serpapi" ? "selected" : ""}>SerpAPI（推荐，免费200次/月）</option>
             <option value="google_cse" ${s.search_provider === "google_cse" ? "selected" : ""}>Google 自定义搜索 API</option>
@@ -2550,7 +2551,7 @@ async function renderSettings() {
         </div>
         <div class="field" style="grid-column:1/-1"><label>限定站点/域名（可选，逗号分隔，如 gov.cn,in 或 具体官网）</label><input class="input full" id="s-search-site" placeholder="gov.cn,in,example.com" value="${esc(s.search_site_filter)}"></div>
       </div>
-      <div class="hint">推荐用博查 AI 搜索（国内稳定、结果精准，平台：open.bochaai.com）；也可用免费 360/搜狗，或 SerpAPI 走 Google（serpapi.com）。</div>
+      <div class="hint">推荐用博查 AI 搜索（国内稳定、结果精准，平台：open.bochaai.com）；也可用免费 百度/360/搜狗/Bing，或 SerpAPI 走 Google（serpapi.com）。</div>
       <div class="toolbar" style="margin-top:10px;margin-bottom:0">
         <button class="btn" id="s-search-test">🧪 检测搜索源</button>
         <span class="hint">找不到客户时先点这里；每个源最多等 18 秒，超时自动跳过</span>

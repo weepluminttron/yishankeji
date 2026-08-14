@@ -65,6 +65,24 @@
       "keyword_config": "同 Bing。"
     },
     {
+      "id": "baidu",
+      "name": "百度搜索",
+      "category": "search_engine",
+      "provider": "baidu",
+      "site_scope": "",
+      "query_template": "{kw} {intent} {market}",
+      "enabled_default": true,
+      "requires_key": "",
+      "rate_limit": 0.3,
+      "freshness": "",
+      "access_params": {
+        "说明": "免费源，无需密钥。复用 core.buyer.search_baidu（真实地址取结果块 mu 属性）。",
+        "endpoint": "https://www.baidu.com/s",
+        "限制": "国内代理可用，被风控时返回验证码，会提示更换代理 IP。"
+      },
+      "keyword_config": "同 Bing；适合国内采购/招标类关键词。"
+    },
+    {
       "id": "serpapi",
       "name": "SerpAPI（Google）",
       "category": "search_engine",
