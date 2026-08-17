@@ -670,11 +670,55 @@ def _validate_plans(plans):
     return warnings
 
 
+_ROLE_GUIDES = {
+    "贸易商/分销商": (
+        "我们是贸易商/分销商，不是生产厂家。方案必须围绕：现货、价格、组合供货、快速交期、账期灵活、代理分销合作；"
+        "目标客户优先找需要外采的工程商、系统集成商、中小运营商、海外进口商/分销商；"
+        "关键词突出“现货/报价/供应/批发/代理”；渠道侧重 B2B平台、展会、邮件触达、工程商社群；"
+        "合作模式以批发/分销/代理为主。"
+    ),
+    "代理商": (
+        "我们是区域代理商。方案必须围绕：区域代理授权、项目报备、价格保护、品牌渠道分销；"
+        "目标客户是下游分销商、工程商、终端项目方；关键词突出“代理/经销/供货”；"
+        "渠道侧重品牌方资源对接、行业展会、工程商社群、招投标代理。"
+    ),
+    "生产厂家": (
+        "我们是生产厂家。方案必须围绕：厂家直供、定制能力、认证资质、样品测试、大客户投标、经销商招募；"
+        "目标客户是系统集成商、工程商、运营商、品牌商、分销商；关键词突出“厂家直供/定制/认证/投标/样品”；"
+        "渠道侧重展会（如 CIOE）、B2B平台、招标平台、经销商招商、LinkedIn/官网 SEO。"
+    ),
+    "系统集成商/工程商": (
+        "我们是系统集成商/工程商。方案必须围绕：上游器件/线缆采购降本、项目分包、解决方案交付；"
+        "目标客户是业主方、总包商、弱电/安防/通信工程发包方、需要整体方案的终端客户；"
+        "关键词突出“工程/项目/总包/解决方案/施工”；渠道侧重招标平台、业主社群、行业商会、同行转介绍。"
+    ),
+    "外贸出口商": (
+        "我们是外贸出口商。方案必须围绕：海外进口商、分销商、海关数据、认证（CE/RoHS/ISO）、物流与账期；"
+        "目标客户是海外运营商、电信工程公司、光纤/安防工程商、进口贸易商；"
+        "关键词全部用英文买方意图词；渠道侧重 LinkedIn、Google/Bing 海外搜索、B2B国际站、行业展会、邮件开发信。"
+    ),
+}
+
+
 def _strategy_worker(data, settings):
-    """后台线程：AI 生成获客方案。"""
+    """后台线程：AI 生成获客方案（支持选择我方角色 + 目标地区）。"""
     desc = str(data.get("description", "")).strip()
+    role = str(data.get("role") or "").strip()
+    regions = [str(x).strip() for x in (data.get("regions") or []) if str(x).strip()]
+    if not desc:
+        parts = []
+        if settings.get("product_name"):
+            parts.append(f"我们主营{settings.get('product_name')}")
+        if role:
+            parts.append(f"我方是{role}")
+        if regions:
+            parts.append(f"想找{('、'.join(regions))}地区有采购需求的客户")
+        desc = "，".join(parts) or "我们想开拓新的买家客户"
     task_progress("strategy", stage="AI 生成中")
     industry = settings.get("industry", "") or "通用"
+    role_guide = _ROLE_GUIDES.get(role, "")
+    role_line = f"我方角色：{role}。{role_guide}" if role_guide else "我方角色：未指定，请根据业务描述判断（默认按贸易商/分销商考虑现货、价格、组合供货优势）。"
+    region_line = f"目标客户地区：{'、'.join(regions)}。所有方案的 markets 必须严格限制在这些地区内，不要设计到其他地区。" if regions else "目标客户地区：未指定，由你根据业务判断选择 1-3 个重点地区，并写进每套方案的 markets。"
     system = (
         f"你是一名资深 B2B 获客策略顾问，当前服务行业：{industry}。我们是卖家（含贸易商/代理商），"
         "目标是为我们找到有真实采购意向的买家，不是同行供应商。潜在客户 = 买方，"
@@ -685,6 +729,9 @@ def _strategy_worker(data, settings):
         "① 这类客户现在为什么买（需求触发点/购买信号，写进 trigger）；"
         "② 我们凭什么切入（差异化打法，写进 moat + strategy）；"
         "③ 落地第一步做什么（具体动作，写进 first_step）。"
+        "根据用户选择的“我方角色”调整打法：贸易商/分销商主打现货/价格/组合供货/账期灵活；"
+        "代理商主打区域授权/项目报备/价格保护；生产厂家主打厂家直供/定制/认证/样品/投标；"
+        "系统集成商/工程商主打项目分包/解决方案交付；外贸出口商主打海外进口商/认证/物流/英文触达。"
         '只输出一个 JSON 对象，不要输出任何其他内容，格式：'
         '{"plans":[{"title":"方案标题","buyer_role":"目标买方角色（如采购经理/总包/集成商/分销商）",'
         '"target_customers":"目标客户画像（谁、规模、画像特征）","specs":["必中规格/品类1","必中规格/品类2"],'
@@ -708,7 +755,9 @@ def _strategy_worker(data, settings):
     )
     user = (
         f"公司：{settings.get('company_name', '')}\n"
+        f"{role_line}\n"
         f"主营产品：{settings.get('product_name', '')}\n"
+        f"{region_line}\n"
         f"业务描述：{desc}\n\n"
         "请生成方案。要求："
         "1. 关键词可直接用于搜索引擎（每套 8-12 个，覆盖不同场景和地区，海外市场用英文）；"
@@ -722,7 +771,8 @@ def _strategy_worker(data, settings):
         "8. moat 写清我们相对同行的差异化优势（如现货/交期/定制/价格/认证）；"
         "9. specs 给出 2-5 个必中规格/品类（用于后续精准筛选客户，不要写意图词）；"
         "10. trigger 写清这类客户现在为什么买（政策/项目/扩产/替换/降本等）；"
-        "11. contact_source 写清从哪些公开渠道找这批客户联系方式。"
+        "11. contact_source 写清从哪些公开渠道找这批客户联系方式；"
+        "12. 若用户指定了目标地区，所有方案的 markets 必须严格在指定地区内，海外市场关键词用英文。"
     )
     text, err = ai.generate_copy(
         settings.get("openai_api_key"),
@@ -1760,8 +1810,10 @@ class Handler(BaseHTTPRequestHandler):
     def _buyer_strategy(self):
         data = read_json_body(self)
         desc = str(data.get("description", "")).strip()
-        if not desc:
-            return send_json(self, {"ok": False, "msg": "请先描述你的业务和客户需求"}, 400)
+        role = str(data.get("role") or "").strip()
+        regions = [str(x).strip() for x in (data.get("regions") or []) if str(x).strip()]
+        if not desc and not role and not regions:
+            return send_json(self, {"ok": False, "msg": "请选择你的角色或目标地区，或描述业务需求"}, 400)
         settings = db.get_settings()
         if not settings.get("openai_api_key"):
             return send_json(self, {"ok": False, "msg": "AI 策略生成需要配置 AI 密钥（“设置 → AI 文案”，支持 DeepSeek/OpenAI）"}, 400)

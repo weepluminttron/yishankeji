@@ -1410,12 +1410,30 @@ async function renderBuyer() {
 
     <div class="card">
       <h3>🚀 一键智能获客</h3>
-      <div class="field"><label>描述你的业务和理想客户（用大白话，可选）</label>
-        <textarea class="textarea full" id="strategy-desc" style="min-height:100px" placeholder="例如：我们做光纤通信设备，WDM和EDFA是拳头产品，想找海外有大型数据中心建设需求的集成商，最好利润空间大、对方有一定行业知名度。&#10;或者：我们做3C电子代工，想找北美有品牌的小家电客户。"></textarea>
+      <div class="form-grid">
+        <div class="field"><label>你是哪种角色（我方身份）</label>
+          <select class="select full" id="strategy-role">
+            <option value="">请选择（AI 自动判断）</option>
+            <option value="贸易商/分销商" selected>贸易商/分销商</option>
+            <option value="代理商">代理商</option>
+            <option value="生产厂家">生产厂家</option>
+            <option value="系统集成商/工程商">系统集成商/工程商</option>
+            <option value="外贸出口商">外贸出口商</option>
+            <option value="其他">其他</option>
+          </select>
+        </div>
+        <div class="field"><label>你要找的客户在哪些地区（可多选）</label>
+          <div id="strategy-regions" style="display:flex;gap:8px;flex-wrap:wrap">
+            ${["中国大陆","亚太","欧美","中东非洲拉美","东南亚","南亚","日韩","中东","非洲","拉美","北美","欧洲"].map((r) => `<label style="display:inline-flex;gap:4px;align-items:center;padding:5px 10px;border:1px solid var(--line);border-radius:8px;cursor:pointer;font-size:12px"><input type="checkbox" class="region-check" value="${esc(r)}"> ${esc(r)}</label>`).join("")}
+          </div>
+        </div>
+        <div class="field" style="grid-column:1/-1"><label>描述你的业务和理想客户（用大白话，可选）</label>
+          <textarea class="textarea full" id="strategy-desc" style="min-height:80px" placeholder="例如：我们做光纤通信设备，WDM和EDFA是拳头产品，想找海外有大型数据中心建设需求的集成商，最好利润空间大、对方有一定行业知名度。&#10;或者：我们做3C电子代工，想找北美有品牌的小家电客户。"></textarea>
+        </div>
       </div>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <button class="btn primary" id="acq-oneclick">🚀 一键智能获客（AI 方案 → 全网发现 → 评分分级）</button>
-        <span class="hint">填写业务描述会自动生成 AI 方案并自动采用推荐方案；不填则按下方“高级条件”直接全网获客。</span>
+        <span class="hint">先选“我方角色”和“客户地区”（至少选一项），AI 会按你的身份定制打法；业务描述可选填，填了更精准。</span>
       </div>
       <div id="strategy-plans" style="margin-top:14px"></div>
       <div id="acq-plan-tag" style="display:none;margin-top:8px;padding:8px 10px;background:#eaf3fd;border:1px solid #bcd9f5;border-radius:8px;font-size:12px"></div>
@@ -1512,13 +1530,16 @@ async function renderBuyer() {
   $("#acq-oneclick").onclick = async () => {
     const btn = $("#acq-oneclick");
     const desc = $("#strategy-desc").value.trim();
+    const role = $("#strategy-role") ? $("#strategy-role").value : "";
+    const regions = getStrategyRegions();
+    const sig = desc + "|" + role + "|" + regions.join(",");
     btn.disabled = true;
     try {
-      if (desc && desc !== state.buyerContext) {
-        state.buyerContext = desc;
-        $("#strategy-plans").innerHTML = `<div class="empty"><div class="ico">🤖</div>AI 正在根据你的描述生成方案…（进度看右上角任务栏）</div>`;
+      if ((desc || role || regions.length) && sig !== state.buyerContext) {
+        state.buyerContext = sig;
+        $("#strategy-plans").innerHTML = `<div class="empty"><div class="ico">🤖</div>AI 正在根据你的角色/地区/描述生成方案…（进度看右上角任务栏）</div>`;
         try {
-          await api("/api/buyer/strategy", { method: "POST", body: { description: desc } });
+          await api("/api/buyer/strategy", { method: "POST", body: { description: desc, role, regions } });
         } catch (e) {
           const t = (await api("/api/buyer/strategy")).task || {};
           if (t.status !== "运行中") throw e;
@@ -1620,6 +1641,8 @@ function buildAcqConditions() {
 
 async function runUnifiedAcq() {
   const conditions = buildAcqConditions();
+  const regions = getStrategyRegions();
+  if (regions.length) conditions.regions = regions.join(",");
   const body = {
     conditions,
     use_manual: !!($("#acq-use-map") && $("#acq-use-map").checked),
@@ -1692,13 +1715,19 @@ function waitStrategyDone() {
   });
 }
 
+function getStrategyRegions() {
+  return $$("#strategy-regions .region-check:checked").map((c) => c.value);
+}
+
 async function generateStrategy() {
-  const desc = $("#strategy-desc").value.trim();
-  if (!desc) { toast("请先描述你的业务和客户需求", "err"); return; }
-  state.buyerContext = desc;
+  const desc = ($("#strategy-desc") ? $("#strategy-desc").value : "").trim();
+  const role = $("#strategy-role") ? $("#strategy-role").value : "";
+  const regions = getStrategyRegions();
+  if (!desc && !role && !regions.length) { toast("请选择你的角色或目标地区，或描述业务需求", "err"); return; }
+  state.buyerContext = desc + "|" + role + "|" + regions.join(",");
   $("#strategy-plans").innerHTML = `<div class="empty"><div class="ico">🤖</div>AI 正在生成新方案…（进度看右上角任务栏）</div>`;
   try {
-    await api("/api/buyer/strategy", { method: "POST", body: { description: desc } });
+    await api("/api/buyer/strategy", { method: "POST", body: { description: desc, role, regions } });
     pollStrategy();
   } catch (e) {
     toast(e.message, "err");
