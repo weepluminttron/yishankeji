@@ -643,8 +643,18 @@ def _validate_plans(plans):
             warnings.append(f"{label}：缺少目标市场")
         else:
             markets.update(p["markets"])
-        if len(p.get("keywords") or []) < 4:
-            warnings.append(f"{label}：关键词不足 4 个（当前 {len(p.get('keywords') or [])}），搜索覆盖会偏窄")
+        if len(p.get("keywords") or []) < 6:
+            warnings.append(f"{label}：关键词不足 6 个（当前 {len(p.get('keywords') or [])}），搜索覆盖会偏窄")
+        if not p.get("specs"):
+            warnings.append(f"{label}：缺少必中规格/品类，建议补充后再做精准筛选")
+        if not p.get("trigger"):
+            warnings.append(f"{label}：缺少需求触发点/购买信号")
+        if not p.get("first_step"):
+            warnings.append(f"{label}：缺少落地第一步动作")
+        if not p.get("contact_source"):
+            warnings.append(f"{label}：缺少联系方式获取渠道说明")
+        if len(p.get("channels") or []) < 2:
+            warnings.append(f"{label}：获客渠道不足 2 个")
         if not p.get("strategy"):
             warnings.append(f"{label}：缺少获客策略建议")
         if not p.get("pitch"):
@@ -666,35 +676,53 @@ def _strategy_worker(data, settings):
     task_progress("strategy", stage="AI 生成中")
     industry = settings.get("industry", "") or "通用"
     system = (
-        f"你是一名资深 B2B 获客策略顾问，当前服务行业：{industry}。我们是卖家，目标是为我们找到有真实采购意向的买家。"
-        "根据用户的业务描述，设计 4-5 套不同的获客方案，必须覆盖不同客户类型/市场/打法组合；"
-        "方案之间要差异化：buyer_role 或 markets 至少两两不同，禁止出几套几乎一样的方案；"
-        "每套方案都要自问三个问题再输出：① 这类客户为什么现在会买（需求触发点）？② 我们凭什么切入（差异化打法）？"
-        "③ 落地第一步做什么（首触动作）？写进对应字段。"
+        f"你是一名资深 B2B 获客策略顾问，当前服务行业：{industry}。我们是卖家（含贸易商/代理商），"
+        "目标是为我们找到有真实采购意向的买家，不是同行供应商。潜在客户 = 买方，"
+        "买方包括：终端厂商的采购部、系统集成商/总包商、工程商、分销商/代理商、平台型买家、政府/运营商项目业主。"
+        "根据用户的业务描述，设计 4-5 套完全不同的获客方案，覆盖不同买方角色/市场/打法组合；"
+        "每套方案在 buyer_role、markets、channels、cooperation 中至少两项与其他方案不同，禁止出几套几乎一样的方案。"
+        "每套方案必须按以下三步自检后再输出："
+        "① 这类客户现在为什么买（需求触发点/购买信号，写进 trigger）；"
+        "② 我们凭什么切入（差异化打法，写进 moat + strategy）；"
+        "③ 落地第一步做什么（具体动作，写进 first_step）。"
         '只输出一个 JSON 对象，不要输出任何其他内容，格式：'
         '{"plans":[{"title":"方案标题","buyer_role":"目标买方角色（如采购经理/总包/集成商/分销商）",'
-        '"target_customers":"目标客户描述","keywords":["关键词1","关键词2"],'
-        '"markets":["地区1","地区2"],"profit":1到5的整数,"brand":1到5的整数,"demand":1到5的整数,'
-        '"effort":1到5的整数(落地难度，5最难),"timeline":"建议执行节奏(如：1周内建名单+首触，2周内送样)",'
+        '"target_customers":"目标客户画像（谁、规模、画像特征）","specs":["必中规格/品类1","必中规格/品类2"],'
+        '"keywords":["关键词1","关键词2"],"markets":["地区1","地区2"],'
+        '"profit":1到5的整数,"brand":1到5的整数,"demand":1到5的整数,"effort":1到5的整数(落地难度，5最难),'
+        '"trigger":"这类客户现在为什么买/购买信号","timeline":"建议执行节奏(如：1周内建名单+首触，2周内送样)",'
+        '"first_step":"落地第一步具体动作","contact_source":"从哪些公开渠道找联系方式(如官网采购邮箱/年报IR页/招投标平台/展会名录/LinkedIn)",'
         '"pitch":"一句话首触话术/切入点","why":"这套方案的推荐理由与适用前提",'
         '"decision":"决策链与采购周期(如：采购部+技术部双确认，周期2-3个月)",'
         '"moat":"我们的差异化壁垒/切入优势(一句话)",'
-        '"strategy":"获客策略建议","cooperation":"合作模式","channels":["获客渠道1","获客渠道2"],'
+        '"strategy":"获客策略建议","cooperation":"合作模式","channels":["具体获客渠道1","具体获客渠道2"],'
         '"risks":["风险提示1","风险提示2"]}]}'
+        "评分口径：profit=客户单笔/年度利润空间(5最高)；demand=采购频次与数量(5最高)；"
+        "brand=客户规模与公开知名度(5最高)；effort=落地难度(5最难)。评分必须与 buyer_role/cooperation 自洽，"
+        "例如做高门槛大客户时 profit/brand 高、effort 高；做走量工程商时 demand 高、effort 低。"
         "关键词规则：每条必须是【产品/场景词 + 买方意图词】的组合，例如“WDM 采购公告”“光传输扩容 项目方”"
-        "“data center fiber procurement”；禁止只写产品名词，禁止包含百科/论文/新闻/知乎/高校等无效词；"
-        "海外市场的关键词用英文意图词（buyer/purchase/procurement/tender/RFP）；"
-        "每套 8-12 个关键词，尽量覆盖不同搜索场景（招标/询价/扩产/展会/供应商征集）。"
+        "“data center fiber procurement”；禁止只写产品名词，禁止包含百科/论文/新闻/知乎/高校/招聘等无效词；"
+        "海外市场的关键词用英文意图词（buyer/purchase/procurement/tender/RFP/distributor）；"
+        "每套 8-12 个关键词，尽量覆盖不同搜索场景（招标/询价/扩产/展会/供应商征集/采购经理）。"
+        "specs 必须是可用来筛选客户的必中规格/品类，2-5 个，禁止写“采购/招标”等意图词。"
     )
     user = (
         f"公司：{settings.get('company_name', '')}\n"
         f"主营产品：{settings.get('product_name', '')}\n"
         f"业务描述：{desc}\n\n"
-        "请生成方案。关键词请给出可直接用于搜索引擎的短语（每套 8-12 个，尽量覆盖不同场景和地区，海外市场用英文）；"
-        "利润/知名度/需求量用 1-5 整数表示（5 最高）；channels 给出 2-4 个可执行获客渠道（如展会/B2B平台/社群/邮件）；"
-        "risks 给出 1-3 条风险提示（如竞争激烈/资质门槛/账期）；effort 用 1-5 表示落地难度；"
-        "pitch 必须是一句可直接发出去的开场话术；why 必须说清为什么这套方案适合当前业务、前提是什么；"
-        "decision 必须说清这类客户的决策链和采购周期；moat 必须写清我们相对同行的差异化优势（如现货/交期/定制/价格/认证）。"
+        "请生成方案。要求："
+        "1. 关键词可直接用于搜索引擎（每套 8-12 个，覆盖不同场景和地区，海外市场用英文）；"
+        "2. profit/brand/demand/effort 用 1-5 整数（5 最高，effort 5 最难），且与目标客户自洽；"
+        "3. channels 给出 2-4 个具体可执行获客渠道（尽量指名道姓：如 CIOE/慕尼黑上海光博会、1688、LinkedIn、"
+        "行业招投标平台、弱电工程商社群等，不要只写“展会/B2B平台”）；"
+        "4. risks 给出 1-3 条具体风险（如竞争激烈/资质门槛/账期/认证/物流）；"
+        "5. pitch 必须是一句可直接发出去的开场话术，带上我们的身份和能提供的价值；"
+        "6. why 说清为什么这套方案适合当前业务、适用前提是什么；"
+        "7. decision 说清这类客户的决策链和采购周期；"
+        "8. moat 写清我们相对同行的差异化优势（如现货/交期/定制/价格/认证）；"
+        "9. specs 给出 2-5 个必中规格/品类（用于后续精准筛选客户，不要写意图词）；"
+        "10. trigger 写清这类客户现在为什么买（政策/项目/扩产/替换/降本等）；"
+        "11. contact_source 写清从哪些公开渠道找这批客户联系方式。"
     )
     text, err = ai.generate_copy(
         settings.get("openai_api_key"),
@@ -724,17 +752,34 @@ def _strategy_worker(data, settings):
                 effort = 3
             markets_list = [str(x).strip() for x in (p.get("markets") or []) if str(x).strip()][:4]
             keywords = buyer.polish_plan_keywords(p.get("keywords"), markets_list)
+            raw_specs = [str(x).strip() for x in (p.get("specs") or []) if str(x).strip()]
+            if not raw_specs:
+                # 兜底：从关键词里提取干净的产品/场景词作为必中规格
+                seen_s = set()
+                for kw in keywords:
+                    s = re.split(r"\s+(?:采购经理|扩容项目|项目方|采购公告|招标公告|询价公告|中标公告|采购|招标|询价|求购|公告|中标|项目|需求|供应商|procurement|tender|rfq|rfp|purchase|buyer|sourcing|inquiry|distributor|dealer|supplier)\b", kw, flags=re.I)[0].strip()
+                    s = re.sub(r"(?:采购经理|扩容项目|项目方|采购公告|招标公告|询价公告|中标公告|采购|招标|询价|求购|公告|中标|项目|需求|供应商|procurement|tender|rfq|rfp|purchase|buyer|sourcing|inquiry|distributor|dealer|supplier)\s*$", "", s, flags=re.I).strip()
+                    if s and s not in seen_s and not re.search(r"(采购|招标|询价|求购|公告|中标|项目|需求|供应商|procurement|tender|rfq|rfp|purchase|buyer)", s, flags=re.I):
+                        seen_s.add(s)
+                        raw_specs.append(s)
+                if not raw_specs:
+                    raw_specs = [str(x).strip() for x in str(p.get("target_customers", "")).split("、") if str(x).strip()][:2]
+            specs = raw_specs[:6]
             plans.append({
                 "title": str(p.get("title", "获客方案"))[:60],
                 "buyer_role": str(p.get("buyer_role", ""))[:60],
                 "target_customers": str(p.get("target_customers", ""))[:200],
+                "specs": specs,
                 "keywords": keywords,
                 "markets": markets_list,
                 "profit": min(5, max(1, profit)),
                 "brand": min(5, max(1, brand)),
                 "demand": min(5, max(1, demand)),
                 "effort": min(5, max(1, effort)),
+                "trigger": str(p.get("trigger", ""))[:120],
                 "timeline": str(p.get("timeline", ""))[:120],
+                "first_step": str(p.get("first_step", ""))[:120],
+                "contact_source": str(p.get("contact_source", ""))[:120],
                 "pitch": str(p.get("pitch", ""))[:120],
                 "why": str(p.get("why", ""))[:200],
                 "decision": str(p.get("decision", ""))[:120],
@@ -751,12 +796,14 @@ def _strategy_worker(data, settings):
         best_by_sig = {}
         for p in plans:
             sig = (p.get("buyer_role", ""), tuple(sorted(p.get("markets", []))))
-            score = p["profit"] + p["demand"] + p["brand"]
+            score = p["profit"] * 0.25 + p["demand"] * 0.35 + p["brand"] * 0.15 + (6 - p["effort"]) * 0.25
             if sig not in best_by_sig or score > best_by_sig[sig][0]:
                 best_by_sig[sig] = (score, p)
         plans = [v[1] for v in best_by_sig.values()]
-        # 按综合评分降序排列（利润+需求量+知名度），最优方案排最前
-        plans.sort(key=lambda p: p["profit"] + p["demand"] + p["brand"], reverse=True)
+        # 按综合推荐分降序排列（利润25% + 需求量35% + 知名度15% + 易落地25%），最优方案排最前
+        plans.sort(key=lambda p: p["profit"] * 0.25 + p["demand"] * 0.35 + p["brand"] * 0.15 + (6 - p["effort"]) * 0.25, reverse=True)
+        for p in plans:
+            p["score"] = round(p["profit"] * 0.25 + p["demand"] * 0.35 + p["brand"] * 0.15 + (6 - p["effort"]) * 0.25, 1)
         warnings = _validate_plans(plans)
         _tasks["strategy"]["result"] = {"plans": plans, "warnings": warnings}
         task_finish("strategy", "成功", f"生成 {len(plans)} 套方案")

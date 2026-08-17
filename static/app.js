@@ -1639,7 +1639,7 @@ function applyPlan(p) {
   if (!p) return;
   state.acqPlan = p;
   $("#acq-products").value = p.target_customers || "";
-  const specs = [];
+  const specs = (p.specs || []).map((s) => String(s || "").trim()).filter(Boolean);
   (p.keywords || []).forEach((kw) => {
     const kwText = String(kw || "").trim();
     let s = kwText.split(/\s+(?:采购经理|扩容项目|项目方|采购公告|招标公告|询价公告|中标公告|采购|招标|询价|求购|公告|中标|项目|需求|供应商|procurement|tender|rfq|rfp|purchase|buyer|sourcing|inquiry|distributor|dealer|supplier)\b/i)[0] || "";
@@ -1653,7 +1653,7 @@ function applyPlan(p) {
     s = s.trim();
     if (s && specs.indexOf(s) < 0) specs.push(s);
   });
-  $("#acq-specs").value = specs.slice(0, 5).join(",");
+  $("#acq-specs").value = specs.slice(0, 6).join(",");
   $("#acq-seeds").value = (p.keywords || []).join(",");
   $("#acq-regions").value = (p.markets || []).join(",");
   $("#acq-types").value = p.buyer_role || "";
@@ -1662,7 +1662,7 @@ function applyPlan(p) {
   const tag = $("#acq-plan-tag");
   if (tag) {
     tag.style.display = "block";
-    tag.textContent = `📋 已采用 AI 方案：${p.title || ""}${p.profit ? ` ｜ 利润${"★".repeat(Math.max(0, Math.min(5, p.profit)))}` : ""}${p.channels && p.channels.length ? ` ｜ 渠道：${p.channels.join("、")}` : ""}${p.risks && p.risks.length ? ` ｜ 风险：${p.risks.join("；")}` : ""}`;
+    tag.textContent = `📋 已采用 AI 方案：${p.title || ""}${p.score ? ` ｜ 综合 ${p.score} 分` : ""}${specs.length ? ` ｜ 必中规格：${specs.join("、")}` : ""}${p.profit ? ` ｜ 利润${"★".repeat(Math.max(0, Math.min(5, p.profit)))}` : ""}${p.channels && p.channels.length ? ` ｜ 渠道：${p.channels.join("、")}` : ""}${p.risks && p.risks.length ? ` ｜ 风险：${p.risks.join("；")}` : ""}`;
   }
 }
 
@@ -1744,12 +1744,13 @@ function renderPlans(plans, warnings) {
     <div id="plans-body">` + plans.map((p, i) => `
     <div style="border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:10px">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
-        <b>方案 ${"ABCDE"[i] || i + 1}：${esc(p.title)}${i === 0 ? ' <span class="type-chip" style="color:#fff;background:#16a34a">推荐</span>' : ""}</b>
+        <b>方案 ${"ABCDE"[i] || i + 1}：${esc(p.title)}${i === 0 ? ' <span class="type-chip" style="color:#fff;background:#16a34a">推荐</span>' : ""}${p.score ? ` <span class="type-chip" style="color:#fff;background:#6366f1">综合 ${esc(p.score)} 分</span>` : ""}</b>
         <span style="display:flex;gap:6px;flex-wrap:wrap">
           <button class="btn primary sm" data-acq="${i}">🚀 用此方案一键获客</button>
         </span>
       </div>
       <div style="margin-top:6px">🎯 目标客户：${esc(p.target_customers)}</div>
+      ${p.specs && p.specs.length ? `<div class="sub" style="margin-top:2px">🔒 必中规格：${p.specs.map((s) => `<span class="tag-chip">${esc(s)}</span>`).join("")}</div>` : ""}
       ${p.buyer_role ? `<div class="sub" style="margin-top:2px">👤 目标角色：${esc(p.buyer_role)}</div>` : ""}
       <div class="sub" style="margin-top:4px">关键词：${(p.keywords || []).map((k) => `<span class="tag-chip">${esc(k)}</span>`).join("")}</div>
       <div class="sub">地区：${(p.markets || []).map((m) => `<span class="tag-chip">${esc(m)}</span>`).join("") || "—"}</div>
@@ -1761,6 +1762,9 @@ function renderPlans(plans, warnings) {
         ${p.cooperation ? `<span class="type-chip" style="margin-left:12px">${esc(p.cooperation)}</span>` : ""}
       </div>
       ${p.timeline ? `<div class="hint" style="margin-top:6px">🗓 ${esc(p.timeline)}</div>` : ""}
+      ${p.trigger ? `<div class="hint" style="margin-top:6px">📶 需求触发点：${esc(p.trigger)}</div>` : ""}
+      ${p.first_step ? `<div class="hint" style="margin-top:6px">👣 落地第一步：${esc(p.first_step)}</div>` : ""}
+      ${p.contact_source ? `<div class="hint" style="margin-top:6px">🔍 联系方式来源：${esc(p.contact_source)}</div>` : ""}
       ${p.pitch ? `<div style="margin-top:6px;background:#eef6ff;border-radius:8px;padding:8px 10px;font-size:12px">💬 首触：${esc(p.pitch)}</div>` : ""}
       ${p.why ? `<div class="hint" style="margin-top:6px">✅ 推荐理由：${esc(p.why)}</div>` : ""}
       ${p.decision ? `<div class="hint" style="margin-top:6px">🧭 决策链/周期：${esc(p.decision)}</div>` : ""}
