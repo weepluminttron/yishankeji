@@ -1,205 +1,79 @@
-# 光纤行业获客助手
+# AI 获客系统（通用版）
 
-专为光纤行业（光缆、光纤收发器、熔接施工、FTTH、机房改造、弱电工程等）设计的获客工具，支持在**本机**或**腾讯云服务器**上运行，包含四大能力：
+一套开箱即用的 B2B 获客工具：自动找客户线索、AI 获客向导、客户管理（轻量 CRM）、AI 评分与主动触达，一套代码即可私有部署，不限行业。
 
-1. **自动找客户线索**
-   - 网页采集：粘贴企业黄页 / 目录页网址，自动提取公司名与电话；
-   - 定时自动采集：配置网址列表和间隔，后台定时抓取、自动去重入库；
-   - **买家发现**：输入行业关键词 × 目标地区，自动搜索潜在买家、抓取网站并提取邮箱/电话/微信，规则评分 0-10 分（参考 B2B 买家发现流程）；
-   - **社媒评论导入**：抖音 / 小红书评论导出文件一键导入为线索（评论内容自动写入跟进备注）；
-   - **微信聊天记录导入**：微信导出文本按联系人导入，聊天内容成为跟进记录；
-   - Excel / CSV 批量导入（自动去重）、手动录入。
-2. **获客落地页 / 表单**
-   - 独立公网落地页 `http://服务器IP:8017/lp`，访客填写姓名、电话、需求后自动成为客户线索；
-   - 页面文案、咨询电话、按钮文字都可在“设置”里自定义；
-   - 内置反垃圾（蜜罐字段 + 频率限制）。
-3. **客户资料管理（轻量 CRM）**
-   - 客户类型、跟进状态、标签、跟进备注、下次跟进提醒；
-   - 搜索、筛选、批量操作、一键导出 Excel / CSV。
-4. **主动触达工具**
-   - 内置 5 套光纤行业邮件模板 + 3 套短信模板；
-   - SMTP 邮件群发（自动个性化：{{公司}} {{联系人}} {{地区}}…）；
-   - **社媒话术库**：抖音评论 / 小红书评论 / 私信开场白 / 追粉话术，随机生成或 AI 生成（参考来赞、小红书 AI 回复工具思路）；
-   - AI 智能生成营销文案与**线索 AI 评分**（支持 OpenAI / DeepSeek / FastGPT 等兼容接口）；
-   - **🤖 AI 跟进内容生成**：线索详情里点“AI 跟进”，按客户画像自动生成个性化首触邮件 / 短信 / 开场话术，一键复制，不编造联系方式；
-   - **🔍 AI 公司背景速览**：输入公司名即可联网分析规模、主营业务、与我方产品匹配度与采购信号（未能联网时基于名称推断并标注“待核实”）；
-   - 短信名单一键复制 / 导出。
+## 核心功能
 
-### 买家发现的 AI 增强
+1. **AI 获客向导**
+   输入一句话描述你的业务（不限行业）→ 选择“你的角色”（贸易商/分销商/代理商/生产厂家/外贸等）→ 选择客户所在地区 → 直接开始找客户，不需要自己拼关键词。
 
-开启“使用 AI 精筛”后，除判断每条线索是否为潜在买家并重新评分外，还会为每条线索给出**下一步动作建议**（如“电话确认采购预算”“发样品报价单”）；结果列表的“判断依据”列会显示 👉 建议，可直接照着跟进。
+2. **多渠道自动找客户**
+   - 搜索引擎：Bing / 360 / 百度 / 搜狗，支持 SerpAPI、博查等商业搜索源；
+   - 地图 POI：高德地图自动检索多个城市的弱电工程商、系统集成商、通信工程公司；
+   - 行业网站、展会名录、招投标平台、企业黄页；
+   - 自动去噪、去重，提取公司名、电话、邮箱、地址。
 
-### 意向分级 · 自动首触 · 获客分析
+3. **AI 线索评分**
+   每条线索按“匹配度 + 实力”双维度打 S/A/B/C 级，可调用 DeepSeek 等大模型给出评分理由和下一步动作建议（先电话确认 / 发样品 / 报价单等）。
 
-- **🧭 意向识别**：新线索入库后自动做“购买意向分级”（未明确 → 初步了解 → 明确需求 → 对比选型 → 决策采购），并识别紧迫度、预算信号、产品兴趣与建议动作；配置 AI 密钥后可选 AI 分级，失败自动降级到规则。
-- **🤖 自动首触（默认关闭）**：在“设置”里开启后，评分达标且尚未触达的新线索会自动生成个性化首触邮件/短信并排程发送（复用跟进序列机制，默认延迟 1 天，防重复排程）。
-- **📈 获客分析看板**：后台左侧“获客分析”打开独立看板，展示转化漏斗、分来源转化率、分意向阶段转化率、触达效果与高意向待跟进清单。
+4. **客户资料管理（轻量 CRM）**
+   客户列表、搜索筛选、跟进状态、跟进备注、下次提醒、批量导入导出、数据清洗去重、获客分析漏斗。
 
-### 🧠 AI 获客引擎（条件驱动）
+5. **主动触达**
+   内置邮件/短信模板，SMTP 群发自动个性化（公司名、联系人、地区）；AI 一键生成首触邮件、短信、开场话术。
 
-在“买家发现”页填写主营产品、必中规格/品类、目标市场、目标买方类型、最低等级与目标数量，引擎会自动生成多渠道检索方案 → 发现并筛选买家 → 按“匹配度+实力”双维度分级（S/A/B/C）→ 自动补齐缺口迭代，完成后可一键导入客户库（保留评分与等级）。引擎与 AI 获客方案、手动搜索已打通：方案可“🧠 用引擎获客”，手动搜索结果可“🧠 送引擎筛选分级”（离线跑双维度分级，无需再联网）。也可用命令行 `python scripts/run_acquisition.py --conditions 条件文件.json [--seed 已收集线索.json]` 输出策略文档与目标清单。
+6. **获客落地页 / 表单**
+   独立公网落地页，访客填表后自动成为客户线索，内置反垃圾。
 
-### 🌐 多源获客渠道（可配置、可扩展）
+## 运行环境
 
-获客途径被抽象为一组**可独立启停、可配置**的「渠道」，引擎会按配置从不同途径**自动发起网络搜索并采集潜在客户**，结果统一去重归一化后进入抓取/抽取/评分。开箱即用覆盖：
+- 本机 Windows / macOS，或一台云服务器（推荐 2核4G 及以上 Linux）
+- Python 3.10+（也可用 Docker，无需安装 Python）
+- 数据存 SQLite 单文件，无需安装数据库
 
-- **搜索引擎**：Bing / 360 / 搜狗 / SerpAPI / Google CSE / 博查
-- **社交媒体**：LinkedIn / Facebook / Reddit / X
-- **行业网站**：C114 / OFweek / Light Reading
-- **论坛社区**：知乎 / CSDN / Quora
-- **招投标平台**：政府采购网 / 政企集采
-- **工商企业库 / 地图 POI**：用于发现公司主页与本地厂商
+## 快速开始（30 秒看效果）
 
-**接入参数、关键词配置、去重归一化均在 `data/channels_config.json` 中定义**，无需改代码即可：
+1. 把 `.env.example` 复制为 `.env`，按注释填写密钥（至少填后台密码，其余可后补）；
+2. 启动服务（任选一种）：
+   - Windows：双击 `启动工具.bat`；
+   - Linux：`bash start.sh`；
+   - Docker：`docker compose up -d --build`；
+3. 浏览器打开 `http://你的服务器IP:8017`，输入后台密码登录。
 
-- 接入参数：每个渠道的 `provider`（搜索后端）/ `site_scope`（域名限定）/ `rate_limit`（限流）/ `freshness`（时间范围）；密钥走 `settings`（`search_api_key` 覆盖 SerpAPI/博查，`map_api_key` 覆盖地图，`qcc_app_key` 覆盖工商库）。
-- 搜索关键词配置：渠道 `query_template` 模板，占位符 `{kw}`=规格词、`{intent}`=买方意图词（采购/招标/询价…或 buyer/rfq，按市场中英自动切换）、`{market}`=地区、`{site}`=自动注入的 site 限定；引擎按「关键词×市场×意图」组合生成检索式。
-- 去重与归一化：跨渠道按归一化 URL 去重；同一客户出现在多个渠道时合并 `channels` 归因；统一经噪音站点过滤 + 同行供应商信号过滤后进入评分，确保多渠道线索口径一致。
+详细步骤见 [部署文档 DEPLOY.md](DEPLOY.md)，功能使用见 [买家版说明书 USER_GUIDE.md](USER_GUIDE.md)。
 
-**启用 / 扩展**：默认即启用搜索引擎 + 社交媒体 + 行业站 + 论坛 + 招投标 + 工商库 + 地图（付费源与地图需相应密钥）；可在 `conditions.channels` 指定类别，或用命令行 `--channels 搜索引擎,linkedin,zhihu,c114` 临时指定；新增一个获客途径 = 在 `channels_config.json` 的 `channels` 数组加一项（指定 provider/site_scope/模板），代码零改动。
+## 目录结构
 
-```bash
-# 查看全部可用渠道及其接入参数 / 可达性
-python scripts/run_acquisition.py --list-channels
-# 临时指定本次启用的渠道（类别名或渠道 id 均可）
-python scripts/run_acquisition.py --conditions 条件.json --channels 搜索引擎,社交媒体,行业网站,论坛
-# 使用自定义渠道配置
-python scripts/run_acquisition.py --conditions 条件.json --channels-config my_channels.json
+```
+├── server.py              # 主程序（Flask 风格单文件 Web 服务）
+├── core/                  # 核心逻辑：获客引擎、买家发现、评分、邮件、地图等
+├── static/                # 前端页面
+├── scripts/               # 辅助脚本（命令行获客、测试等）
+├── data/                  # 运行数据（首次启动自动创建，含线索库 settings 等）
+├── examples/              # 演示数据（虚构客户，供熟悉系统）
+├── .env.example           # 配置文件模板（复制为 .env 后填写）
+├── Dockerfile / docker-compose.yml
+├── DEPLOY.md / USER_GUIDE.md
 ```
 
-### 🖥️ 引擎任务栏监控（系统托盘 / 状态栏）
+## 配置说明（.env）
 
-`scripts/tray_monitor.py` 可实时监控获客引擎的后台任务与相关子进程，在 Windows 系统托盘或控制台状态栏显示**名称、状态、运行时间**，支持定时刷新、空列表提示、异常退出标记与完整日志：
+所有密钥集中在一个文件 `.env` 里，改完重启服务即生效：
 
-```bash
-# 系统托盘模式（推荐，需 pystray + Pillow，可加 psutil 枚举子进程）
-pip install pystray pillow psutil
-python scripts/tray_monitor.py --base-url http://你的服务器:8017 --password 后台密码
+| 配置项 | 说明 | 必填 |
+|---|---|---|
+| ACCESS_PASSWORD | 后台登录密码 | ✅ |
+| OPENAI_API_KEY / OPENAI_MODEL / OPENAI_API_BASE | AI 接口（DeepSeek 等） | 推荐 |
+| SEARCH_PROVIDER / SERPAPI_API_KEY / BOCHA_API_KEY | 搜索源 | 推荐 |
+| MAP_API_KEY / MAP_PROVIDER | 高德地图（找工程商） | 推荐 |
+| PROXY_ENABLED / PROXY_URL / PROXY_API_URL | 代理（被限流时启用） | 可选 |
+| QCC_APP_KEY / QCC_SECRET_KEY / TYC_TOKEN | 企查查/天眼查 | 可选 |
+| SMTP_HOST / SMTP_USER / SMTP_PASSWORD | 邮件触达 | 可选 |
 
-# 控制台状态栏模式（零依赖）
-python scripts/tray_monitor.py --mode console --base-url http://127.0.0.1:8017 --password 123456lfs
+## 法律与合规声明
 
-# 只读模式：只枚举本机引擎相关进程
-python scripts/tray_monitor.py --mode console --local-only
-```
-
-日志写入 `data/tray_monitor.log`（自动轮转，保留最近 3 份）。托盘菜单提供“刷新 / 打开日志 / 退出”，刷新间隔默认 2 秒（`--refresh` 可调）。
-
-### AI 接口配置
-
-在“设置 → AI”里可配置接口地址与模型，支持所有 OpenAI 兼容协议的服务：
-
-| 服务 | 接口地址 | 模型示例 |
-| --- | --- | --- |
-| OpenAI | `https://api.openai.com/v1` | `gpt-4o-mini` |
-| DeepSeek | `https://api.deepseek.com/v1` | `deepseek-chat` |
-| FastGPT 等自建 | 服务商提供的地址 | 按服务商文档 |
-
-### 群机器人通知（飞书 / 企业微信）
-
-在“设置 → 群机器人通知”里填入群里自定义机器人的 Webhook 地址，然后点“发送测试通知”验证。配置后：
-
-- 落地页收到新客户留资 → 群内即时提醒（含公司、联系人、电话、需求）；
-- 定时自动采集到新线索 → 群内汇总提醒。
-
-### 手机安装（PWA）
-
-工具支持 PWA：用手机浏览器打开后台地址，选“添加到主屏幕”，就会像 App 一样安装到手机桌面，方便销售团队随时跟进客户。落地页同样适用。
-
-### Docker 部署（备选）
-
-不想用 systemd 的话，也可以用 Docker：
-
-```bash
-cp server.env.example server.env   # 先设置好 ACCESS_PASSWORD
-docker compose up -d --build
-```
-
-数据保存在 `./data`（已挂载持久化），更新代码后 `docker compose up -d --build` 即可。
-
-## 本机运行
-
-双击 **`启动工具.bat`**，浏览器打开 `http://127.0.0.1:8017`。
-
-所有数据保存在 `data/app.db`，备份时复制 `data` 文件夹即可。
-
-## 部署到腾讯云服务器（Linux）
-
-### 1. 安装运行环境（Ubuntu / Debian 示例）
-
-```bash
-sudo apt update
-sudo apt install -y git python3 python3-venv
-```
-
-### 2. 拉取代码并安装依赖
-
-```bash
-sudo mkdir -p /data/yishankeji
-sudo chown $USER /data/yishankeji
-cd /data/yishankeji
-git clone https://github.com/weepluminttron/yishankeji.git .
-python3 -m venv venv
-./venv/bin/pip install -r requirements.txt
-```
-
-### 3. 设置访问密码
-
-```bash
-cp server.env.example server.env
-nano server.env   # 把 ACCESS_PASSWORD 改成你的强密码，HOST 保持 0.0.0.0
-```
-
-### 4. 注册为系统服务（开机自启 + 崩溃自动重启）
-
-```bash
-sudo cp deploy/yishankeji.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable yishankeji
-sudo systemctl start yishankeji
-sudo systemctl status yishankeji
-```
-
-### 5. 打开云服务器防火墙端口
-
-在腾讯云控制台（服务器 → 防火墙 / 安全组）放行 **TCP 8017**，然后访问：
-
-- 管理后台：`http://服务器公网IP:8017`（需要访问密码）
-- 获客落地页：`http://服务器公网IP:8017/lp`（客户可公开访问并提交表单）
-
-### 更新代码
-
-```bash
-cd /data/yishankeji
-git pull
-sudo systemctl restart yishankeji
-```
-
-## 邮件配置（SMTP）
-
-发信邮箱需要支持 SMTP：
-
-- **QQ 邮箱**：设置 → 账户 → 开启“POP3/SMTP 服务”并生成授权码；服务器 `smtp.qq.com`，端口 465（SSL）。
-- **163 邮箱**：设置 → 客户端授权密码；服务器 `smtp.163.com`，端口 465（SSL）。
-- **企业邮 / 阿里邮箱**：一般也是 `smtp.公司域名` + 465/587。
-
-在“设置”里填写后点“保存”，再点“发送测试邮件”确认。
-
-## 短信说明
-
-短信需通过运营商短信网关（如阿里云短信）发送，需要营业执照和签名审核。当前版本提供短信模板、号码一键复制和导出，方便粘贴到手机短信或第三方群发平台。
-
-## 采集合规提示
-
-请只采集你有权使用的公开信息，遵守网站条款和相关法律法规。部分网站有验证码、登录墙或反爬措施，采集不到时建议改用 Excel 导入。
-
-## 常见问题
-
-- **页面打不开**：检查腾讯云防火墙/安全组是否放行 8017；检查服务状态 `sudo systemctl status yishankeji`。
-- **忘记访问密码**：编辑 `server.env` 重新设置，重启服务即可。
-- **落地页提交失败**：确认“设置 → 获客落地页”状态为开启。
-
-## 技术说明
-
-- Python 标准库（HTTP 服务）+ SQLite，无第三方依赖（Excel 用 openpyxl、网页解析用 lxml，随附带好）。
-- 默认只在本机 `127.0.0.1:8017` 提供服务，其他设备无法访问。
+- 本系统仅采集互联网**公开可见**的信息，请勿用于获取非公开、需登录或个人隐私数据；
+- 请遵守目标网站的 robots 协议并控制请求频率，不得破解验证码、绕过防护；
+- 本项目内置的客户线索仅用于**合法商业分析**，请勿用于骚扰、恶意营销或侵犯他人权益；
+- `examples/` 中的演示数据均为**虚构**，仅供熟悉系统，请勿当作真实客户使用；
+- 源码按 LICENSE 授权使用，仅限购买方使用，禁止二次转卖。

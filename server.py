@@ -977,19 +977,72 @@ def find_duplicates():
     return groups[:50]
 
 
+# .env / server.env 中可直接配置的全部密钥与业务参数（键 → 后台设置字段）。
+# 买家只需改 .env 一个文件即可完成 AI、搜索、地图、代理、邮箱等全部配置。
+_ENV_SETTING_KEYS = {
+    "OPENAI_API_KEY": "openai_api_key",
+    "OPENAI_MODEL": "openai_model",
+    "OPENAI_API_BASE": "openai_api_base",
+    "SEARCH_PROVIDER": "search_provider",
+    "SEARCH_API_KEY": "search_api_key",
+    "SERPAPI_API_KEY": "serpapi_api_key",
+    "BOCHA_API_KEY": "bocha_api_key",
+    "MAP_API_KEY": "map_api_key",
+    "MAP_PROVIDER": "map_provider",
+    "QCC_APP_KEY": "qcc_app_key",
+    "QCC_SECRET_KEY": "qcc_secret_key",
+    "TYC_TOKEN": "tyc_token",
+    "PROXY_ENABLED": "proxy_enabled",
+    "PROXY_URL": "proxy_url",
+    "PROXY_POOL": "proxy_pool",
+    "PROXY_API_URL": "proxy_api_url",
+    "COMPANY_NAME": "company_name",
+    "INDUSTRY": "industry",
+    "PRODUCT_NAME": "product_name",
+    "SMTP_HOST": "smtp_host",
+    "SMTP_PORT": "smtp_port",
+    "SMTP_SSL": "smtp_ssl",
+    "SMTP_USER": "smtp_user",
+    "SMTP_PASSWORD": "smtp_password",
+}
+
+
+def _env_placeholder(val):
+    """占位符/示例值不写入设置，避免覆盖后台已配置的真实值。"""
+    if not val:
+        return True
+    low = val.lower()
+    return any(t in low for t in ("请改成", "请修改", "your_", "xxx", "change-me", "changeme", "placeholder", "在此填写"))
+
+
 def _load_env_file():
-    """读取 server.env（可选），支持 HOST / PORT / ACCESS_PASSWORD。
-    server.env 的配置优先于 systemd 环境变量，方便只改文件不碰服务。"""
-    env_path = os.path.join(BASE_DIR, "server.env")
-    if not os.path.exists(env_path):
-        return
-    with open(env_path, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            k, v = line.split("=", 1)
-            os.environ[k.strip()] = v.strip()
+    """读取 .env（优先）/ server.env（兼容旧版），支持 HOST / PORT / ACCESS_PASSWORD。
+    密钥类配置自动写入后台设置，买家只改 .env 即可完成全部配置；
+    .env 的配置优先于 systemd 环境变量，方便只改文件不碰服务。"""
+    env_paths = []
+    for name in (".env", "server.env"):
+        p = os.path.join(BASE_DIR, name)
+        if os.path.exists(p):
+            env_paths.append(p)
+    for env_path in env_paths:
+        with open(env_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                os.environ[k.strip()] = v.strip()
+    # 密钥/业务参数 → 后台设置（只写入非空、非占位符的值）
+    updates = {}
+    for env_k, set_k in _ENV_SETTING_KEYS.items():
+        v = os.environ.get(env_k, "")
+        if not _env_placeholder(v):
+            updates[set_k] = v
+    if updates:
+        try:
+            db.save_settings(updates)
+        except Exception:
+            pass
 
 
 def _pw_hash(pw):

@@ -450,7 +450,10 @@ def _discover_one_round(conditions, settings, progress=None):
     # 若 settings 里显式给了 channel_ids（CLI --channels），则优先按显式列表解析
     channel_ids = chmod.get_enabled_channel_ids(conditions, eff_settings, explicit=eff_settings.get("channel_ids"))
 
-    keywords = conditions["specs"] + conditions["keywords"]
+    # 地图/名录渠道补充买家类型词：弱电/系统集成/通信工程等，
+    # 显著提高工程商、集成商 POI 命中（只搜“光纤”会命中大量运营商营业厅）
+    _MAP_BUYER_TERMS = ["弱电工程", "系统集成", "通信工程", "网络工程", "安防监控"]
+    keywords = list(conditions["specs"]) + _MAP_BUYER_TERMS + list(conditions["keywords"])
     # 名录/展会/公司发现词（找全客户）：让搜索引擎渠道也生成“公司/名录/展商”类检索式
     industry = conditions.get("industry", "") or ""
     dir_terms = []

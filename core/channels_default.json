@@ -346,7 +346,12 @@
       "requires_key": "",
       "rate_limit": 0.3,
       "freshness": "",
-      "intents": ["展商 名录", "参展企业", "exhibitor", "exhibition exhibitor list"],
+      "intents": [
+        "展商 名录",
+        "参展企业",
+        "exhibitor",
+        "exhibition exhibitor list"
+      ],
       "access_params": {
         "说明": "行业展会官网/展商名录页，可一页拆出多家参展公司。",
         "endpoint": "搜索引擎 site: 限定",
@@ -365,7 +370,12 @@
       "requires_key": "",
       "rate_limit": 0.3,
       "freshness": "",
-      "intents": ["展商 名录", "参展企业", "company list", "exhibitor list"],
+      "intents": [
+        "展商 名录",
+        "参展企业",
+        "company list",
+        "exhibitor list"
+      ],
       "access_params": {
         "说明": "全网展会/企业列表页，用于批量发现公司。",
         "endpoint": "搜索引擎全站",
@@ -425,7 +435,10 @@
         "endpoint": "高德/腾讯地图 POI API",
         "限制": "需地图 Key；返回厂商名/电话/地址，直接作为候选。"
       },
-      "keyword_config": "由引擎按区域名映射城市后逐城检索；与 web_search 互补。"
+      "keyword_config": "由引擎按区域名映射城市后逐城检索；与 web_search 互补。",
+      "intents": [
+        ""
+      ]
     },
     {
       "id": "zhaopin",

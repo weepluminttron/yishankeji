@@ -1126,6 +1126,9 @@ def _to_candidate(contact, title, snippet, keyword, market, page_text, channels=
     cand["score"] = score
     cand["score_reason"] = reason
     cand["verified"] = _looks_verified(cand)
+    # 地图 POI 等无网址线索：名称已由关键词命中，视为泛行业相关，避免规格未命中被整批丢弃
+    if "amap" in (channels or []):
+        cand["broad"] = True
     # WorkBuddy 式双维度：匹配度 + 实力 → S/A/B/C 等级
     fc = fit_comp_score(cand)
     cand["fit"] = fc["fit"]
@@ -1441,11 +1444,12 @@ def run(keywords, markets=None, max_results=6, urls=None, use_ai=False, settings
     # 多源与单源走同一套过滤口径，保证去重/归一化一致。
     for r in raw_results:
         r["url"] = _resolve_url(r.get("url", ""))
-        if not r.get("url"):
+        if not (r.get("url") or (r.get("title") or "").strip()):
             continue
-        if r["url"] in seen:
+        key = r["url"] or ("n:" + str(r.get("title") or "").strip().lower())
+        if key in seen:
             continue
-        seen.add(r["url"])
+        seen.add(key)
         if _is_noise(r.get("title", ""), r.get("snippet", ""), r["url"]):
             filtered += 1
             continue
@@ -1479,6 +1483,13 @@ def run(keywords, markets=None, max_results=6, urls=None, use_ai=False, settings
 
     def _fetch_worker(t):
         try:
+            if not t.get("url"):
+                cand = _to_candidate(
+                    {"emails": [], "phones": [], "company": "", "website": ""},
+                    t.get("title", ""), t.get("snippet", ""), t.get("keyword", ""), t.get("market", ""),
+                    (t.get("snippet") or "")[:2000], t.get("channels", []),
+                )
+                return ("ok", cand)
             html_text, final_url = fetch_page(t["url"], timeout=10, use_jina=use_jina, jina_timeout=12, settings=settings)
             contact = extract_contacts(html_text, final_url or t["url"])
             if probe_contact_pages and not (contact["emails"] and contact["phones"]):
@@ -1611,12 +1622,15 @@ def run(keywords, markets=None, max_results=6, urls=None, use_ai=False, settings
             c["score_reason"] = (c.get("score_reason", "") + "；该电话为招标平台共享").strip("；")
 
     tier_order = {"S": 0, "A": 1, "B": 2, "C": 3}
-    # AI 精筛只做“建议”，不能因为 AI 保守而把“有公司名+独立网站”的真实线索丢掉
+    # AI 精筛只做“建议”，不能因为 AI 保守而把“有公司名+独立网站”的真实线索丢掉；
+    # 地图 POI / 名录等无网址线索只要有公司名+公开地址/联系方式也保底 2 分，避免整批被丢
     for c in candidates:
-        if (str(c.get("name") or "").strip() and c.get("website")
-                and int(c.get("score") or 0) < 2):
+        has_identity = (str(c.get("name") or "").strip()
+                        and (c.get("website") or c.get("phone") or c.get("email")
+                             or (c.get("note") or "").strip() or (c.get("snippet") or "").strip()))
+        if has_identity and int(c.get("score") or 0) < 2:
             c["score"] = 2
-            c["score_reason"] = (c.get("score_reason") or "") + "；有公司名+独立网站，保底2分"
+            c["score_reason"] = (c.get("score_reason") or "") + "；有公司名+公开地址/联系方式，保底2分"
     candidates.sort(key=lambda c: (tier_order.get(c.get("tier", ""), 9), -int(c.get("score", 0))))
     dropped_low = 0
     keep = []

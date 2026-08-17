@@ -23,3 +23,9 @@ Thumbs.db
 # 虚拟环境
 venv/
 .venv/
+
+# .env 密钥文件（勿提交）
+.env
+
+# 可售卖交付包构建产物
+deliverable/

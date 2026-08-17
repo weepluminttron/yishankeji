@@ -668,6 +668,8 @@ def get_settings():
         "auto_login_trusted": "1",
         "search_provider": "so_free",
         "search_api_key": "",
+        "serpapi_api_key": "",
+        "bocha_api_key": "",
         "search_engine_id": "",
         "search_freshness": "",
         "search_site_filter": "",
@@ -694,6 +696,7 @@ def get_settings():
         "auto_touch_delay": "1",      # 入库后延迟几天再首触
         "auto_touch_channel": "email",  # 首触渠道：email / sms
         # ---- 反爬策略配置（对应"快启精线索"综合反爬体系）----
+        "proxy_enabled": "0",      # 是否启用代理（1=启用，0=关闭）
         "proxy_pool": "",          # 代理池：逗号分隔的代理 URL（http://ip:port 或 http://user:pass@ip:port）
         "proxy_url": "",           # 单个代理 URL（与 proxy_pool 二选一，优先级低于 pool）
         "proxy_api_url": "",       # 动态代理 API（有代理/快代理等短效IP接口，池空自动拉取）
@@ -723,7 +726,7 @@ def save_settings(values):
         "smtp_user", "smtp_password", "openai_api_key", "openai_model", "openai_api_base", "sms_notice",
         "notify_webhook",
         "auto_login_trusted",
-        "search_provider", "search_api_key", "search_engine_id",
+        "search_provider", "search_api_key", "serpapi_api_key", "bocha_api_key", "search_engine_id",
         "search_freshness", "search_site_filter",
         "map_api_key",
         "map_provider",
@@ -735,7 +738,7 @@ def save_settings(values):
         "auto_intent_enabled", "auto_intent_use_ai",
         "auto_touch_enabled", "auto_touch_score", "auto_touch_delay", "auto_touch_channel",
         # 反爬策略配置
-        "proxy_pool", "proxy_url", "proxy_api_url", "proxy_api_refresh",
+        "proxy_pool", "proxy_url", "proxy_api_url", "proxy_api_refresh", "proxy_enabled",
         "delay_search", "delay_fetch", "delay_page", "delay_default",
         "retry_max", "retry_base_delay",
         "probe_contact_pages", "contact_probe_limit",

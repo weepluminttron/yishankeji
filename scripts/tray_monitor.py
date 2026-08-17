@@ -17,7 +17,7 @@
   python scripts/tray_monitor.py --base-url http://123.207.58.61:8017 --password 你的后台密码
 
   # 控制台状态栏模式（无需任何第三方库）
-  python scripts/tray_monitor.py --mode console --base-url http://127.0.0.1:8017 --password 123456lfs
+  python scripts/tray_monitor.py --mode console --base-url http://127.0.0.1:8017 --password 你的后台密码
 
   # 只读模式：不登录、不拉取 Web 任务，仅枚举本机引擎相关子进程
   python scripts/tray_monitor.py --mode console --local-only

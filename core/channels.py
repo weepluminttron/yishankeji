@@ -38,6 +38,7 @@
 import json
 import os
 import re
+import threading
 
 from core import concurrent_search
 
@@ -384,6 +385,11 @@ def _commercial_provider(settings):
     return ""
 
 
+# 高德地图 API 全局节流：多查询/多城市同时并发会触发 QPS 限流导致整批失败
+_MAP_LOCK = threading.Lock()
+import time as _time
+
+
 def _search_map(channel, query, settings):
     """地图 POI 渠道：委托 core.mapsearch 拉取厂商（返回统一字段）。"""
     try:
@@ -401,21 +407,33 @@ def _search_map(channel, query, settings):
         "中东非洲拉美": "迪拜", "广东": "广州", "浙江": "杭州",
         "江苏": "南京", "上海": "上海", "北京": "北京", "四川": "成都",
     }
+    # 大区域自动展开为多个主要城市检索，大幅增加地图 POI 线索量（找全客户）
+    _CITY_LIST = {
+        "中国大陆": ["北京", "上海", "广州", "深圳", "武汉", "成都", "杭州", "南京"],
+        "亚太": ["新加坡", "香港", "吉隆坡", "曼谷"],
+        "欧美": ["洛杉矶", "纽约", "伦敦", "柏林"],
+        "中东非洲拉美": ["迪拜", "开罗", "约翰内斯堡", "圣保罗"],
+    }
     if city in _REGION_CITY:
         city = _REGION_CITY[city]
-    if not city:
-        city = "深圳"
-    try:
-        leads = mapsearch.run_map_search(settings, kw, city, pages=1, max_results=10)
-    except Exception:
-        return []
+    if city in _CITY_LIST:
+        cities = _CITY_LIST[city]
+    else:
+        cities = [city or "深圳"]
     out = []
-    for ld in leads:
-        out.append({
-            "title": str(ld.get("name", "")),
-            "url": str(ld.get("website") or ld.get("url") or ""),
-            "snippet": str(ld.get("address") or ld.get("note") or "")[:200],
-        })
+    for city2 in cities:
+        try:
+            with _MAP_LOCK:
+                leads = mapsearch.run_map_search(settings, kw, city2, pages=1, max_results=8)
+                _time.sleep(0.2)
+        except Exception:
+            continue
+        for ld in leads:
+            out.append({
+                "title": str(ld.get("name", "")),
+                "url": str(ld.get("website") or ld.get("url") or ""),
+                "snippet": (str(ld.get("address") or "") + " " + str(ld.get("note") or "")).strip()[:200],
+            })
     return out
 
 

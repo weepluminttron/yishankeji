@@ -3,14 +3,15 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: crpi-jo8sc8us8vqvvoq7.cn-hangzhou.personal.cr.aliyuncs.com/get1/111:latest
+    image: yishankeji-acquisition:latest
     container_name: yishankeji
     restart: always
     ports:
       - "8017:8017"
     volumes:
       - ./data:/app/data
+      - ./.env:/app/.env:ro
     environment:
       - HOST=0.0.0.0
       - PORT=8017
-      - ACCESS_PASSWORD=${ACCESS_PASSWORD:-123456lfs}
+      - ACCESS_PASSWORD=${ACCESS_PASSWORD:-please-change-me}
