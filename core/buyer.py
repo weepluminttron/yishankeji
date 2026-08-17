@@ -60,14 +60,14 @@ SUPPLIER_WORDS = ["厂家直供", "厂家直销", "现货供应", "批发价", "
                   "supplier", "manufacturer", "wholesale price", "factory price", "export",
                   "我们生产", "我司生产", "主营产品", "热销", "产品中心", "产品介绍",
                   "产品系列", "产品展示", "产品分类", "产品参数", "光纤预制棒"]
-# 纯噪音站点信号（直接过滤）
-NOISE_WORDS = ["黄页", "百科", "招聘", "求职", "文库", "下载", "登录", "注册", "论坛", "博客",
-               "新闻", "资讯", "峰会", "大会", "展会", "知道", "问答", "教程", "视频", "小说",
+# 纯噪音站点信号（直接过滤；注意：公司名录/企业库/大全 是有价值的公司发现源，不能过滤）
+NOISE_WORDS = ["百科", "招聘", "求职", "文库", "下载", "登录", "注册", "论坛", "博客",
+               "新闻", "资讯", "峰会", "大会", "知道", "问答", "教程", "视频", "小说",
                "论文", "期刊", "高校", "大学", "学院", "学术", "学报",
-               "企业库", "名录", "大全", "厂商名录", "公司库", "联系方式大全",
+               "榜单", "排名", "排行榜", "品牌榜", "公司排名",
                # 页面级噪音：错误页/反爬验证页/招标门户/免费发布平台
                "错误页面", "404", "access verification", "安全验证", "人机验证",
-               "招标网", "采购网", "千里马", "优云优客", "免费发布",
+               "招标网", "采购网", "千里马", "优云优客", "免费发布", "验证码",
                "mouser", "贸泽", "szlcsc", "立创", "c-fol", "讯石", "维库", "得捷", "digikey",
                "元器件商城", "电子元件商城", "元件查询", "现货商城"]
 
@@ -124,16 +124,22 @@ BLOCKED_DOMAINS = (
     "baidu.com", "zhihu.com", "xiaohongshu.com", "douyin.com", "bilibili.com",
     "weibo.com", "sohu.com", "sina.com", "163.com", "qq.com", "toutiao.com",
     "facebook.com", "linkedin.com", "youtube.com", "instagram.com", "wikipedia.org",
-    "icp.chinaz.com", "beian.miit.gov.cn", "tianyancha.com", "qichacha.com", "aiqicha.baidu.com",
-    "gongshang.mingluji.com", "qcc.com",
+    "icp.chinaz.com", "beian.miit.gov.cn",
     # 内容/技术博客与招聘平台（大概率不是买家）
     "csdn.net", "cnblogs.com", "juejin.cn", "segmentfault.com", "51cto.com", "oschina.net",
     "infoq.cn", "eefocus.com", "elecfans.com", "21ic.com", "zhipin.com", "liepin.com",
-    "51job.com", "c114.com.cn",
-    "gongchang.com", "11467.com", "ofweek.com", "cnpp.com",
-    # 黄页/免费信息站/招标门户类域名（多为噪音或反爬拦截页）
-    "huangye88.com", "chaomiw.com", "fengj.com", "qianlima.com",
+    "51job.com",
+    "cnpp.com",
+    # 招标门户类域名（多为噪音或反爬拦截页）；企业库/名录站保留用于公司发现
+    "qianlima.com", "chaomiw.com",
+    # 榜单/品牌榜/工商查询/招聘/股吧/回收/供应商目录类页面（不是买方主体）
+    "jobui.com", "qichamao.com", "chinapp.com", "gongchang.com", "11467.com",
+    "xueqiu.com", "zz91.com", "jrzb.cn", "zjtcn.com",
 )
+
+_ANNOUNCE_MARKS = ("采购公告", "招标公告", "询价公告", "中标公告", "采购项目", "招标项目", "采购需求",
+                "采购计划", "招标采购", "询比价", "结果公告", "更正公告", "补充公告", "采购信息",
+                "招标信息", "征集公告", "公示", "单一来源", "评审结果", "中标", "采购结果", "采购")
 
 WEBMAILS = {"qq.com", "163.com", "126.com", "gmail.com", "outlook.com", "hotmail.com",
             "foxmail.com", "sina.com", "139.com", "aliyun.com", "icloud.com", "yahoo.com"}
@@ -928,8 +934,21 @@ def _is_noise(title, snippet, url):
         return True
     if _is_vpn_link(url):
         return True
+    u = (url or "").lower()
+    if "/kw-" in u or "/kw_" in u:
+        return True
     t = ((title or "") + (snippet or "") + " " + (url or "")).lower()
     return any(w in t for w in NOISE_WORDS)
+
+
+def _is_directory_result(title, snippet):
+    """公司名录/企业库/展商列表类结果：即使没有采购意图词也保留（名录页可拆出多家公司）。"""
+    t = ((title or "") + " " + (snippet or "")).lower()
+    return any(w in t for w in (
+        "名录", "大全", "企业库", "公司库", "厂商", "黄页", "公司列表", "企业列表",
+        "companies", "company list", "directory", "suppliers", "manufacturers",
+        "exhibitors", "展商", "b2b",
+    ))
 
 
 def _text_signals(text):
@@ -941,6 +960,34 @@ def _text_signals(text):
     return cn, en, sup, strong
 
 
+def _is_company_name(cand):
+    if any(h in cand for h in ("公司", "集团", "有限", "股份")):
+        return True
+    if re.search(r"(科技|通信|网络|电子|光电|实业|贸易|工程|智能|信息|技术|集成|系统|机电|自动化|能源|电力|安防|弱电|数据|互联|软件|精密|新材料|半导体|光器件|光模块)$", cand):
+        return True
+    low = cand.lower()
+    return any(h in low for h in ("telecom", "networks", "communications", "technologies",
+                                  "technology", "optical", "photonics", "systems", "solutions",
+                                  "electronics", "engineering", "industries", "holdings", "berhad",
+                                  "pte", "sdn", "plc", "gmbh", "inc", "ltd", "llc", "corp",
+                                  "company", "group", "integrated", "株式会社"))
+
+
+def extract_company_name(text):
+    """从公告/名录/门户标题中提取公司主体（如“XX有限公司 询比价”→ XX有限公司）。"""
+    t = (text or "")[:600]
+    for m in re.finditer(r"([\u4e00-\u9fa5A-Za-z0-9（）()·&\-]{2,50}?(?:有限责任公司|股份有限公司|有限公司|集团有限公司|集团|公司))", t):
+        cand = m.group(1).strip(" -_|｜，。:：")
+        cand = re.split(r"\d{4}年\d{1,2}月\d{1,2}日|发布|采购公告|招标公告|询价公告|询比价|中标公告|采购结果|采购项目|招标项目| - ", cand)[0].strip()
+        if 4 <= len(cand) <= 60 and _is_company_name(cand):
+            return cand
+    for m in re.finditer(r"([A-Z][A-Za-z0-9&.\-]{1,40}(?:\s+[A-Z][A-Za-z0-9&.\-]{1,40}){1,3})", t):
+        cand = m.group(1).strip()
+        if _is_company_name(cand):
+            return cand
+    return ""
+
+
 def _clean_company(raw, url):
     if not raw:
         return ""
@@ -948,8 +995,19 @@ def _clean_company(raw, url):
     name = re.sub(r"[-_|｜]\s*(官网|首页|企业黄页|黄页|官方网站|公司简介|about|home|official)\s*$", "", name, flags=re.I)
     name = re.sub(r"\s*[-_|｜]\s*[^-_|｜]{0,12}(网|站|平台)\s*$", "", name)
     name = re.sub(r"(官网|首页|欢迎访问|欢迎来到)[：: ]*", "", name)
+    # 目录/榜单尾巴：3家、4条、榜单 - 职友集、..、日期发布
+    name = re.sub(r"\s*\d+\s*(家|条|项)$", "", name)
+    name = re.sub(r"\s*榜单\s*[-_|｜]?\s*.*$", "", name)
+    name = re.sub(r"\d{4}年\d{1,2}月\d{1,2}日(?:发布|发)?", "", name)
+    name = re.sub(r"\s*\.{2,}\s*\d*\s*$", "", name)
+    # 公司后缀后的栏目/频道尾巴（如“XX股份有限公司_激光器件_综合器件”）截断
+    mm = None
+    for m in re.finditer(r"(股份有限公司|有限责任公司|有限公司|集团有限公司|公司|集团)", name):
+        mm = m
+    if mm:
+        name = name[:mm.end()]
     name = name.strip(" -_|｜，。")
-    if any(w in name for w in ("电话", "联系", "邮箱", "地址", "首页", "欢迎")):
+    if any(w in name for w in ("电话", "联系", "邮箱", "地址", "首页", "欢迎", "榜单", "排名")):
         return ""
     return name[:80]
 
@@ -1023,7 +1081,7 @@ def _score_candidate(cand, page_text):
     if cand.get("phone"):
         score += 2
         reasons.append("有电话")
-    if cand.get("company"):
+    if cand.get("company") or cand.get("name"):
         score += 1
         reasons.append("有公司名")
     if cand.get("whatsapp") or cand.get("wechat"):
@@ -1039,6 +1097,10 @@ def _to_candidate(contact, title, snippet, keyword, market, page_text, channels=
     email = (contact.get("emails") or [""])[0]
     phone = (contact.get("phones") or [""])[0]
     name = contact.get("company") or _clean_company(title, contact.get("website") or "") or ""
+    if name and any(m in name for m in _ANNOUNCE_MARKS):
+        ex = extract_company_name(title + " " + snippet + " " + page_text[:200])
+        if ex:
+            name = ex
     if not name or name.lower() in ("undefined", "none", "null"):
         name = "未命名"
     cand = {
@@ -1074,6 +1136,102 @@ def _to_candidate(contact, title, snippet, keyword, market, page_text, channels=
     cand["tags"] = fc["tier"] + "级"
     cand["query"] = keyword
     return cand
+
+
+def extract_directory_candidates(html_text, url, keyword="", market="", snippet="", channels=None):
+    """从公司名录/展商列表/企业库页面中拆出多个真实公司线索（找全客户的核心）。"""
+    anno = ("采购公告", "招标公告", "询价公告", "中标公告", "采购项目", "招标项目", "采购需求",
+            "采购计划", "招标采购", "询比价", "结果公告", "更正公告", "补充公告", "采购信息",
+            "招标信息", "征集公告", "公示", "单一来源", "单一谈判", "结果公示", "评审结果",
+            "中标", "采购结果", "预测报告", "行业趋势", "市场报告", "研究报告", "发展前景",
+            "测试", "检测", "产品", "平台", "报告", "趋势", "前景", "多种", "白皮书", "黄页",
+            "首页", "联系我们", "关于我们", "产品中心", "新闻中心", "公司简介", "更多",
+            "点击查看", "查看详情")
+    nav = ("home", "about", "contact", "products", "news", "service", "support", "privacy",
+           "terms", "login", "register", "download", "中文", "english", "carrier", "consumer",
+           "center", "request", "license", "courses", "online", "get", "help", "careers",
+           "blog", "global", "cloud")
+    try:
+        doc = lh.fromstring(html_text)
+    except Exception:
+        return []
+    page_host = _domain(url)
+    text_all = re.sub(r"<script.*?</script>|<style.*?</style>", " ", html_text, flags=re.S | re.I)
+    text_all = re.sub(r"<[^>]+>", " ", text_all)
+    emails = contact_probe.clean_emails(m.lower() for m in EMAIL_RE.findall(text_all))[:6]
+    phones = contact_probe.clean_phones(m.replace("-", "") for m in MOBILE_RE.findall(text_all) + LANDLINE_RE.findall(text_all))[:6]
+    out, seen = [], set()
+    for a in doc.xpath("//a[@href]"):
+        href = str(a.get("href") or "").strip()
+        anchor = " ".join((a.text_content() or "").split()).strip()
+        if not href or not anchor or len(anchor) < 4 or len(anchor) > 60:
+            continue
+        low = anchor.lower()
+        if any(m in anchor for m in anno):
+            continue
+        if low in nav or any(low.startswith(n) for n in ("javascript:", "mailto:", "tel:")):
+            continue
+        # 收紧公司名识别：中文名录项必须含“公司/集团/有限/股份”（避免拆出栏目名/关键词名）；
+        # 英文必须含公司后缀词（Inc/Ltd/Telecom/Networks/…），排除导航/产品标题
+        is_cn = any(h in anchor for h in ("公司", "集团", "有限", "股份"))
+        is_en = False
+        if re.fullmatch(r"[A-Za-z0-9&.\-() ]{3,60}", low):
+            toks = [t.strip("&.-") for t in re.split(r"[\s()]+", low) if t.strip("&.-")]
+            strong = [t for t in toks if any(h in t for h in (
+                "telecom", "networks", "communications", "technologies", "technology", "optical",
+                "photonics", "systems", "solutions", "electronics", "engineering", "industries",
+                "holdings", "berhad", "pte", "sdn", "plc", "gmbh", "inc", "ltd", "llc", "corp",
+                "company", "group", "integrated", "株式会社"))]
+            is_en = bool(strong) and not all(t in nav for t in toks)
+        if not (is_cn or is_en):
+            continue
+        abs_url = urllib.parse.urljoin(url, href)
+        if not abs_url.startswith(("http://", "https://")):
+            continue
+        if "/kw-" in abs_url.lower() or "/kw_" in abs_url.lower():
+            continue
+        host = _domain(abs_url)
+        if not host or host == page_host or host.endswith("." + page_host) or page_host.endswith("." + host):
+            continue
+        if is_blocked(abs_url) or _is_vpn_link(abs_url):
+            continue
+        key = (low, host)
+        if key in seen:
+            continue
+        seen.add(key)
+        cand = {
+            "name": (_clean_company(anchor, abs_url) or anchor)[:80],
+            "contact": "",
+            "phone": phones[0] if phones else "",
+            "email": emails[0] if emails else "",
+            "region": market,
+            "type": "终端客户",
+            "source": "名录发现",
+            "broad": True,
+            "tags": "C级",
+            "website": abs_url,
+            "whatsapp": "",
+            "wechat": "",
+            "snippet": (snippet or "")[:200],
+            "note": f"来自公司名录/企业库页面（{url[:80]}）；关键词：{keyword}".strip(),
+            "next_action": "",
+            "verified": False,
+            "path": "官网公开联系方式 / 名录页来源链接（合法公开渠道）",
+            "channels": ",".join(channels or []) if channels else "名录发现",
+            "broad": True,
+        }
+        sc, rs = _score_candidate(cand, text_all)
+        cand["score"] = sc
+        cand["score_reason"] = rs
+        cand["verified"] = _looks_verified(cand)
+        fc = fit_comp_score(cand)
+        cand["fit"] = fc["fit"]
+        cand["comp"] = fc["comp"]
+        cand["tier"] = fc["tier"]
+        out.append(cand)
+        if len(out) >= 30:
+            break
+    return out
 
 
 def _merge_same_domain(cands):
@@ -1128,8 +1286,8 @@ def ai_filter(settings, candidates, context=""):
         return None
     from core import ai
     rows = []
-    for i, c in enumerate(candidates):
-        rows.append(f"{i}|{c.get('name','')[:30]}|{c.get('website','')}|{c.get('email','')}|{c.get('snippet','')[:80]}")
+    for i, c in enumerate(candidates[:40]):
+        rows.append(f"{i}|{c.get('name','')[:40]}|{c.get('website','')}|{c.get('email','')}")
     industry = settings.get("industry", "") or "通用"
     company = settings.get("company_name", "") or "我方公司"
     products = settings.get("product_name", "") or "我们的产品"
@@ -1139,13 +1297,8 @@ def ai_filter(settings, candidates, context=""):
         "结合下面的【业务与理想客户描述】判断每条线索是【潜在买家】还是【供应商/同行/无关内容】。"
         "只输出一行 JSON 数组，元素格式："
         '{"i":序号,"buyer":true或false,"score":0到10的整数,"reason":"一句话结论",'
-        '"points":["2到3条具体判断依据，如采购意向、规模信号、匹配度"],'
-        '"fit":0到50的整数（品类/规格/定制匹配度）,'
-        '"comp":0到50的整数（体量/层级/活跃度/可持续性）,'
-        '"signal":"该客户最明显的采购信号(一句话，如：正在招标/刚中标/扩产采购)",'
-        '"window":"最佳触达窗口(如：Q3扩产投产前送样 / 中标后48小时内)",'
-        '"next_action":"针对该线索的下一步动作建议（如：电话确认采购预算 / 发样品报价单 / 加微信发案例，20字内）"}，'
-        "不要输出任何其他内容。reason、points、next_action 必须基于线索本身的真实信息，禁止编造。"
+        '"next_action":"一句动作建议，20字内"}，'
+        "不要输出任何其他内容。reason、next_action 必须基于线索本身的真实信息，禁止编造。"
     )
     user = (
         f"【业务与理想客户描述】\n{desc}\n\n"
@@ -1298,7 +1451,7 @@ def run(keywords, markets=None, max_results=6, urls=None, use_ai=False, settings
             continue
         cn, en, sup, strong = _text_signals(r.get("title", "") + " " + r.get("snippet", ""))
         # 片段里只有供应商信号、没有任何采购意向 → 大概率是同行，跳过抓取
-        if sup >= 2 and cn == 0 and en == 0 and strong == 0:
+        if sup >= 2 and cn == 0 and en == 0 and strong == 0 and not _is_directory_result(r.get("title", ""), r.get("snippet", "")):
             filtered += 1
             continue
         r.setdefault("channels", [])
@@ -1321,7 +1474,7 @@ def run(keywords, markets=None, max_results=6, urls=None, use_ai=False, settings
     except Exception:
         _probe_smart = None
     use_jina = bool((settings or {}).get("use_jina_fallback", True))
-    fetch_targets = targets[:30]
+    fetch_targets = targets[:60]
     workers = max(1, min(int((settings or {}).get("max_fetch_workers", 8) or 8), 16))
 
     def _fetch_worker(t):
@@ -1347,6 +1500,13 @@ def run(keywords, markets=None, max_results=6, urls=None, use_ai=False, settings
             page_text = re.sub(r"<script.*?</script>|<style.*?</style>", " ", html_text, flags=re.S | re.I)
             page_text = re.sub(r"<[^>]+>", " ", page_text)[:2000]
             cand = _to_candidate(contact, t.get("title", ""), t.get("snippet", ""), t.get("keyword", ""), t.get("market", ""), page_text, t.get("channels", []))
+            # 公司名录/企业库/展商列表页：一页拆出多家公司，显著提升线索量
+            multi = extract_directory_candidates(
+                html_text, t.get("url", ""), t.get("keyword", ""), t.get("market", ""),
+                t.get("snippet", ""), t.get("channels", []),
+            )
+            if len(multi) >= 2:
+                return ("ok_list", multi)
             return ("ok", cand)
         except urllib.error.HTTPError as e:
             return ("err", f"{t['url']} 抓取失败：页面返回 {e.code}（可能已失效或需登录）")
@@ -1365,20 +1525,27 @@ def run(keywords, markets=None, max_results=6, urls=None, use_ai=False, settings
         status, payload = res
         if status == "err":
             errors.append(payload)
+        elif status == "ok_list":
+            candidates.extend(payload)
         else:
             candidates.append(payload)
 
     candidates = _merge_same_domain(candidates)
 
-    if use_ai:
+    if use_ai and candidates:
         if progress:
             progress({"stage": "AI 智能筛选", "done": 0, "total": len(candidates)})
         ta = time.time()
-        ai_map = ai_filter(settings, candidates, context)
+        # 候选过多时只让 AI 精筛前 40 条（避免提示词超长/超时），其余按规则评分保留
+        ai_pool = candidates[:40]
+        ai_map = ai_filter(settings, ai_pool, context)
         timings["ai"] = time.time() - ta
         if ai_map:
             keep = []
             for i, c in enumerate(candidates):
+                if i >= len(ai_pool):
+                    keep.append(c)
+                    continue
                 item = ai_map.get(i)
                 if item is None:
                     keep.append(c)
@@ -1444,6 +1611,12 @@ def run(keywords, markets=None, max_results=6, urls=None, use_ai=False, settings
             c["score_reason"] = (c.get("score_reason", "") + "；该电话为招标平台共享").strip("；")
 
     tier_order = {"S": 0, "A": 1, "B": 2, "C": 3}
+    # AI 精筛只做“建议”，不能因为 AI 保守而把“有公司名+独立网站”的真实线索丢掉
+    for c in candidates:
+        if (str(c.get("name") or "").strip() and c.get("website")
+                and int(c.get("score") or 0) < 2):
+            c["score"] = 2
+            c["score_reason"] = (c.get("score_reason") or "") + "；有公司名+独立网站，保底2分"
     candidates.sort(key=lambda c: (tier_order.get(c.get("tier", ""), 9), -int(c.get("score", 0))))
     dropped_low = 0
     keep = []

@@ -45,7 +45,7 @@ def normalize_conditions(conditions):
       keywords        额外检索种子词（可空，默认由 specs 衍生）
       regions         目标市场列表（如 ["中国大陆","亚太","欧美","中东非洲拉美"]）
       buyer_types     目标买方类型（如 ["光无源器件厂","光模块厂","系统集成商","近期招标扩容"]）
-      min_tier        最低保留等级（S/A/B/C，默认 "B"）
+      min_tier        最低保留等级（S/A/B/C，默认 "C"：全部保留，宁多勿漏）
       exclude         排除公司名/域名片段（如竞争对手、自家）
       channels        启用的发现渠道（默认全部：["web_search","company_db","exhibition","procurement"]）
       max_results     目标客户数量（达到即停止迭代，默认 30）
@@ -59,15 +59,17 @@ def normalize_conditions(conditions):
     c.setdefault("keywords", [])
     c.setdefault("regions", ["中国大陆", "亚太", "欧美", "中东非洲拉美"])
     c.setdefault("buyer_types", ["光无源器件厂", "光模块厂", "系统集成商", "近期招标扩容"])
-    c.setdefault("min_tier", "B")
+    c.setdefault("min_tier", "C")
     c.setdefault("exclude", [])
-    c.setdefault("channels", ["web_search", "procurement", "exhibition"])
-    c.setdefault("max_results", 30)
+    c.setdefault("my_role", "贸易商/分销商")
+    c.setdefault("channels", ["web_search", "procurement", "exhibition", "company_db", "map", "industry_site"])
+    c.setdefault("max_queries_per_channel", 18)
+    c.setdefault("max_results", 60)
     c.setdefault("allow_broad", False)
     c.setdefault("enrich_limit", 30)
     c.setdefault("recency", "")          # 时间范围：day/week/month/year（可选）
     c.setdefault("site_scope", "")       # 限定站点/域名：如 gov.cn,in（可选）
-    c.setdefault("verify_limit", 20)     # 官网定向抓取核验数量上限
+    c.setdefault("verify_limit", 10)     # 官网定向抓取核验数量上限（控制整体耗时）
     c["ai_plan"] = c.get("ai_plan") if isinstance(c.get("ai_plan"), dict) else {}
 
     def as_list(v):
@@ -132,9 +134,9 @@ def normalize_conditions(conditions):
         raise ValueError("至少需要提供一个 specs（必中规格）或 keywords（检索种子）")
     c["min_tier"] = str(c["min_tier"]).upper()
     if c["min_tier"] not in ("S", "A", "B", "C"):
-        c["min_tier"] = "B"
+        c["min_tier"] = "C"
     try:
-        c["max_results"] = max(1, int(c.get("max_results") or 30))
+        c["max_results"] = max(1, int(c.get("max_results") or 60))
     except Exception:
         c["max_results"] = 30
     return c
@@ -154,6 +156,7 @@ _BUYER_SUFFIX = {
 _OVERSEAS_WORDS = (
     "印度", "印尼", "越南", "泰国", "马来西亚", "日本", "韩国", "新加坡", "沙特", "阿联酋",
     "巴西", "尼日利亚", "德国", "英国", "法国", "美国", "欧洲", "中东", "非洲", "拉美", "海外",
+    "欧美", "亚太", "北美", "南亚", "日韩", "东南亚", "中东非洲拉美", "大洋洲",
 )
 
 
@@ -194,6 +197,33 @@ def _is_overseas(market):
     return bool(re.search(r"[a-zA-Z]{2,}", m)) or any(w in m for w in _OVERSEAS_WORDS)
 
 
+# 中文市场名 → 英文检索代表词（海外区域用英文找客户命中率高得多）
+_EN_MARKET_MAP = {
+    "中国大陆": ["China"],
+    "亚太": ["Asia Pacific", "Singapore", "Malaysia", "Vietnam", "Indonesia"],
+    "东南亚": ["Southeast Asia", "Vietnam", "Indonesia", "Philippines", "Malaysia", "Thailand"],
+    "南亚": ["South Asia", "India", "Bangladesh", "Pakistan"],
+    "日韩": ["Japan", "South Korea"],
+    "欧美": ["Europe", "USA", "Germany", "UK", "Netherlands"],
+    "北美": ["North America", "USA", "Canada"],
+    "欧洲": ["Europe", "Germany", "UK", "Netherlands", "France"],
+    "中东非洲拉美": ["Middle East", "Africa", "Latin America", "UAE", "Nigeria", "Brazil"],
+    "中东": ["Middle East", "UAE", "Saudi Arabia"],
+    "非洲": ["Africa", "Nigeria", "Kenya", "Egypt"],
+    "拉美": ["Latin America", "Brazil", "Mexico"],
+}
+
+
+def _market_terms(m):
+    """市场名 → 检索用词（保留原词，并补充英文代表词）。"""
+    m = (m or "").strip()
+    out = [m] if m else []
+    for t in _EN_MARKET_MAP.get(m, []):
+        if t not in out:
+            out.append(t)
+    return out
+
+
 def _expand_keywords(kw):
     """规格词同义词扩展；优先复用 buyer，缺失（无 lxml）时退回内置映射。"""
     try:
@@ -209,6 +239,43 @@ def _expand_keywords(kw):
     return [kw] + SYN.get(kw.lower(), [])
 
 
+_EN_BUYER_SUFFIX = {
+    "系统集成商/工程商": ["system integrator", "network integrator", "telecom contractor", "data center contractor"],
+    "系统集成商": ["system integrator", "network integrator", "telecom contractor"],
+    "运营商/ISP采购经理": ["ISP", "telecom operator", "carrier", "network operator"],
+    "运营商": ["ISP", "telecom operator", "carrier"],
+    "光无源器件厂": ["component manufacturer", "passive component maker"],
+    "光模块厂": ["optical module manufacturer", "transceiver module maker"],
+    "贸易商/分销商": ["distributor", "wholesaler", "trading company"],
+    "代理商": ["agent", "reseller", "channel partner"],
+    "生产厂家": ["manufacturer", "OEM", "factory"],
+    "外贸出口商": ["importer", "buying agent", "procurement office"],
+    "近期招标扩容": ["tender", "network expansion project", "capacity expansion"],
+}
+
+
+def _en_buyer_suffix_for(bt):
+    """海外市场专用：买方类型 → 英文检索后缀（找欧美/东南亚客户用英文命中率高）。"""
+    t = (bt or "").strip()
+    if t in _EN_BUYER_SUFFIX:
+        return _EN_BUYER_SUFFIX[t]
+    lower = t.lower()
+    out = []
+    if any(w in lower for w in ("integrator", "集成", "总包", "工程")):
+        out += ["system integrator", "network integrator", "telecom contractor"]
+    if any(w in lower for w in ("distributor", "分销", "经销", "代理")):
+        out += ["distributor", "reseller", "channel partner"]
+    if any(w in lower for w in ("operator", "isp", "运营商", "carrier")):
+        out += ["ISP", "telecom operator", "carrier"]
+    if any(w in lower for w in ("manufacturer", "工厂", "生产", "器件", "module", "模块")):
+        out += ["component manufacturer", "optical module manufacturer"]
+    if any(w in lower for w in ("procurement", "采购", "buyer", "sourcing")):
+        out += ["procurement manager", "sourcing engineer", "buyer"]
+    if not out:
+        out = ["buyer", "procurement", "integrator"]
+    return out[:4]
+
+
 def _buyer_queries(kw, market):
     """买方意图检索式；优先复用 buyer.build_queries，缺失时退回内置模板。"""
     try:
@@ -216,10 +283,14 @@ def _buyer_queries(kw, market):
         return list(buyer.build_queries(kw, market))
     except Exception:
         pass
-    overseas = bool(re.search(r"[a-zA-Z]{2,}", market or ""))
+    overseas = _is_overseas(market)
     variants = (["采购", "询价"], ["招标", "公告"], ["求购", "信息"], ["需要", "报价"]) if not overseas \
-        else (["buyer", "purchase"], ["rfq", "tender"], ["distributor", "import"])
-    return [f"{kw} {v} {market}".strip() for v in variants]
+        else (["buyer", "purchase"], ["rfq", "tender"], ["distributor", "import"], ["supplier", "wholesale"])
+    out = []
+    for m in _market_terms(market):
+        for v in variants:
+            out.append(f"{kw} {v} {m}".strip())
+    return out
 
 
 def generate_plan(conditions):
@@ -249,25 +320,54 @@ def generate_plan(conditions):
                     queries_by_channel["web_search"].append(q)
                     queries_by_channel["procurement"].append(q)
 
-    # 2) 新兴市场/海外专项：import / tender / distributor 买方侧检索
+    # 1b) 海外市场：按买方类型补充英文检索式（欧美/东南亚用英文页面命中率高得多）
+    for bt in conditions["buyer_types"]:
+        for suf in _en_buyer_suffix_for(bt):
+            for kw in expanded[:6]:
+                for m in (markets or [""]):
+                    if _is_overseas(m):
+                        for tm in _market_terms(m):
+                            q = f"{kw} {suf} {tm}".strip()
+                            queries_by_channel["web_search"].append(q)
+                            queries_by_channel["procurement"].append(q)
+
+    # 2) 新兴市场/海外专项：import / tender / distributor 买方侧检索（海外区域自动补充英文代表词）
     for kw in expanded[:6]:
         for m in (markets or [""]):
             if _is_overseas(m):
-                for suf in ("import", "tender", "procurement", "distributor", "ISP"):
-                    q = f"{kw} {suf} {m}".strip()
-                    queries_by_channel["web_search"].append(q)
-                    queries_by_channel["procurement"].append(q)
+                for tm in _market_terms(m):
+                    for suf in ("import", "tender", "procurement", "distributor", "ISP", "buyer"):
+                        q = f"{kw} {suf} {tm}".strip()
+                        queries_by_channel["web_search"].append(q)
+                        queries_by_channel["procurement"].append(q)
 
-    # 3) 通用规格检索（兜底覆盖）
+    # 3) 通用规格检索（兜底覆盖）+ 公司名录/展会/地图发现（找全客户的关键）
+    industry = conditions.get("industry", "") or ""
     for kw in expanded:
         for m in (markets or [""]):
             for q in _buyer_queries(kw, m):
                 queries_by_channel["web_search"].append(q)
-        queries_by_channel["company_db"].append(f"{kw} 公司 官网")
+            # 公司名录发现：国内用公司/企业名录，海外用 companies / company list
+            if _is_overseas(m):
+                for tm in _market_terms(m):
+                    queries_by_channel["company_db"].append(f"{kw} companies {tm}".strip())
+                    queries_by_channel["company_db"].append(f"{kw} company list {tm}".strip())
+                    queries_by_channel["company_db"].append(f"telecom companies {tm}".strip())
+            else:
+                queries_by_channel["company_db"].append(f"{kw} 公司 官网")
+                queries_by_channel["company_db"].append(f"{kw} 公司 名录")
+                queries_by_channel["company_db"].append(f"{kw} 企业 名录")
+        if industry:
+            queries_by_channel["company_db"].append(f"{industry} 公司 名录")
+            queries_by_channel["company_db"].append(f"{industry} 企业 名录")
         if "exhibition" in conditions["channels"]:
-            expo = conditions.get("industry", "") or ""
-            expo_q = f"{expo} 展会 展商 {kw}".strip()
+            expo_q = f"{industry} 展会 展商 {kw}".strip() if industry else f"{kw} 展会 展商".strip()
             queries_by_channel["exhibition"].append(expo_q)
+            for m in (markets or [""]):
+                if _is_overseas(m):
+                    for tm in _market_terms(m):
+                        queries_by_channel["exhibition"].append(f"{kw} exhibitor {tm}".strip())
+                        queries_by_channel["exhibition"].append(f"{kw} exhibition exhibitor list {tm}".strip())
         if "procurement" in conditions["channels"]:
             queries_by_channel["procurement"].append(f"{kw} 招标 采购公告")
 
@@ -344,17 +444,28 @@ def _discover_one_round(conditions, settings, progress=None):
     if conditions.get("site_scope"):
         eff_settings["search_site_filter"] = conditions["site_scope"]
     # 引擎限流：每个渠道最多检索式数量，避免一次跑上百个查询烧 API 配额
-    eff_settings["channel_max_per_channel"] = str(conditions.get("max_queries_per_channel") or 6)
+    eff_settings["channel_max_per_channel"] = str(conditions.get("max_queries_per_channel") or 18)
 
     # 解析本次要启用的具体渠道（类别 → 渠道 id；缺密钥的自动跳过）
     # 若 settings 里显式给了 channel_ids（CLI --channels），则优先按显式列表解析
     channel_ids = chmod.get_enabled_channel_ids(conditions, eff_settings, explicit=eff_settings.get("channel_ids"))
 
     keywords = conditions["specs"] + conditions["keywords"]
+    # 名录/展会/公司发现词（找全客户）：让搜索引擎渠道也生成“公司/名录/展商”类检索式
+    industry = conditions.get("industry", "") or ""
+    dir_terms = []
+    for kw in (conditions["specs"] or keywords)[:4]:
+        dir_terms += [f"{kw} 公司 名录", f"{kw} 企业 名录", f"{kw} 展商 名录"]
+    if industry:
+        dir_terms += [f"{industry} 公司 名录", f"{industry} 企业 名录", f"{industry} 展商 名录"]
+    for t in dir_terms:
+        if t not in keywords:
+            keywords.append(t)
+    keywords = keywords[:24]
     markets = conditions["regions"]
     use_ai = bool(eff_settings.get("openai_api_key"))
     context = (
-        f"我方主营：{conditions.get('products','')}。理想客户："
+        f"我方角色：{conditions.get('my_role') or '贸易商/分销商'}。我方主营：{conditions.get('products','')}。理想客户："
         f"{'、'.join(conditions.get('buyer_types', []))}。"
         f"必须命中品类：{'、'.join(conditions.get('specs', []))}。"
         "请只保留有真实采购意向的买方，剔除同行供应商与平台噪音。"
@@ -362,7 +473,7 @@ def _discover_one_round(conditions, settings, progress=None):
     res = buyer.run(
         keywords=keywords,
         markets=markets,
-        max_results=8,
+        max_results=max(1, min(int(conditions.get("max_results") or 60), 60)),
         use_ai=use_ai,
         settings=eff_settings,
         progress=progress,
@@ -399,35 +510,62 @@ def _discover_manual(conditions, settings, progress=None):
     if not key:
         return []
 
-    # 区域名 → 真实城市（手动搜索需要具体城市）
+    # 区域名 → 真实城市（手动搜索需要具体城市；覆盖更多城市以“找全客户”）
     CITY_MAP = {
-        "中国大陆": ["深圳", "武汉", "苏州", "成都", "上海"],
-        "亚太": ["新加坡", "吉隆坡", "雅加达"],
-        "欧美": ["Frankfurt", "San Jose"],
-        "中东非洲拉美": ["迪拜", "圣保罗"],
+        "中国大陆": ["北京", "上海", "广州", "深圳", "武汉", "成都", "苏州", "杭州", "南京", "西安", "重庆", "郑州"],
+        "亚太": ["新加坡", "吉隆坡", "雅加达", "曼谷"],
+        "东南亚": ["新加坡", "吉隆坡", "雅加达", "曼谷", "胡志明市"],
+        "南亚": ["新德里", "孟买", "达卡"],
+        "日韩": ["东京", "大阪", "首尔"],
+        "欧美": ["London", "Frankfurt", "San Jose", "Dallas"],
+        "北美": ["San Jose", "Dallas", "Toronto"],
+        "欧洲": ["London", "Frankfurt", "Amsterdam"],
+        "中东非洲拉美": ["迪拜", "利雅得", "圣保罗", "拉各斯"],
+        "中东": ["迪拜", "利雅得"],
+        "非洲": ["拉各斯", "开罗", "内罗毕"],
+        "拉美": ["圣保罗", "墨西哥城"],
     }
     cities = []
     for r in conditions["regions"]:
         cities += CITY_MAP.get(r, [])
     if not cities:
-        cities = ["深圳"]
+        cities = ["深圳", "上海", "北京"]
 
-    seeds = list(conditions["specs"]) + list(conditions["keywords"])
+    # 地图 POI 用“行业词”而不是产品词（高德上搜“WDM”几乎没有公司，搜“光纤/网络工程”才有）
+    _MAP_KEYWORDS = [
+        "光纤", "光缆", "光通信", "通信工程", "网络工程", "弱电工程",
+        "综合布线", "系统集成", "安防监控", "数据中心", "机房建设",
+    ]
+    seeds = _MAP_KEYWORDS
     out = []
     seen = set()
-    for kw in seeds[:6]:
-        for city in cities[:4]:
-            try:
-                leads = mapsearch.run_map_search(settings, kw, city, pages=1, max_results=20)
-                for ld in leads:
-                    key_ = (str(ld.get("name", "")).strip().lower(), str(ld.get("phone", "")))
-                    if key_ in seen:
-                        continue
-                    seen.add(key_)
-                    out.append(ld)
-            except Exception as e:
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    def _one(kw, city):
+        try:
+            leads = mapsearch.run_map_search(settings, kw, city, pages=1, max_results=20)
+            time.sleep(0.4)  # 防高德限流（并行时每线程内小间隔）
+            return kw, city, leads
+        except Exception as e:
+            return kw, city, e
+
+    combos = [(kw, city) for kw in seeds[:3] for city in cities[:4]]
+    with ThreadPoolExecutor(max_workers=4) as ex:
+        futs = [ex.submit(_one, kw, city) for kw, city in combos]
+        for fut in as_completed(futs):
+            kw, city, res = fut.result()
+            if isinstance(res, Exception):
                 if progress:
-                    progress({"stage": f"手动搜索跳过({city}/{kw})", "note": str(e)[:80]})
+                    progress({"stage": f"手动搜索跳过({city}/{kw})", "note": str(res)[:80]})
+                continue
+            for ld in res:
+                key_ = (str(ld.get("name", "")).strip().lower(), str(ld.get("phone", "")))
+                if key_ in seen:
+                    continue
+                seen.add(key_)
+                ld["broad"] = True
+                ld["note"] = str(ld.get("note") or "") + f"；行业线索来源：{kw}"
+                out.append(ld)
     if progress:
         progress({"stage": f"手动搜索完成", "manual": len(out)})
     return out
@@ -440,7 +578,7 @@ _BUYER_TYPE_RULES = [
     # 买方动作词优先（运营商/集成商在招标、集采、扩容）→ 近期招标扩容，优先级高于品类词，
     # 避免“中国电信 DWDM 扩容集采”被同笔记里的玻璃管/滤光片误判为器件厂。
     ("近期招标扩容", ["招标", "中标", "采购公告", "扩容", "集采", "tender", "procurement", "rfp", "rfq", "询价公告"]),
-    ("系统集成商", ["系统集成", "集成商", "总包", "工程公司", "施工", "布线", "contractor", "integrator", "installer"]),
+    ("系统集成商", ["系统集成", "集成商", "总包", "工程公司", "工程商", "施工", "布线", "contractor", "integrator", "installer"]),
     ("光模块厂", ["光模块", "optical module", "transceiver", "硅光", "cpo", "800g", "1.6t", "400g"]),
     ("光无源器件厂", ["无源", "器件", "准直器", "隔离器", "环形器", "滤光片", "玻璃管", "毛细管", "ferrule",
                    "z-block", "zblock", "透镜", "套管", "插芯", "passive", "pigtail", "fiber"]),
@@ -478,20 +616,24 @@ _INTENT_WORDS = (
     "sourcing", "inquiry", "distributor", "dealer", "supplier", "contractor",
 )
 
-# 公司主体特征词：把“真实公司”与“公告/页面标题/平台页”区分开
+# 公司主体特征词（收紧版）：必须命中“公司后缀/组织特征”，避免产品标题、导航链接混入
 _COMPANY_HINTS = (
-    "公司", "集团", "有限", "股份", "科技", "通信", "网络", "电子", "光电", "光纤", "光缆",
-    "集成", "工程", "设备", "实业", "贸易", "供应链", "运营", "电力", "能源", "水务",
+    "公司", "集团", "有限", "股份", "科技", "通信", "网络", "电子", "光电", "实业", "贸易",
+    "工程", "智能", "信息", "技术", "集成", "系统", "机电", "自动化", "能源", "电力",
+    "安防", "弱电", "数据", "互联", "软件", "精密", "新材料", "半导体", "光器件", "光模块",
     "telecom", "networks", "communications", "technologies", "technology", "optical",
-    "photonics", "fiber", "cable", "systems", "solutions", "internet", "electronics",
-    "engineering", "industries", "holdings", "berhad", "pte", "sdn", "plc", "gmbh",
-    "inc", "ltd", "llc", "corp", "co.", "s.a.", "株式会社",
+    "photonics", "systems", "solutions", "electronics", "engineering", "industries",
+    "holdings", "berhad", "pte", "sdn", "plc", "gmbh", "inc", "ltd", "llc", "corp",
+    "company", "group", "integrated", "株式会社",
 )
 
 _ANNOUNCEMENT_MARKS = (
     "采购公告", "招标公告", "询价公告", "中标公告", "采购项目", "招标项目", "采购需求",
     "采购计划", "招标采购", "询比价", "结果公告", "更正公告", "补充公告", "采购信息",
-    "招标信息", "征集公告", "公示",
+    "招标信息", "征集公告", "公示", "单一来源", "单一谈判", "结果公示", "评审结果",
+    "预测报告", "行业趋势", "市场报告", "研究报告", "发展前景", "测试", "检测",
+    "产品", "平台", "报告", "趋势", "前景", "多种", "白皮书", "黄页",
+    "榜单", "排名", "排行榜", "品牌榜", "公司排名", "招聘", "求职", "Summit", "峰会",
 )
 
 
@@ -500,7 +642,7 @@ def _is_intent_word(x):
     return any(w == xl or w in xl for w in _INTENT_WORDS)
 
 
-def _looks_like_company(name):
+def _looks_like_company(name, has_contact=False):
     """只保留“公司主体”：排除采购/招标公告标题、行业门户/商城页、纯页面标题。"""
     n = (name or "").strip()
     if not n or n in ("未命名", "undefined", "none", "null"):
@@ -510,15 +652,46 @@ def _looks_like_company(name):
     if any(m in n for m in _ANNOUNCEMENT_MARKS):
         return False
     low = n.lower()
-    if any(h in low for h in _COMPANY_HINTS):
+    # 最强公司后缀：出现“公司/集团/有限/股份”基本可确认是公司主体
+    if any(h in n for h in ("公司", "集团", "有限", "股份")):
+        return True
+    # 中文公司名通常以“科技/通信/网络/电子/光电/工程/贸易…”等组织词结尾
+    if re.search(r"(科技|通信|网络|电子|光电|实业|贸易|工程|智能|信息|技术|集成|系统|机电|自动化|能源|电力|安防|弱电|数据|互联|软件|精密|新材料|半导体|光器件|光模块)$", n):
         return True
     # 英文品牌名（如 Tejas Networks、e& UAE、Ooredoo Qatar）
-    # 至少两个词，且不能是“采购/招标/需求”等意图词标题
     if re.fullmatch(r"[A-Za-z0-9&.\-() ]{2,60}", n):
         toks = [t.strip("&.-") for t in re.split(r"[\s()]+", n) if t.strip("&.-")]
-        if len(toks) >= 2 and not any(_is_intent_word(t) for t in toks):
+        if len(toks) >= 2:
+            nav = ("carrier", "consumer", "support", "center", "service", "request",
+                   "license", "courses", "online", "get", "home", "products", "news",
+                   "about", "contact", "cloud", "download", "login", "register", "help",
+                   "privacy", "terms", "careers", "blog", "global", "solutions", "systems")
+            strong = [t for t in toks if any(h in t.lower() for h in _COMPANY_HINTS)]
+            if strong and not all(t.lower() in nav for t in toks) and not any(_is_intent_word(t) for t in toks):
+                return True
+        # 单英文词品牌（如 Fibermall、Zhonghao），带联系方式/独立网址时也按公司保留
+        if has_contact and len(toks) == 1 and len(toks[0]) >= 3 \
+                and toks[0].lower() not in ("carrier", "consumer", "support", "center", "service",
+                                            "request", "license", "courses", "online", "get", "home",
+                                            "products", "news", "about", "contact", "cloud", "download",
+                                            "login", "register", "help", "privacy", "terms", "careers",
+                                            "blog", "global") and not _is_intent_word(toks[0]):
             return True
     return False
+
+
+def _extract_company_name(text):
+    """从公告/名录/门户标题中提取公司主体（如“XX有限公司 询比价”→ XX有限公司）。"""
+    t = (text or "")[:600]
+    for m in re.finditer(r"([\u4e00-\u9fa5A-Za-z0-9（）()·&\-]{2,50}?(?:有限责任公司|股份有限公司|有限公司|集团有限公司|集团|公司))", t):
+        cand = m.group(1).strip(" -_|｜，。:：")
+        if 4 <= len(cand) <= 60 and _looks_like_company(cand):
+            return cand
+    for m in re.finditer(r"([A-Z][A-Za-z0-9&.\-]{1,40}(?:\s+[A-Z][A-Za-z0-9&.\-]{1,40}){1,3})", t):
+        cand = m.group(1).strip()
+        if _looks_like_company(cand, has_contact=True):
+            return cand
+    return ""
 
 
 def _match_specs(text, specs):
@@ -545,6 +718,7 @@ def _match_specs(text, specs):
 _TENDER_SIGNALS = (
     "采购公告", "询价公告", "招标公告", "采购项目", "招标项目",
     "采购需求", "采购计划", "招标采购", "采购邀请", "求购", "中标",
+    "征集公告", "结果公告", "公示", "采购信息", "招标信息", "招标",
 )
 
 
@@ -570,9 +744,16 @@ def build_targets(candidates, conditions, seq_start=1):
     targets, dropped = [], []
     for i, c in enumerate(candidates):
         name = str(c.get("name") or "").strip()
+        name = re.sub(r"\s*\d+\s*(家|条|项)$", "", name).strip()
+        name = re.sub(r"\d{4}年\d{1,2}月\d{1,2}日(?:发布|发)?", "", name).strip()
         note = str(c.get("note") or "")
         tags = str(c.get("tags") or "")
         website = str(c.get("website") or "")
+        # 公告/名录标题 → 还原真实公司主体（如“XX有限公司-询比价公告” → XX有限公司）
+        if (not _looks_like_company(name, bool(c.get("email") or c.get("phone") or c.get("website")))) or _has_tender_signal(name):
+            ex = _extract_company_name(name + " " + note + " " + tags)
+            if ex:
+                name = ex
         # 关键词回显（query/tags）不能当作页面真实内容，匹配与归类时不使用，
         # 避免“搜索词命中”被误当成“客户真的命中规格”
         text = " ".join([name, note, c.get("type", ""), c.get("region", ""), c.get("source", "")])
@@ -583,13 +764,22 @@ def build_targets(candidates, conditions, seq_start=1):
             continue
 
         # 1.1) 错误页/反爬验证页直接丢弃（页面抓取后才暴露的“错误页面”标题）
-        _err_mark = ("错误页面", "404", "access verification", "安全验证", "人机验证")
+        _err_mark = ("错误页面", "404", "access verification", "安全验证", "人机验证",
+              "javascript is disabled", "enable javascript", "please enable javascript",
+              "just a moment", "attention required", "access denied", "403 forbidden",
+              "verify you are human", "checking your browser", "请开启javascript")
         if any(m in (name + " " + note).lower() for m in _err_mark):
             dropped.append((name or "未命名", "错误页/验证页，非有效线索"))
             continue
 
         # 1.2) 只保留“公司主体”：排除采购/招标公告标题、行业门户/商城页、纯页面标题
-        if not _looks_like_company(name):
+        if re.fullmatch(r"[某某Xx]{1,4}公司|某公司|有限公司|有限责任公司|股份有限公司", name):
+            dropped.append((name or "未命名", "占位公司名（无实际主体）"))
+            continue
+        if any(m in name for m in ("榜单", "排名", "排行榜", "品牌榜", "招聘", "求职", "Summit", "峰会")):
+            dropped.append((name or "未命名", "榜单/招聘/非买方页面"))
+            continue
+        if not _looks_like_company(name, bool(c.get("email") or c.get("phone") or c.get("website"))):
             dropped.append((name or "未命名", "非公司主体（公告/页面标题/平台页）"))
             continue
 
@@ -614,8 +804,12 @@ def build_targets(candidates, conditions, seq_start=1):
                 dropped.append((name or "未命名", f"等级低于阈值({tier}<{min_tier})"))
                 continue
         if not matched:
-            if allow_broad:
+            if allow_broad or c.get("broad") or (c.get("source") == "名录发现" and website):
+                matched = ["（泛行业相关，按行业线索保留）"]
                 reasons.append("泛行业相关（未命中具体规格）")
+            elif _has_tender_signal(text):
+                matched = ["（招标/采购信号，按线索保留）"]
+                reasons.append("强采购机会信号（未命中具体规格，按招标保留）")
             else:
                 dropped.append((name or "未命名", "未命中任何必中规格（泛泛线索）"))
                 continue
@@ -978,7 +1172,10 @@ def enrich_with_company_api(targets, settings, limit=30):
         return {"done": 0, "updated": 0, "errors": [{"msg": f"company_api 不可用：{e}"}]}
     done = updated = 0
     errors = []
+    deadline = time.time() + 30  # 官网核验总耗时上限 30 秒，避免拖慢整体
     for t in targets:
+        if time.time() > deadline:
+            break
         if done >= limit:
             break
         if t.get("verified") or (t.get("email") and t.get("phone")):

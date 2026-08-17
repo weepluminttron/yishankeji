@@ -57,7 +57,7 @@ _CATEGORY_ALIASES = {
     "地图": "map", "地图poi": "map", "map": "map",
     # 兼容旧版 conditions.channels 命名
     "web_search": "search_engine", "搜索引擎源": "search_engine",
-    "exhibition": "map", "展会": "map",
+    "exhibition": "exhibition", "展会": "exhibition", "展商": "exhibition",
 }
 # 国内免费源（无需密钥即可用，作为搜索引擎类别的可达候选）
 _FREE_PROVIDERS = ("bing", "so", "sogou", "baidu")
@@ -72,7 +72,7 @@ _BUILTIN = {
     "categories": {
         "search_engine": "通用搜索引擎", "social_media": "社交媒体",
         "industry_site": "行业网站", "forum": "论坛", "procurement": "招投标",
-        "company_db": "工商库", "map": "地图 POI",
+        "company_db": "工商库", "map": "地图 POI", "exhibition": "行业展会",
     },
     "channels": [
         {"id": "bing", "name": "Bing 搜索", "category": "search_engine", "provider": "bing",
@@ -87,6 +87,10 @@ _BUILTIN = {
         {"id": "baidu", "name": "百度搜索", "category": "search_engine", "provider": "baidu",
          "site_scope": "", "query_template": "{kw} {intent} {market}", "enabled_default": True,
          "requires_key": "", "rate_limit": 0.3, "freshness": ""},
+        {"id": "expo_directory", "name": "展商名录/企业列表", "category": "exhibition", "provider": "bing",
+         "site_scope": "", "query_template": "{kw} {intent} {market}", "enabled_default": True,
+         "requires_key": "", "rate_limit": 0.3, "freshness": "",
+         "intents": ["展商 名录", "参展企业", "company list", "exhibitor list"]},
     ],
 }
 

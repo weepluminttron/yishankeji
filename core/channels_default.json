@@ -7,7 +7,8 @@
     "forum": "论坛 / 问答社区（知乎、CSDN、Quora 等）",
     "procurement": "招投标 / 政府采购平台",
     "company_db": "工商企业库（企查查 / 天眼查 / 爱企查，用于发现公司主页）",
-    "map": "地图 POI（高德 / 腾讯地图，按城市拉取本地厂商）"
+    "map": "地图 POI（高德 / 腾讯地图，按城市拉取本地厂商）",
+    "exhibition": "行业展会 / 展商名录（CIOE、OFC、ECOC 等）"
   },
   "channels": [
     {
@@ -333,6 +334,44 @@
         "限制": "英文，偏海外。"
       },
       "keyword_config": "英文意图词。"
+    },
+    {
+      "id": "expo_cioe",
+      "name": "光通信展会/展商名录",
+      "category": "exhibition",
+      "provider": "bing",
+      "site_scope": "cioe.cn,ofcconference.org,ecoc.de",
+      "query_template": "{kw} {intent} {market} {site}",
+      "enabled_default": true,
+      "requires_key": "",
+      "rate_limit": 0.3,
+      "freshness": "",
+      "intents": ["展商 名录", "参展企业", "exhibitor", "exhibition exhibitor list"],
+      "access_params": {
+        "说明": "行业展会官网/展商名录页，可一页拆出多家参展公司。",
+        "endpoint": "搜索引擎 site: 限定",
+        "限制": "配合公司名录页解析，命中即批量线索。"
+      },
+      "keyword_config": "关键词模板 {kw}=品类，{intent}=展商/参展企业，{market}=市场。"
+    },
+    {
+      "id": "expo_directory",
+      "name": "展商名录/企业列表",
+      "category": "exhibition",
+      "provider": "bing",
+      "site_scope": "",
+      "query_template": "{kw} {intent} {market}",
+      "enabled_default": true,
+      "requires_key": "",
+      "rate_limit": 0.3,
+      "freshness": "",
+      "intents": ["展商 名录", "参展企业", "company list", "exhibitor list"],
+      "access_params": {
+        "说明": "全网展会/企业列表页，用于批量发现公司。",
+        "endpoint": "搜索引擎全站",
+        "限制": "结果需经名录页解析过滤。"
+      },
+      "keyword_config": "同 expo_cioe。"
     },
     {
       "id": "cn_procurement",

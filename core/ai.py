@@ -17,8 +17,8 @@ import urllib.request
 from core import llm_cache
 
 DEFAULT_API_BASE = "https://api.openai.com/v1"
-_MAX_RETRIES = 2
-_RETRY_BASE_WAIT = 1.5  # 秒，指数退避
+_MAX_RETRIES = 1
+_RETRY_BASE_WAIT = 1.0  # 秒，指数退避
 
 
 def _do_request(api_key, model, system, user, api_base):

@@ -65,10 +65,10 @@ async function pollTasks() {
     const d = await api("/api/tasks");
     const tasks = d.tasks || [];
     const nowTs = Date.now();
-    // 运行中的任务 + 最近 30 秒内完成的任务都显示，避免“一闪而过”
+    // 运行中的任务 + 最近 5 分钟内完成的任务都显示，避免“一闪而过”
     const visible = tasks.filter((t) => {
       if (t.status === "运行中") return true;
-      return t.finished_ts && nowTs - t.finished_ts * 1000 < 30000;
+      return t.finished_ts && nowTs - t.finished_ts * 1000 < 300000;
     });
     const bar = $("#task-bar");
     if (visible.length) {
@@ -94,8 +94,8 @@ async function pollTasks() {
       if (lastTaskSeen[t.id] !== t.finished) {
         lastTaskSeen[t.id] = t.finished;
         toast(`${t.label}：${t.message || t.status}`, t.status === "成功" ? "ok" : "err");
-        // AI 方案生成完成后：如果人不在方案页，自动跳过去显示方案
-        if (t.id === "strategy" && t.status === "成功" && state.page !== "buyer") {
+        // AI 方案/获客引擎完成后：如果人不在结果页，自动跳过去显示结果
+        if ((t.id === "strategy" || t.id === "acq") && t.status === "成功" && state.page !== "buyer") {
           setTimeout(() => go("buyer"), 800);
         }
       }
@@ -367,8 +367,7 @@ async function renderDashboard() {
       <div class="card"><h3>AI 评分分布</h3>${scoreBars}</div>
     </div>`;
   $("#home-strategy-btn").onclick = () => {
-    const desc = $("#home-strategy").value.trim();
-    if (!desc) return toast("请先描述您的业务", "err");
+    const desc = $("#home-strategy").value.trim() || "我们想开拓新的买家客户";
     state.buyerContext = desc;
     state.pendingStrategy = desc;
     go("buyer");
@@ -1406,34 +1405,34 @@ async function renderBuyer() {
   const el = $("#page-buyer");
   el.innerHTML = `
     <div class="page-title">买家发现 · 一键获客</div>
-    <div class="page-sub">一个入口跑完全流程：描述业务 → AI 出方案 → 多渠道发现（搜索引擎/社媒/行业站/招投标/地图/工商库）→ AI 评分分级 → 一键导入客户库。手动搜索、地图获客已并入这条流水线。</div>
+    <div class="page-sub">一个入口跑完全流程：描述业务 → 选择你的角色 → 选择客户地区 → 直接全网找客户（AI 在后台自动整理关键词/规格，不再展示方案卡片）→ AI 评分分级 → 一键导入客户库。</div>
 
     <div class="card">
       <h3>🚀 一键智能获客</h3>
       <div class="form-grid">
-        <div class="field"><label>你是哪种角色（我方身份）</label>
-          <select class="select full" id="strategy-role">
-            <option value="">请选择（AI 自动判断）</option>
-            <option value="贸易商/分销商" selected>贸易商/分销商</option>
-            <option value="代理商">代理商</option>
-            <option value="生产厂家">生产厂家</option>
-            <option value="系统集成商/工程商">系统集成商/工程商</option>
-            <option value="外贸出口商">外贸出口商</option>
-            <option value="其他">其他</option>
-          </select>
+        <div class="field" style="grid-column:1/-1"><label>① 描述你的业务和理想客户（必填）</label>
+          <textarea class="textarea full" id="strategy-desc" style="min-height:90px" placeholder="例如：我们做光纤通信设备，WDM和EDFA是拳头产品，想找海外有大型数据中心建设需求的集成商，最好利润空间大、对方有一定行业知名度。&#10;或者：我们做3C电子代工，想找北美有品牌的小家电客户。"></textarea>
         </div>
-        <div class="field"><label>你要找的客户在哪些地区（可多选）</label>
-          <div id="strategy-regions" style="display:flex;gap:8px;flex-wrap:wrap">
-            ${["中国大陆","亚太","欧美","中东非洲拉美","东南亚","南亚","日韩","中东","非洲","拉美","北美","欧洲"].map((r) => `<label style="display:inline-flex;gap:4px;align-items:center;padding:5px 10px;border:1px solid var(--line);border-radius:8px;cursor:pointer;font-size:12px"><input type="checkbox" class="region-check" value="${esc(r)}"> ${esc(r)}</label>`).join("")}
-          </div>
-        </div>
-        <div class="field" style="grid-column:1/-1"><label>描述你的业务和理想客户（用大白话，可选）</label>
-          <textarea class="textarea full" id="strategy-desc" style="min-height:80px" placeholder="例如：我们做光纤通信设备，WDM和EDFA是拳头产品，想找海外有大型数据中心建设需求的集成商，最好利润空间大、对方有一定行业知名度。&#10;或者：我们做3C电子代工，想找北美有品牌的小家电客户。"></textarea>
+      </div>
+      <div id="wizard-summary" class="hint" style="margin-top:8px"></div>
+      <!-- 角色/地区由弹窗选择后写入隐藏控件，供引擎读取 -->
+      <div style="display:none">
+        <select id="strategy-role">
+          <option value="">未选择</option>
+          <option value="贸易商/分销商">贸易商/分销商</option>
+          <option value="代理商">代理商</option>
+          <option value="生产厂家">生产厂家</option>
+          <option value="系统集成商/工程商">系统集成商/工程商</option>
+          <option value="外贸出口商">外贸出口商</option>
+          <option value="其他">其他</option>
+        </select>
+        <div id="strategy-regions">
+          ${["中国大陆","亚太","欧美","中东非洲拉美","东南亚","南亚","日韩","中东","非洲","拉美","北美","欧洲"].map((r) => `<label><input type="checkbox" class="region-check" value="${esc(r)}"> ${esc(r)}</label>`).join("")}
         </div>
       </div>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-        <button class="btn primary" id="acq-oneclick">🚀 一键智能获客（AI 方案 → 全网发现 → 评分分级）</button>
-        <span class="hint">先选“我方角色”和“客户地区”（至少选一项），AI 会按你的身份定制打法；业务描述可选填，填了更精准。</span>
+        <button class="btn primary" id="acq-oneclick">🚀 开始 AI 获客（先选角色 → 再选地区 → 直接找客户）</button>
+        <span class="hint">点击后依次弹出：你是哪种角色？→ 客户在哪些地区？→ 选择完成后直接开始找客户，不再展示方案。</span>
       </div>
       <div id="strategy-plans" style="margin-top:14px"></div>
       <div id="acq-plan-tag" style="display:none;margin-top:8px;padding:8px 10px;background:#eaf3fd;border:1px solid #bcd9f5;border-radius:8px;font-size:12px"></div>
@@ -1452,10 +1451,10 @@ async function renderBuyer() {
           <div class="field"><label>目标市场（逗号分隔）</label><input class="input full" id="acq-regions" placeholder="中国大陆,亚太,欧美,中东非洲拉美"></div>
           <div class="field"><label>目标买方类型（逗号分隔）</label><input class="input full" id="acq-types" placeholder="光无源器件厂,光模块厂,系统集成商,近期招标扩容"></div>
           <div class="field"><label>最低等级</label><select class="select full" id="acq-tier">
+            <option value="C" selected>全部（推荐，线索少时优先）</option>
             <option value="B">B 级及以上</option>
             <option value="A">A 级及以上</option>
             <option value="S">仅 S 级</option>
-            <option value="C">全部</option>
           </select></div>
           <div class="field"><label>目标客户数</label><input class="input full" type="number" min="1" max="100" id="acq-max" value="30"></div>
           <div class="field"><label>搜索时间范围（可选）</label>
@@ -1492,7 +1491,7 @@ async function renderBuyer() {
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:12px">
           <button class="btn primary" id="acq-run">🚀 按当前条件直接获客（不生成方案）</button>
-          <span class="hint">说明：一键模式会自动完成“AI 方案 → 多渠道搜索 → 手动关键词/网址 → 地图POI → 评分分级”，结果统一显示在下方。</span>
+          <span class="hint">说明：一键模式会自动完成“获客条件 → 多渠道搜索 → 手动关键词/网址 → 地图POI → 评分分级”，结果统一显示在下方。</span>
         </div>
       </div>
     </div>
@@ -1526,41 +1525,20 @@ async function renderBuyer() {
   };
   loadPresets();
 
-  // 一键智能获客：AI 方案 → 全网发现 → 评分分级
-  $("#acq-oneclick").onclick = async () => {
-    const btn = $("#acq-oneclick");
-    const desc = $("#strategy-desc").value.trim();
-    const role = $("#strategy-role") ? $("#strategy-role").value : "";
-    const regions = getStrategyRegions();
-    const sig = desc + "|" + role + "|" + regions.join(",");
-    btn.disabled = true;
-    try {
-      if ((desc || role || regions.length) && sig !== state.buyerContext) {
-        state.buyerContext = sig;
-        $("#strategy-plans").innerHTML = `<div class="empty"><div class="ico">🤖</div>AI 正在根据你的角色/地区/描述生成方案…（进度看右上角任务栏）</div>`;
-        try {
-          await api("/api/buyer/strategy", { method: "POST", body: { description: desc, role, regions } });
-        } catch (e) {
-          const t = (await api("/api/buyer/strategy")).task || {};
-          if (t.status !== "运行中") throw e;
-          toast("上一轮方案还在生成，等待完成后自动使用", "warn");
+  // 开始 AI 获客：描述业务 → 弹窗选角色 → 弹窗选地区 → 直接开始找客户（不展示方案）
+  $("#acq-oneclick").onclick = () => {
+    const desc = ($("#strategy-desc").value.trim() || buildFallbackDesc());
+    openRoleModal((role) => openRegionModal(role, (regions) => {
+      startSilentAcq(desc, role, regions).catch((e) => {
+        if ($("#acq-specs").value.trim() || $("#acq-seeds").value.trim()) {
+          toast("AI 获客条件暂不可用，已按当前条件直接获客：" + (e && e.message || e), "warn");
+          runUnifiedAcq().catch((e2) => toast(e2.message, "err"));
+        } else {
+          $("#strategy-plans").innerHTML = `<div class="empty"><div class="ico">⚠️</div>${esc(e && e.message || e)}</div>`;
+          toast(e && e.message || e, "err");
         }
-        const plans = await waitStrategyDone();
-        if (plans && plans.length) applyPlan(plans[0]);
-      }
-      await runUnifiedAcq();
-    } catch (e) {
-      if ($("#acq-specs").value.trim()) {
-        toast("AI 方案暂不可用，已按当前条件直接获客：" + (e && e.message || e), "warn");
-        try { await runUnifiedAcq(); } catch (e2) { toast(e2.message, "err"); }
-      } else {
-        $("#strategy-plans").innerHTML = `<div class="empty"><div class="ico">⚠️</div>${esc(e && e.message || e)}</div>`;
-        toast(e && e.message || e, "err");
-      }
-    } finally {
-      btn.disabled = false;
-      btn.textContent = "🚀 一键智能获客（AI 方案 → 全网发现 → 评分分级）";
-    }
+      });
+    }));
   };
 
   // 按当前条件直接运行（不生成方案）
@@ -1595,18 +1573,29 @@ async function renderBuyer() {
       pollAcquisition();
     } else if (job.result) {
       renderAcqResult(job.result);
+    } else if (job.message) {
+      $("#acq-result").innerHTML = `<div class="empty"><div class="ico">⚠️</div>${esc(job.message)}</div>`;
     }
   }).catch(() => {});
 
-  // 恢复 AI 方案任务状态（切走再回来不丢）
+  // 恢复 AI 方案/获客条件任务状态（切走再回来不丢）
   api("/api/buyer/strategy").then((d) => {
     const t = d.task || {};
     if (state.pendingStrategy) return;
     if (t.status === "运行中") {
-      $("#strategy-plans").innerHTML = `<div class="empty"><div class="ico">⏳</div>${esc(t.stage || "AI 生成中")}…（进度看右上角任务栏）</div>`;
+      $("#strategy-plans").innerHTML = `<div class="empty"><div class="ico">${state.silentStrategy ? "🤖" : "⏳"}</div>${state.silentStrategy ? "正在根据你的描述准备获客条件（准备好后自动开始找客户）" : (t.stage || "AI 生成中")}…（进度看右上角任务栏）</div>`;
       if (!strategyPolling) pollStrategy();
     } else if (t.status === "成功" && t.result && t.result.plans) {
-      renderPlans(t.result.plans, t.result.warnings || []);
+      if (state.silentStrategy) {
+        state.silentStrategy = false;
+        if (!state.acqStarting) {
+          applyPlan(t.result.plans[0]);
+          state.acqStarting = true;
+          runUnifiedAcq().catch((e) => toast(e.message, "err")).finally(() => { state.acqStarting = false; });
+        }
+      } else if (state.showPlans) {
+        renderPlans(t.result.plans, t.result.warnings || []);
+      }
     } else if (t.status === "失败") {
       $("#strategy-plans").innerHTML = `<div class="empty"><div class="ico">⚠️</div>${esc(t.message || "生成失败，请重试")}</div>`;
     }
@@ -1614,17 +1603,135 @@ async function renderBuyer() {
 
   if (state.pendingStrategy) {
     $("#strategy-desc").value = state.pendingStrategy;
+    const desc = state.pendingStrategy;
     state.pendingStrategy = "";
-    generateStrategy();
+    // 首页/入口传入业务描述后：同样走“选角色 → 选地区 → 直接找客户”向导
+    openRoleModal((role) => openRegionModal(role, (regions) => {
+      startSilentAcq(desc, role, regions).catch((e) => {
+        if ($("#acq-specs").value.trim() || $("#acq-seeds").value.trim()) {
+          toast("AI 获客条件暂不可用，已按当前条件直接获客：" + (e && e.message || e), "warn");
+          runUnifiedAcq().catch((e2) => toast(e2.message, "err"));
+        } else {
+          $("#strategy-plans").innerHTML = `<div class="empty"><div class="ico">⚠️</div>${esc(e && e.message || e)}</div>`;
+          toast(e && e.message || e, "err");
+        }
+      });
+    }));
+  }
+}
+
+/* ---------- 获客向导：角色 → 地区 → 直接找客户 ---------- */
+function buildFallbackDesc() {
+  const prod = ($("#acq-products") && $("#acq-products").value.trim()) || "光通信设备与器件";
+  const region = ($("#acq-regions") && $("#acq-regions").value.trim()) || "目标地区";
+  return "我们主营" + prod + "，想找" + region + "有真实采购需求的客户，请 AI 帮我们整理行业买家画像与搜索条件";
+}
+const WIZARD_ROLES = ["贸易商/分销商", "代理商", "生产厂家", "系统集成商/工程商", "外贸出口商", "其他"];
+const WIZARD_REGIONS = ["中国大陆", "亚太", "欧美", "中东非洲拉美", "东南亚", "南亚", "日韩", "中东", "非洲", "拉美", "北美", "欧洲"];
+
+function openRoleModal(onNext) {
+  const html = `
+    <div class="modal-head"><h2>👤 你是哪种角色？</h2><button class="close-x" onclick="closeModal()">×</button></div>
+    <div class="form-grid">
+      ${WIZARD_ROLES.map((r, i) => `<label style="display:flex;gap:8px;align-items:center;padding:10px 12px;border:1px solid var(--line);border-radius:10px;cursor:pointer;background:${i === 0 ? "#f2f8ff" : "#fff"}"><input type="radio" name="wizard-role" value="${esc(r)}" ${i === 0 ? "checked" : ""} style="width:16px;height:16px"> <span>${esc(r)}</span></label>`).join("")}
+      <input class="input full" id="wizard-role-other" style="grid-column:1/-1;display:none" placeholder="请输入你的具体角色（如：外贸代理、电商运营、品牌商…）">
+    </div>
+    <div class="modal-foot"><button class="btn" onclick="closeModal()">取消</button><button class="btn primary" id="wizard-role-next">下一步：选择客户地区 →</button></div>`;
+  openModal(html, "narrow");
+  $$('input[name="wizard-role"]').forEach((r) => r.onchange = () => {
+    const other = $("#wizard-role-other");
+    if (other) other.style.display = (r.value === "其他" && r.checked) ? "" : "none";
+  });
+  $("#wizard-role-next").onclick = () => {
+    const sel = document.querySelector('input[name="wizard-role"]:checked');
+    let role = sel ? sel.value : "";
+    if (role === "其他") {
+      role = ($("#wizard-role-other").value || "").trim();
+      if (!role) { toast("请填写你的具体角色", "err"); return; }
+    }
+    if (!role) { toast("请选择你的角色", "err"); return; }
+    closeModal();
+    onNext(role);
+  };
+}
+
+function openRegionModal(role, onStart) {
+  const html = `
+    <div class="modal-head"><h2>🌍 你要找的客户在哪些地区？</h2><button class="close-x" onclick="closeModal()">×</button></div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+      <button class="btn sm" id="wizard-regions-all">☑️ 全选</button>
+      <button class="btn sm" id="wizard-regions-clear">清空</button>
+      <span class="hint">可多选；不选表示不限地区</span>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      ${WIZARD_REGIONS.map((r) => `<label style="display:inline-flex;gap:5px;align-items:center;padding:6px 10px;border:1px solid var(--line);border-radius:8px;cursor:pointer;font-size:13px"><input type="checkbox" class="wizard-region-check" value="${esc(r)}"> ${esc(r)}</label>`).join("")}
+    </div>
+    <div class="modal-foot"><button class="btn" id="wizard-regions-back">← 上一步（重新选角色）</button><button class="btn primary" id="wizard-regions-start">🚀 开始找客户</button></div>`;
+  openModal(html, "narrow");
+  $("#wizard-regions-all").onclick = () => $$(".wizard-region-check").forEach((c) => c.checked = true);
+  $("#wizard-regions-clear").onclick = () => $$(".wizard-region-check").forEach((c) => c.checked = false);
+  $("#wizard-regions-back").onclick = () => { closeModal(); openRoleModal((r2) => openRegionModal(r2, onStart)); };
+  $("#wizard-regions-start").onclick = () => {
+    const regions = $$(".wizard-region-check:checked").map((c) => c.value);
+    closeModal();
+    onStart(regions);
+  };
+}
+
+async function startSilentAcq(desc, role, regions) {
+  desc = (desc || "").trim() || buildFallbackDesc();
+  const seedEl = $("#acq-seeds");
+  if (seedEl && !seedEl.value.trim()) seedEl.value = desc;
+  state.showPlans = false;
+  // 写入隐藏控件，供引擎读取
+  const roleSel = $("#strategy-role");
+  if (roleSel) roleSel.value = role || "";
+  $$("#strategy-regions .region-check").forEach((c) => c.checked = (regions || []).includes(c.value));
+  const summary = $("#wizard-summary");
+  if (summary) summary.textContent = `👤 角色：${role || "AI 自动判断"} ｜ 🌍 地区：${(regions && regions.length) ? regions.join("、") : "不限"} ｜ ✅ 已开始直接找客户`;
+  state.silentStrategy = true;
+  state.buyerContext = desc + "|" + role + "|" + (regions || []).join(",");
+  const box = $("#strategy-plans");
+  if (box) box.innerHTML = `<div class="empty"><div class="ico">🤖</div>正在根据你的描述准备获客条件…（不展示方案，准备好后直接开始找客户；进度看右上角任务栏）</div>`;
+  let plans = null;
+  try {
+    try {
+      await api("/api/buyer/strategy", { method: "POST", body: { description: desc, role, regions: regions || [] } });
+    } catch (e) {
+      const t = (await api("/api/buyer/strategy")).task || {};
+      if (t.status !== "运行中") throw e;
+      toast("上一轮获客条件还在生成，等待完成后自动开始", "warn");
+    }
+    plans = await waitStrategyDone({ silent: true });
+  } finally {
+    state.silentStrategy = false;
+  }
+  if (plans && plans.length) applyPlan(plans[0]);
+  const readyBox = $("#strategy-plans");
+  if (readyBox) readyBox.innerHTML = `<div class="empty"><div class="ico">✅</div>获客条件已自动整理完成，正在直接找客户…（进度看右上角任务栏）</div>`;
+  if (state.acqStarting) return;
+  state.acqStarting = true;
+  try {
+    await runUnifiedAcq();
+    const card = $("#acq-result") ? $("#acq-result").closest(".card") : null;
+    if (card) card.scrollIntoView({ behavior: "smooth", block: "start" });
+  } finally {
+    state.acqStarting = false;
   }
 }
 
 function buildAcqConditions() {
-  const specs = $("#acq-specs").value.trim();
-  if (!specs) throw new Error("请至少填写必中规格/品类（可让 AI 方案自动填入）");
+  let specs = $("#acq-specs").value.trim();
+  if (!specs) {
+    specs = ($("#acq-seeds").value || "").split(/[\n,，]/).map((s) => s.trim().split(/\s+/)[0] || "")
+      .filter((s) => s && !/(采购|招标|询价|求购|公告|中标|项目|需求|供应商|procurement|tender|rfq|rfp|purchase|buyer)/i.test(s))
+      .slice(0, 6).join(",");
+  }
+  if (!specs) throw new Error("请至少填写必中规格/品类（点击“开始 AI 获客”会自动填入）");
   const conditions = {
     industry: "光纤通信 / 光器件",
     products: $("#acq-products").value.trim(),
+    my_role: ($("#strategy-role") ? $("#strategy-role").value : "") || "贸易商/分销商",
     specs,
     keywords: $("#acq-seeds").value.trim(),
     regions: $("#acq-regions").value.trim(),
@@ -1685,11 +1792,12 @@ function applyPlan(p) {
   const tag = $("#acq-plan-tag");
   if (tag) {
     tag.style.display = "block";
-    tag.textContent = `📋 已采用 AI 方案：${p.title || ""}${p.score ? ` ｜ 综合 ${p.score} 分` : ""}${specs.length ? ` ｜ 必中规格：${specs.join("、")}` : ""}${p.profit ? ` ｜ 利润${"★".repeat(Math.max(0, Math.min(5, p.profit)))}` : ""}${p.channels && p.channels.length ? ` ｜ 渠道：${p.channels.join("、")}` : ""}${p.risks && p.risks.length ? ` ｜ 风险：${p.risks.join("；")}` : ""}`;
+    tag.textContent = `🎯 已自动生成获客条件：${p.title || ""}${p.score ? ` ｜ 综合 ${p.score} 分` : ""}${specs.length ? ` ｜ 必中规格：${specs.join("、")}` : ""}${p.profit ? ` ｜ 利润${"★".repeat(Math.max(0, Math.min(5, p.profit)))}` : ""}${p.channels && p.channels.length ? ` ｜ 渠道：${p.channels.join("、")}` : ""}${p.risks && p.risks.length ? ` ｜ 风险：${p.risks.join("；")}` : ""}`;
   }
 }
 
-function waitStrategyDone() {
+function waitStrategyDone(opts = {}) {
+  const silent = !!opts.silent;
   return new Promise((resolve, reject) => {
     const started = Date.now();
     const tick = async () => {
@@ -1698,17 +1806,17 @@ function waitStrategyDone() {
         const t = d.task || {};
         if (t.status === "运行中") {
           const box = $("#strategy-plans");
-          if (box) box.innerHTML = `<div class="empty"><div class="ico">⏳</div>${esc(t.stage || "AI 生成中")}…（进度看右上角任务栏）</div>`;
-          if (Date.now() - started > 240000) return reject(new Error("AI 方案生成超时，请稍后重试"));
+          if (box) box.innerHTML = `<div class="empty"><div class="ico">${silent ? "🤖" : "⏳"}</div>${silent ? "正在根据你的描述准备获客条件（不展示方案，准备好后直接开始找客户）" : (t.stage || "AI 生成中")}…（进度看右上角任务栏）</div>`;
+          if (Date.now() - started > 240000) return reject(new Error("AI 获客条件生成超时，请稍后重试"));
           setTimeout(tick, 1500);
           return;
         }
         if (t.status === "成功" && t.result && t.result.plans && t.result.plans.length) {
-          renderPlans(t.result.plans, t.result.warnings || []);
+          if (!silent && state.showPlans) renderPlans(t.result.plans, t.result.warnings || []);
           resolve(t.result.plans);
           return;
         }
-        reject(new Error(t.message || "AI 方案生成失败，请重试"));
+        reject(new Error(t.message || (silent ? "AI 获客条件生成失败，请重试" : "AI 方案生成失败，请重试")));
       } catch (e) { reject(e); }
     };
     tick();
@@ -1725,6 +1833,7 @@ async function generateStrategy() {
   const regions = getStrategyRegions();
   if (!desc && !role && !regions.length) { toast("请选择你的角色或目标地区，或描述业务需求", "err"); return; }
   state.buyerContext = desc + "|" + role + "|" + regions.join(",");
+  state.showPlans = true;
   $("#strategy-plans").innerHTML = `<div class="empty"><div class="ico">🤖</div>AI 正在生成新方案…（进度看右上角任务栏）</div>`;
   try {
     await api("/api/buyer/strategy", { method: "POST", body: { description: desc, role, regions } });
@@ -1742,12 +1851,21 @@ async function pollStrategy() {
     const d = await api("/api/buyer/strategy");
     const t = d.task || {};
     if (t.status === "运行中") {
-      $("#strategy-plans").innerHTML = `<div class="empty"><div class="ico">⏳</div>${esc(t.stage || "AI 生成中")}…（进度看右上角任务栏）</div>`;
+      $("#strategy-plans").innerHTML = `<div class="empty"><div class="ico">${state.silentStrategy ? "🤖" : "⏳"}</div>${state.silentStrategy ? "正在根据你的描述准备获客条件（不展示方案，准备好后自动开始找客户）" : (t.stage || "AI 生成中")}…（进度看右上角任务栏）</div>`;
       setTimeout(pollStrategy, 1500);
       return;
     }
     if (t.status === "成功" && t.result && t.result.plans) {
-      renderPlans(t.result.plans, t.result.warnings || []);
+      if (state.silentStrategy) {
+        state.silentStrategy = false;
+        if (!state.acqStarting) {
+          applyPlan(t.result.plans[0]);
+          state.acqStarting = true;
+          runUnifiedAcq().catch((e) => toast(e.message, "err")).finally(() => { state.acqStarting = false; });
+        }
+      } else if (state.showPlans) {
+        renderPlans(t.result.plans, t.result.warnings || []);
+      }
     } else {
       $("#strategy-plans").innerHTML = `<div class="empty"><div class="ico">⚠️</div>${esc(t.message || "生成失败，请重试")}</div>`;
     }
@@ -1860,12 +1978,26 @@ async function pollAcquisition() {
       return;
     }
     acqPolling = false;
-    if (job.result) renderAcqResult(job.result);
-    else $("#acq-result").innerHTML = `<div class="empty"><div class="ico">⚠️</div>${esc(job.message || "运行失败，请重试")}</div>`;
+    if (job.result) {
+      renderAcqResult(job.result);
+      const card = $("#acq-result") ? $("#acq-result").closest(".card") : null;
+      if (card) card.scrollIntoView({ behavior: "smooth", block: "start" });
+    } else {
+      $("#acq-result").innerHTML = `<div class="empty"><div class="ico">⚠️</div>${esc(job.message || "运行失败，请重试")}</div>`;
+    }
   } catch (e) { acqPolling = false; }
 }
 
 function renderAcqResult(res) {
+  try { renderAcqResultInner(res); } catch (e) {
+    console.error("结果渲染异常", e);
+    const t2 = (res && res.targets) || [];
+    const box2 = $("#acq-result");
+    if (box2) box2.innerHTML = `<div class="empty">⚠️ 结果渲染异常（${esc(e && e.message || e)}），已降级显示</div>` + t2.slice(0, 50).map((t) => `<div style="border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin:6px 0;font-size:13px"><b>${esc(t.company)}</b> <span class="sub">${esc(t.region || "")} ｜ ${esc(t.priority || "")}级 ｜ ${esc((t.matched_conditions || []).join("、"))}</span></div>`).join("");
+  }
+}
+
+function renderAcqResultInner(res) {
   const targets = res.targets || [];
   const stats = res.stats || {};
   const warnings = res.warnings || [];
@@ -1889,7 +2021,7 @@ function renderAcqResult(res) {
     <div class="hint" style="margin-bottom:8px">等级分布：${esc(tiers)} ｜ 已核验 ${stats.verified || 0} 家${verify.updated ? ` ｜ 🌐 官网核验 ${verify.updated} 家` : ""}${enrich.updated ? ` ｜ 🏢 工商补全 ${enrich.updated} 家` : ""}${res.final_gaps && res.final_gaps.length ? ` ｜ 剩余缺口：${esc(res.final_gaps.map((g) => g.join(":")).join("；"))}` : ""}</div>
     ${targets.length ? `<div class="table-wrap"><table>
       <thead><tr><th>等级</th><th>公司</th><th>区域</th><th>买方类型</th><th>命中规格</th><th>来源</th><th>建议动作</th></tr></thead>
-      <tbody>${targets.slice(0, 30).map((t) => `
+      <tbody>${targets.slice(0, 100).map((t) => `
         <tr><td>${esc(t.priority)}级</td><td><b>${esc(t.company)}</b>${t.email ? `<div class="sub">${esc(t.email)}</div>` : ""}</td>
         <td>${esc(t.region)}</td><td>${esc(t.buyer_type)}</td><td class="sub">${esc((t.matched_conditions || []).join("、"))}</td>
         <td class="sub">${esc(t.channels || t.channel_source || "引擎")}</td>

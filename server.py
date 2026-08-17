@@ -375,6 +375,9 @@ def _acquisition_worker(conditions, seed=None, use_manual=False, manual_kws="", 
 
     try:
         settings = db.get_settings()
+        # 已配置地图 Key 时自动启用地图 POI 补充（不用再手动勾选“地图补充”）
+        if not use_manual and settings.get("map_api_key"):
+            use_manual = True
         combined_seed = list(seed) if seed else []
         has_manual = bool((manual_kws or "").strip() or (manual_urls or "").strip())
         if has_manual:
@@ -405,7 +408,7 @@ def _acquisition_worker(conditions, seed=None, use_manual=False, manual_kws="", 
                 _acq_job["stage"] = "手动搜索失败，继续引擎搜索"
                 task_progress("acq", stage="手动搜索失败，继续引擎搜索", message=str(me)[:120])
         result = acquisition.run_engine(
-            conditions, settings=settings, max_rounds=3, progress=cb,
+            conditions, settings=settings, max_rounds=4, progress=cb,
             seed_candidates=combined_seed or None,
             use_manual=use_manual,
             discover_with_seeds=has_manual,

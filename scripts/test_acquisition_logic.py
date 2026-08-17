@@ -100,7 +100,7 @@ def main():
     import core.channels as chmod
 
     def _fake_channel_search(channel_ids, keywords=None, markets=None, settings=None,
-                             progress=None, use_cache=True):
+                             progress=None, use_cache=True, max_per_channel=None, **kw):
         return ([{"url": "http://a.com", "title": "某公司 - 采购",
                   "snippet": "DWDM 采购 招标", "channels": ["bing"]}], {})
 
@@ -156,7 +156,7 @@ def main():
 
     # 11) 渠道级失败/跳过原因要汇入 errors，方便定位“找不到客户”的原因
     def _fake_channel_err(channel_ids, keywords=None, markets=None, settings=None,
-                          progress=None, use_cache=True):
+                             progress=None, use_cache=True, max_per_channel=None, **kw):
         return ([], {"bing": {"error": "HTTP 429"}, "linkedin": {"status": "skipped", "reason": "无密钥"}})
 
     chmod.run_channel_search = _fake_channel_err
