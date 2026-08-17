@@ -1405,168 +1405,148 @@ function uploadFile(file, kind, resultSel) {
 async function renderBuyer() {
   const el = $("#page-buyer");
   el.innerHTML = `
-    <div class="page-title">买家发现</div>
-    <div class="page-sub">一条流水线：① 描述业务让 AI 出方案 → ② 选“手动搜索”或“🧠 用引擎获客” → ③ 结果可再“送引擎筛选分级” → ④ 统一导入客户库</div>
+    <div class="page-title">买家发现 · 一键获客</div>
+    <div class="page-sub">一个入口跑完全流程：描述业务 → AI 出方案 → 多渠道发现（搜索引擎/社媒/行业站/招投标/地图/工商库）→ AI 评分分级 → 一键导入客户库。手动搜索、地图获客已并入这条流水线。</div>
+
     <div class="card">
-      <h3>🤖 AI 获客策略助手（不限行业）</h3>
-      <div class="field"><label>描述你的业务和理想客户（用大白话就行）</label>
+      <h3>🚀 一键智能获客</h3>
+      <div class="field"><label>描述你的业务和理想客户（用大白话，可选）</label>
         <textarea class="textarea full" id="strategy-desc" style="min-height:100px" placeholder="例如：我们做光纤通信设备，WDM和EDFA是拳头产品，想找海外有大型数据中心建设需求的集成商，最好利润空间大、对方有一定行业知名度。&#10;或者：我们做3C电子代工，想找北美有品牌的小家电客户。"></textarea>
       </div>
-      <div style="display:flex;gap:8px;align-items:center">
-        <button class="btn primary" id="strategy-gen">🤖 AI 生成获客方案</button>
-        <span class="hint">AI 会生成 3-5 套方案（目标角色、关键词、地区、利润/需求/知名度、渠道、风险），关键词自动补齐“采购/招标/RFP”等买方意图词并排除百科/论文/同行页面，选一套即可一键开搜。需要先配置 AI 密钥（设置 → AI 文案）。</span>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <button class="btn primary" id="acq-oneclick">🚀 一键智能获客（AI 方案 → 全网发现 → 评分分级）</button>
+        <span class="hint">填写业务描述会自动生成 AI 方案并自动采用推荐方案；不填则按下方“高级条件”直接全网获客。</span>
       </div>
       <div id="strategy-plans" style="margin-top:14px"></div>
-    </div>
-    <div class="card">
-      <h3>🧠 AI 获客引擎（条件驱动，自动迭代）</h3>
-      <div class="form-grid">
-        <div class="field" style="grid-column:1/-1"><label>主营产品（给 AI 判断用）</label><input class="input full" id="acq-products" placeholder="石英玻璃毛细管 / 光无源器件（准直器、滤光片、隔离器、透镜、套管）"></div>
-        <div class="field"><label>必中规格/品类（逗号分隔）*</label><input class="input full" id="acq-specs" placeholder="DWDM,WDM,玻璃管"></div>
-        <div class="field"><label>检索种子词（可选，逗号分隔）</label><input class="input full" id="acq-seeds" placeholder="DWDM 招标公告,光传输设备 采购商"></div>
-        <div class="field"><label>目标市场（逗号分隔）</label><input class="input full" id="acq-regions" placeholder="中国大陆,亚太,欧美,中东非洲拉美"></div>
-        <div class="field"><label>目标买方类型（逗号分隔）</label><input class="input full" id="acq-types" placeholder="光无源器件厂,光模块厂,系统集成商,近期招标扩容"></div>
-        <div class="field"><label>最低等级</label><select class="select full" id="acq-tier">
-          <option value="B">B 级及以上</option>
-          <option value="A">A 级及以上</option>
-          <option value="S">仅 S 级</option>
-          <option value="C">全部</option>
-        </select></div>
-        <div class="field"><label>目标客户数</label><input class="input full" type="number" min="1" max="100" id="acq-max" value="30"></div>
-        <div class="field" style="grid-column:1/-1"><label>排除词（逗号分隔）</label><input class="input full" id="acq-exclude" placeholder="自家企业,同行平台"></div>
-        <div class="field"><label>搜索时间范围（可选）</label>
-          <select class="select full" id="acq-recency">
-            <option value="">不限</option>
-            <option value="week">近 7 天</option>
-            <option value="month">近 1 个月</option>
-            <option value="year">近 1 年</option>
-          </select>
-        </div>
-        <div class="field"><label>限定站点/域名（可选）</label><input class="input full" id="acq-site" placeholder="gov.cn,in 或具体官网"></div>
-      </div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-        <button class="btn primary" id="acq-run">🚀 运行获客引擎</button>
-        <button class="btn" id="acq-import" disabled>📥 导入客户库</button>
-        <label style="display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" id="acq-manual"> 🗺️ 同时用地图POI补充（需地图Key）</label>
-        <span class="hint">引擎按你的条件自动生成多渠道检索方案、发现并筛选买家、迭代补齐缺口；也可接收“AI 方案”或“手动搜索”的结果做离线筛选分级；完成后可一键导入客户库（保留评分与等级）。</span>
-      </div>
       <div id="acq-plan-tag" style="display:none;margin-top:8px;padding:8px 10px;background:#eaf3fd;border:1px solid #bcd9f5;border-radius:8px;font-size:12px"></div>
-      <div id="acq-result" style="margin-top:12px"></div>
     </div>
-    <div class="card">
-      <h3>🔍 手动搜索（高级）</h3>
-      <div class="hint" style="margin-bottom:10px">💡 技巧：关键词 = 产品词 + 买方动作（采购/招标/询价/项目），例如 “WDM 采购”、“波分复用设备 项目方”，比只写产品名精准得多。</div>
-      <div class="form-grid">
-        <div class="field" style="grid-column:1/-1"><label>搜索关键词（每行一个，建议 1-3 个）</label>
-          <textarea class="textarea full" id="buyer-kws" placeholder="WDM 采购&#10;波分复用设备 招标&#10;光传输扩容 项目方"></textarea>
-        </div>
-        <div class="field" style="grid-column:1/-1"><label>行业获客词模板（一键套用）</label>
-          <div id="buyer-presets" style="display:flex;gap:8px;flex-wrap:wrap"><span class="hint">加载中…</span></div>
-        </div>
-        <div class="field"><label>目标地区/市场（每行一个，可留空）</label>
-          <textarea class="textarea full" id="buyer-markets" style="min-height:80px" placeholder="广东&#10;浙江&#10;海外：Peru"></textarea>
-        </div>
-        <div class="field"><label>每个关键词抓取数量</label>
-          <select class="select full" id="buyer-max">
-            <option value="3">3 条</option>
-            <option value="5">5 条</option>
-            <option value="8" selected>8 条</option>
-            <option value="10">10 条</option>
-          </select>
-        </div>
-      </div>
-      <div class="field"><label>或直接指定网址抓取（每行一个，优先于关键词搜索）</label>
-        <textarea class="textarea full" id="buyer-urls" style="min-height:60px" placeholder="https://example.com/company-a&#10;https://example.com/company-b"></textarea>
-      </div>
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-        <button class="btn primary" id="buyer-run">🔍 开始发现买家</button>
-        <label style="display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" id="buyer-ai"> AI 智能筛选（需要 API Key）</label>
-        <span class="hint">AI 会结合上方的业务描述判断每条线索像不像你的买家（不限行业）并给出依据；未填描述时按“设置 → 行业”判断</span>
-      </div>
-    </div>
-    <div class="card" id="buyer-result"><div class="empty"><div class="ico">🎯</div>搜索结果显示在这里</div></div>`;
 
-  $("#buyer-run").onclick = async () => {
-    const btn = $("#buyer-run");
-    btn.disabled = true; btn.textContent = "启动中…";
-    try {
-      const res = await api("/api/buyer", { method: "POST", body: {
-        keywords: $("#buyer-kws").value.trim(),
-        markets: $("#buyer-markets").value.trim(),
-        max_results: $("#buyer-max").value,
-        urls: $("#buyer-urls").value.trim(),
-        use_ai: $("#buyer-ai").checked,
-        context: state.buyerContext || $("#strategy-desc").value.trim(),
-      } });
-      $("#buyer-result").innerHTML = `<div class="empty"><div class="ico">⏳</div>搜索任务已启动，正在后台进行…（页面可继续操作）</div>`;
-      pollBuyerJob();
-    } catch (e) { toast(e.message, "err"); }
-    finally { btn.disabled = false; btn.textContent = "🔍 开始发现买家"; }
+    <div class="card">
+      <h3 style="display:flex;justify-content:space-between;align-items:center">
+        <span>⚙️ 高级条件（默认已够用，可展开微调）</span>
+        <button class="btn sm" id="acq-advanced-toggle">展开 ▼</button>
+      </h3>
+      <div id="acq-advanced" style="display:none">
+        <div class="form-grid">
+          <div class="field" style="grid-column:1/-1"><label>主营产品（给 AI 判断用）</label><input class="input full" id="acq-products" placeholder="石英玻璃毛细管 / 光无源器件（准直器、滤光片、隔离器、透镜、套管）"></div>
+          <div class="field"><label>必中规格/品类（逗号分隔）*</label><input class="input full" id="acq-specs" placeholder="DWDM,WDM,玻璃管"></div>
+          <div class="field"><label>检索种子词（可选，逗号分隔）</label><input class="input full" id="acq-seeds" placeholder="DWDM 招标公告,光传输设备 采购商"></div>
+          <div class="field"><label>目标市场（逗号分隔）</label><input class="input full" id="acq-regions" placeholder="中国大陆,亚太,欧美,中东非洲拉美"></div>
+          <div class="field"><label>目标买方类型（逗号分隔）</label><input class="input full" id="acq-types" placeholder="光无源器件厂,光模块厂,系统集成商,近期招标扩容"></div>
+          <div class="field"><label>最低等级</label><select class="select full" id="acq-tier">
+            <option value="B">B 级及以上</option>
+            <option value="A">A 级及以上</option>
+            <option value="S">仅 S 级</option>
+            <option value="C">全部</option>
+          </select></div>
+          <div class="field"><label>目标客户数</label><input class="input full" type="number" min="1" max="100" id="acq-max" value="30"></div>
+          <div class="field"><label>搜索时间范围（可选）</label>
+            <select class="select full" id="acq-recency">
+              <option value="">不限</option>
+              <option value="week">近 7 天</option>
+              <option value="month">近 1 个月</option>
+              <option value="year">近 1 年</option>
+            </select>
+          </div>
+          <div class="field"><label>限定站点/域名（可选）</label><input class="input full" id="acq-site" placeholder="gov.cn,in 或具体官网"></div>
+          <div class="field" style="grid-column:1/-1"><label>排除词（逗号分隔）</label><input class="input full" id="acq-exclude" placeholder="自家企业,同行平台"></div>
+          <div class="field" style="grid-column:1/-1"><label>补充关键词（原“手动搜索”，每行一个，可留空）</label>
+            <textarea class="textarea full" id="acq-manual-kws" style="min-height:70px" placeholder="WDM 采购&#10;波分复用设备 招标&#10;光传输扩容 项目方"></textarea>
+          </div>
+          <div class="field" style="grid-column:1/-1"><label>行业获客词模板（一键套用）</label>
+            <div id="buyer-presets" style="display:flex;gap:8px;flex-wrap:wrap"><span class="hint">加载中…</span></div>
+          </div>
+          <div class="field" style="grid-column:1/-1"><label>指定网址抓取（每行一个，优先于关键词搜索）</label>
+            <textarea class="textarea full" id="acq-manual-urls" style="min-height:60px" placeholder="https://example.com/company-a&#10;https://example.com/company-b"></textarea>
+          </div>
+          <div class="field"><label>每个关键词抓取数量</label>
+            <select class="select full" id="acq-manual-max">
+              <option value="3">3 条</option>
+              <option value="5">5 条</option>
+              <option value="8" selected>8 条</option>
+              <option value="10">10 条</option>
+            </select>
+          </div>
+          <div class="field" style="display:flex;flex-direction:column;justify-content:flex-end;gap:8px">
+            <label style="display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" id="acq-manual-ai"> AI 智能筛选手动线索（需要 API Key）</label>
+            <label style="display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" id="acq-use-map"> 🗺️ 同时用地图POI补充（需地图Key）</label>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:12px">
+          <button class="btn primary" id="acq-run">🚀 按当前条件直接获客（不生成方案）</button>
+          <span class="hint">说明：一键模式会自动完成“AI 方案 → 多渠道搜索 → 手动关键词/网址 → 地图POI → 评分分级”，结果统一显示在下方。</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3 style="display:flex;justify-content:space-between;align-items:center"><span>🎯 统一结果</span><button class="btn" id="acq-import" disabled>📥 导入客户库</button></h3>
+      <div id="acq-result"><div class="empty"><div class="ico">🎯</div>运行“一键智能获客”后，所有渠道发现的客户会统一显示在这里</div></div>
+    </div>`;
+
+  $("#acq-advanced-toggle").onclick = () => {
+    const body = $("#acq-advanced");
+    const collapsed = body.style.display === "none";
+    body.style.display = collapsed ? "" : "none";
+    $("#acq-advanced-toggle").textContent = collapsed ? "收起 ▲" : "展开 ▼";
   };
+
   const loadPresets = async () => {
     try {
       const d = await api("/api/buyer/presets");
       const presets = d.presets || {};
       const box = $("#buyer-presets");
+      if (!box) return;
       box.innerHTML = Object.entries(presets).map(([name]) => `<button class="btn sm" data-p="${esc(name)}">${esc(name)}</button>`).join("");
       $$("#buyer-presets [data-p]").forEach((b) => b.onclick = () => {
         const p = presets[b.dataset.p];
-        $("#buyer-kws").value = (p.keywords || []).join("\n");
-        $("#buyer-markets").value = (p.markets || []).join("\n");
-        toast("已套用模板：" + b.dataset.p, "ok");
+        $("#acq-manual-kws").value = (p.keywords || []).join("\n");
+        $("#acq-regions").value = (p.markets || []).join(",");
+        toast("已套用模板：" + b.dataset.p + "（已填入补充关键词与地区）", "ok");
       });
     } catch (e) { /* 忽略 */ }
   };
   loadPresets();
 
-  $("#strategy-gen").onclick = async () => {
+  // 一键智能获客：AI 方案 → 全网发现 → 评分分级
+  $("#acq-oneclick").onclick = async () => {
+    const btn = $("#acq-oneclick");
     const desc = $("#strategy-desc").value.trim();
-    if (!desc) return toast("请先描述你的业务和客户需求", "err");
-    state.buyerContext = desc;
-    // 立即清掉上一次的方案，避免残留/闪烁
-    $("#strategy-plans").innerHTML = `<div class="empty"><div class="ico">🤖</div>AI 正在生成新方案…（进度看右上角任务栏）</div>`;
-    const btn = $("#strategy-gen");
-    btn.disabled = true; btn.textContent = "启动中…";
+    btn.disabled = true;
     try {
-      await api("/api/buyer/strategy", { method: "POST", body: { description: desc } });
-      pollStrategy();
+      if (desc && desc !== state.buyerContext) {
+        state.buyerContext = desc;
+        $("#strategy-plans").innerHTML = `<div class="empty"><div class="ico">🤖</div>AI 正在根据你的描述生成方案…（进度看右上角任务栏）</div>`;
+        try {
+          await api("/api/buyer/strategy", { method: "POST", body: { description: desc } });
+        } catch (e) {
+          const t = (await api("/api/buyer/strategy")).task || {};
+          if (t.status !== "运行中") throw e;
+          toast("上一轮方案还在生成，等待完成后自动使用", "warn");
+        }
+        const plans = await waitStrategyDone();
+        if (plans && plans.length) applyPlan(plans[0]);
+      }
+      await runUnifiedAcq();
     } catch (e) {
-      toast(e.message, "err");
-      $("#strategy-plans").innerHTML = `<div class="empty"><div class="ico">⚠️</div>${esc(e.message)}</div>`;
+      if ($("#acq-specs").value.trim()) {
+        toast("AI 方案暂不可用，已按当前条件直接获客：" + (e && e.message || e), "warn");
+        try { await runUnifiedAcq(); } catch (e2) { toast(e2.message, "err"); }
+      } else {
+        $("#strategy-plans").innerHTML = `<div class="empty"><div class="ico">⚠️</div>${esc(e && e.message || e)}</div>`;
+        toast(e && e.message || e, "err");
+      }
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "🚀 一键智能获客（AI 方案 → 全网发现 → 评分分级）";
     }
-    finally { btn.disabled = false; btn.textContent = "🤖 AI 生成获客方案"; }
   };
-  if (state.pendingStrategy) {
-    $("#strategy-desc").value = state.pendingStrategy;
-    state.pendingStrategy = "";
-    $("#strategy-gen").click();
-  }
 
-  // AI 获客引擎
+  // 按当前条件直接运行（不生成方案）
   $("#acq-run").onclick = async () => {
-    const specs = $("#acq-specs").value.trim();
-    if (!specs) return toast("请至少填写必中规格/品类", "err");
-    const conditions = {
-      industry: "光纤通信 / 光器件",
-      products: $("#acq-products").value.trim(),
-      specs,
-      keywords: $("#acq-seeds").value.trim(),
-      regions: $("#acq-regions").value.trim(),
-      buyer_types: $("#acq-types").value.trim(),
-      min_tier: $("#acq-tier").value,
-      max_results: $("#acq-max").value || 30,
-      exclude: $("#acq-exclude").value.trim(),
-      recency: $("#acq-recency").value,
-      site_scope: $("#acq-site").value.trim(),
-    };
-    if (state.acqPlan) conditions.ai_plan = state.acqPlan;
-    try {
-      await api("/api/acquisition/run", { method: "POST", body: { conditions, use_manual: $("#acq-manual").checked } });
-      $("#acq-result").innerHTML = `<div class="empty"><div class="ico">🧠</div>获客引擎已启动，正在发现并筛选买家…（进度看右上角任务栏）</div>`;
-      $("#acq-import").disabled = true;
-      pollAcquisition();
-    } catch (e) { toast(e.message, "err"); }
+    try { await runUnifiedAcq(); } catch (e) { toast(e.message, "err"); }
   };
+
   $("#acq-import").onclick = async () => {
     try {
       const r = await api("/api/acquisition/import", { method: "POST", body: {} });
@@ -1575,8 +1555,9 @@ async function renderBuyer() {
       box.innerHTML += `<div class="hint" style="margin-top:8px">✅ 已导入 ${r.added} 家客户（跳过重复 ${r.duplicates} 家），去“客户线索”查看</div>`;
     } catch (e) { toast(e.message, "err"); }
   };
+
   // 手动修改引擎条件后，自动解除“AI 方案带入”状态，避免旧方案残留
-  ["acq-products", "acq-specs", "acq-seeds", "acq-regions", "acq-types", "acq-tier", "acq-max", "acq-exclude", "acq-recency", "acq-site"].forEach((id) => {
+  ["acq-products", "acq-specs", "acq-seeds", "acq-regions", "acq-types", "acq-tier", "acq-max", "acq-exclude", "acq-recency", "acq-site", "acq-manual-kws", "acq-manual-urls"].forEach((id) => {
     const el = $("#" + id);
     if (el) el.addEventListener("input", () => {
       state.acqPlan = null;
@@ -1584,6 +1565,7 @@ async function renderBuyer() {
       if (tag) tag.style.display = "none";
     });
   });
+
   // 恢复获客引擎任务状态（切走再回来不丢）
   api("/api/acquisition").then((d) => {
     const job = d.job || {};
@@ -1598,7 +1580,6 @@ async function renderBuyer() {
   // 恢复 AI 方案任务状态（切走再回来不丢）
   api("/api/buyer/strategy").then((d) => {
     const t = d.task || {};
-    // 如果是刚发起的新一轮生成，跳过旧方案渲染，避免闪烁
     if (state.pendingStrategy) return;
     if (t.status === "运行中") {
       $("#strategy-plans").innerHTML = `<div class="empty"><div class="ico">⏳</div>${esc(t.stage || "AI 生成中")}…（进度看右上角任务栏）</div>`;
@@ -1610,16 +1591,119 @@ async function renderBuyer() {
     }
   }).catch(() => {});
 
-  // 恢复买家发现搜索任务状态
-  api("/api/buyer").then((d) => {
-    const job = d.job || {};
-    if (job.running) {
-      $("#buyer-result").innerHTML = `<div class="empty"><div class="ico">⏳</div>${esc(job.stage || "正在搜索并分析买家线索")}…（进度看右上角任务栏）</div>`;
-      pollBuyerJob();
-    } else if (job.result) {
-      renderBuyerResult(job.result);
+  if (state.pendingStrategy) {
+    $("#strategy-desc").value = state.pendingStrategy;
+    state.pendingStrategy = "";
+    generateStrategy();
+  }
+}
+
+function buildAcqConditions() {
+  const specs = $("#acq-specs").value.trim();
+  if (!specs) throw new Error("请至少填写必中规格/品类（可让 AI 方案自动填入）");
+  const conditions = {
+    industry: "光纤通信 / 光器件",
+    products: $("#acq-products").value.trim(),
+    specs,
+    keywords: $("#acq-seeds").value.trim(),
+    regions: $("#acq-regions").value.trim(),
+    buyer_types: $("#acq-types").value.trim(),
+    min_tier: $("#acq-tier").value,
+    max_results: $("#acq-max").value || 30,
+    exclude: $("#acq-exclude").value.trim(),
+    recency: $("#acq-recency").value,
+    site_scope: $("#acq-site").value.trim(),
+  };
+  if (state.acqPlan) conditions.ai_plan = state.acqPlan;
+  return conditions;
+}
+
+async function runUnifiedAcq() {
+  const conditions = buildAcqConditions();
+  const body = {
+    conditions,
+    use_manual: !!($("#acq-use-map") && $("#acq-use-map").checked),
+    manual_kws: $("#acq-manual-kws").value.trim(),
+    manual_urls: $("#acq-manual-urls").value.trim(),
+    manual_max: $("#acq-manual-max") ? $("#acq-manual-max").value : 8,
+    manual_ai: !!($("#acq-manual-ai") && $("#acq-manual-ai").checked),
+  };
+  await api("/api/acquisition/run", { method: "POST", body });
+  $("#acq-result").innerHTML = `<div class="empty"><div class="ico">🧠</div>一键获客已启动：AI 方案 → 多渠道搜索 → 手动关键词/网址 → 地图POI → 评分分级…（进度看右上角任务栏）</div>`;
+  const importBtn = $("#acq-import");
+  if (importBtn) importBtn.disabled = true;
+  pollAcquisition();
+}
+
+function applyPlan(p) {
+  if (!p) return;
+  state.acqPlan = p;
+  $("#acq-products").value = p.target_customers || "";
+  const specs = [];
+  (p.keywords || []).forEach((kw) => {
+    const kwText = String(kw || "").trim();
+    let s = kwText.split(/\s+(?:采购经理|扩容项目|项目方|采购公告|招标公告|询价公告|中标公告|采购|招标|询价|求购|公告|中标|项目|需求|供应商|procurement|tender|rfq|rfp|purchase|buyer|sourcing|inquiry|distributor|dealer|supplier)\b/i)[0] || "";
+    s = s.trim();
+    if (s === kwText) {
+      s = kwText.replace(/(?:采购经理|扩容项目|项目方|采购公告|招标公告|询价公告|中标公告|采购|招标|询价|求购|公告|中标|项目|需求|供应商|procurement|tender|rfq|rfp|purchase|buyer|sourcing|inquiry|distributor|dealer|supplier)\s*$/i, "").trim();
     }
-  }).catch(() => {});
+    if (!s || /(采购|招标|询价|求购|公告|中标|项目|需求|供应商|procurement|tender|rfq|rfp|purchase|buyer)/i.test(s)) {
+      s = kwText.split(/\s+/)[0] || "";
+    }
+    s = s.trim();
+    if (s && specs.indexOf(s) < 0) specs.push(s);
+  });
+  $("#acq-specs").value = specs.slice(0, 5).join(",");
+  $("#acq-seeds").value = (p.keywords || []).join(",");
+  $("#acq-regions").value = (p.markets || []).join(",");
+  $("#acq-types").value = p.buyer_role || "";
+  $("#acq-exclude").value = "";
+  $("#acq-manual-kws").value = (p.keywords || []).join("\n");
+  const tag = $("#acq-plan-tag");
+  if (tag) {
+    tag.style.display = "block";
+    tag.textContent = `📋 已采用 AI 方案：${p.title || ""}${p.profit ? ` ｜ 利润${"★".repeat(Math.max(0, Math.min(5, p.profit)))}` : ""}${p.channels && p.channels.length ? ` ｜ 渠道：${p.channels.join("、")}` : ""}${p.risks && p.risks.length ? ` ｜ 风险：${p.risks.join("；")}` : ""}`;
+  }
+}
+
+function waitStrategyDone() {
+  return new Promise((resolve, reject) => {
+    const started = Date.now();
+    const tick = async () => {
+      try {
+        const d = await api("/api/buyer/strategy");
+        const t = d.task || {};
+        if (t.status === "运行中") {
+          const box = $("#strategy-plans");
+          if (box) box.innerHTML = `<div class="empty"><div class="ico">⏳</div>${esc(t.stage || "AI 生成中")}…（进度看右上角任务栏）</div>`;
+          if (Date.now() - started > 240000) return reject(new Error("AI 方案生成超时，请稍后重试"));
+          setTimeout(tick, 1500);
+          return;
+        }
+        if (t.status === "成功" && t.result && t.result.plans && t.result.plans.length) {
+          renderPlans(t.result.plans, t.result.warnings || []);
+          resolve(t.result.plans);
+          return;
+        }
+        reject(new Error(t.message || "AI 方案生成失败，请重试"));
+      } catch (e) { reject(e); }
+    };
+    tick();
+  });
+}
+
+async function generateStrategy() {
+  const desc = $("#strategy-desc").value.trim();
+  if (!desc) { toast("请先描述你的业务和客户需求", "err"); return; }
+  state.buyerContext = desc;
+  $("#strategy-plans").innerHTML = `<div class="empty"><div class="ico">🤖</div>AI 正在生成新方案…（进度看右上角任务栏）</div>`;
+  try {
+    await api("/api/buyer/strategy", { method: "POST", body: { description: desc } });
+    pollStrategy();
+  } catch (e) {
+    toast(e.message, "err");
+    $("#strategy-plans").innerHTML = `<div class="empty"><div class="ico">⚠️</div>${esc(e.message)}</div>`;
+  }
 }
 
 let strategyPolling = false;
@@ -1662,8 +1746,7 @@ function renderPlans(plans, warnings) {
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
         <b>方案 ${"ABCDE"[i] || i + 1}：${esc(p.title)}${i === 0 ? ' <span class="type-chip" style="color:#fff;background:#16a34a">推荐</span>' : ""}</b>
         <span style="display:flex;gap:6px;flex-wrap:wrap">
-          <button class="btn primary sm" data-use="${i}">🔍 手动搜索</button>
-          <button class="btn sm" data-acq="${i}">🧠 用引擎获客</button>
+          <button class="btn primary sm" data-acq="${i}">🚀 用此方案一键获客</button>
         </span>
       </div>
       <div style="margin-top:6px">🎯 目标客户：${esc(p.target_customers)}</div>
@@ -1692,49 +1775,12 @@ function renderPlans(plans, warnings) {
     body.style.display = collapsed ? "" : "none";
     $("#plans-toggle").textContent = collapsed ? "收起 ▲" : "展开 ▼";
   };
-  $$("[data-use]", box).forEach((b) => b.onclick = () => {
-    const p = plans[+b.dataset.use];
-    $("#buyer-kws").value = (p.keywords || []).join("\n");
-    $("#buyer-markets").value = (p.markets || []).join("\n");
-    toast("已按方案填入关键词，开始手动搜索…", "ok");
-    $("#buyer-run").click();
-  });
   $$("[data-acq]", box).forEach((b) => b.onclick = () => {
     const p = plans[+b.dataset.acq];
-    // 方案 → 引擎条件：规格/市场/买方角色 一键带入并启动
-    state.acqPlan = p;  // 完整方案（标题/评级/策略/合作/渠道/风险）随引擎一起传递
-    $("#acq-products").value = p.target_customers || "";
-    // 从方案关键词提取干净的产品词填“必中规格”（去掉 采购/招标/公告 等意图后缀）
-    const specs = [];
-    (p.keywords || []).forEach((kw) => {
-      const kwText = String(kw || "").trim();
-      // 在第一个买方意图词处切分，只保留前面的产品/场景词
-      let s = kwText.split(/\s+(?:采购经理|扩容项目|项目方|采购公告|招标公告|询价公告|中标公告|采购|招标|询价|求购|公告|中标|项目|需求|供应商|procurement|tender|rfq|rfp|purchase|buyer|sourcing|inquiry|distributor|dealer|supplier)\b/i)[0] || "";
-      s = s.trim();
-      // 没有“空格+意图词”时，尝试直接去掉结尾的意图词（如“光模块需求”）
-      if (s === kwText) {
-        s = kwText.replace(/(?:采购经理|扩容项目|项目方|采购公告|招标公告|询价公告|中标公告|采购|招标|询价|求购|公告|中标|项目|需求|供应商|procurement|tender|rfq|rfp|purchase|buyer|sourcing|inquiry|distributor|dealer|supplier)\s*$/i, "").trim();
-      }
-      // 首段仍含意图词时（如“采购经理”），退而取关键词第一个词
-      if (!s || /(采购|招标|询价|求购|公告|中标|项目|需求|供应商|procurement|tender|rfq|rfp|purchase|buyer)/i.test(s)) {
-        s = kwText.split(/\s+/)[0] || "";
-      }
-      s = s.trim();
-      if (s && specs.indexOf(s) < 0) specs.push(s);
-    });
-    $("#acq-specs").value = specs.slice(0, 5).join(",");
-    $("#acq-seeds").value = (p.keywords || []).join(",");
-    $("#acq-regions").value = (p.markets || []).join(",");
-    $("#acq-types").value = p.buyer_role || "";
-    $("#acq-exclude").value = "";
-    const tag = $("#acq-plan-tag");
-    if (tag) {
-      tag.style.display = "block";
-      tag.textContent = `📋 已带入 AI 方案：${p.title || ""}${p.profit ? ` ｜ 利润${"★".repeat(Math.max(0, Math.min(5, p.profit)))}` : ""}${p.channels && p.channels.length ? ` ｜ 渠道：${p.channels.join("、")}` : ""}${p.risks && p.risks.length ? ` ｜ 风险：${p.risks.join("；")}` : ""}`;
-    }
-    toast("已用方案填充引擎条件，开始自动获客…", "ok");
-    $("#acq-run").click();
-    const card = $("#acq-run").closest(".card");
+    applyPlan(p);
+    toast("已采用方案：" + (p.title || ""), "ok");
+    runUnifiedAcq().catch((e) => toast(e.message, "err"));
+    const card = $("#acq-result") ? $("#acq-result").closest(".card") : null;
     if (card) card.scrollIntoView({ behavior: "smooth", block: "start" });
   });
   } catch (e) {
@@ -1809,10 +1855,11 @@ function renderAcqResult(res) {
     ${warnHtml}
     <div class="hint" style="margin-bottom:8px">等级分布：${esc(tiers)} ｜ 已核验 ${stats.verified || 0} 家${verify.updated ? ` ｜ 🌐 官网核验 ${verify.updated} 家` : ""}${enrich.updated ? ` ｜ 🏢 工商补全 ${enrich.updated} 家` : ""}${res.final_gaps && res.final_gaps.length ? ` ｜ 剩余缺口：${esc(res.final_gaps.map((g) => g.join(":")).join("；"))}` : ""}</div>
     ${targets.length ? `<div class="table-wrap"><table>
-      <thead><tr><th>等级</th><th>公司</th><th>区域</th><th>买方类型</th><th>命中规格</th><th>建议动作</th></tr></thead>
+      <thead><tr><th>等级</th><th>公司</th><th>区域</th><th>买方类型</th><th>命中规格</th><th>来源</th><th>建议动作</th></tr></thead>
       <tbody>${targets.slice(0, 30).map((t) => `
         <tr><td>${esc(t.priority)}级</td><td><b>${esc(t.company)}</b>${t.email ? `<div class="sub">${esc(t.email)}</div>` : ""}</td>
         <td>${esc(t.region)}</td><td>${esc(t.buyer_type)}</td><td class="sub">${esc((t.matched_conditions || []).join("、"))}</td>
+        <td class="sub">${esc(t.channels || t.channel_source || "引擎")}</td>
         <td class="sub">${esc(t.next_action || "")}</td></tr>`).join("")}</tbody>
     </table></div>` : `<div class="empty">没有目标客户，请根据上方原因调整后重试</div>`}`;
 }

@@ -781,11 +781,12 @@ def _expand_for_gaps(conditions, gaps, round_no):
     return out[:10], uniq_r
 
 
-def run_engine(conditions, settings=None, max_rounds=3, progress=None, seed_candidates=None, use_manual=False):
+def run_engine(conditions, settings=None, max_rounds=3, progress=None, seed_candidates=None, use_manual=False, discover_with_seeds=False):
     """编排：发现 → 筛选 → 迭代补强 → 导出就绪。
 
     返回 dict: {targets, dropped, plan, gaps_history, rounds, stats}
     use_manual=True 时，会额外调用 core.mapsearch（手动搜索/高级）补充 POI 线索。
+    discover_with_seeds=True 时，即使带了 seed 线索也会继续联网发现（一键融合模式）。
     """
     conditions = normalize_conditions(conditions)
     plan = generate_plan(conditions)
@@ -800,7 +801,7 @@ def run_engine(conditions, settings=None, max_rounds=3, progress=None, seed_cand
     gaps_history = []
     discovery_info = []
     warnings = []
-    if not seed_candidates:
+    if not seed_candidates or discover_with_seeds:
         # 手动搜索（高级）一次性补充，避免每轮重复调用地图接口
         if use_manual:
             all_candidates = _discover_manual(conditions, settings, progress) + all_candidates

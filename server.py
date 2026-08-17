@@ -356,10 +356,15 @@ def start_buyer_job(data):
     return True, "搜索任务已启动"
 
 
-def _acquisition_worker(conditions, seed=None, use_manual=False):
-    """后台线程：条件驱动的 AI 获客引擎。
-    有 seed（已发现线索）时走离线筛选分级，无 seed 时联网发现→筛选→迭代补缺口。"""
-    task_start("acq", "AI 获客引擎（筛选分级）" if seed else "AI 获客引擎")
+def _acquisition_worker(conditions, seed=None, use_manual=False, manual_kws="", manual_urls="", manual_max=8, manual_ai=False):
+    """后台线程：一键融合的 AI 获客引擎。
+
+    - 无 seed、无手动输入：联网发现 → 筛选 → 迭代补缺口；
+    - 仅 seed：离线筛选分级；
+    - 手动关键词/网址：先手动搜索合并线索，再联网发现（一键融合模式）。"""
+    has_manual = bool((manual_kws or "").strip() or (manual_urls or "").strip())
+    label = "AI 获客引擎（筛选分级）" if (seed and not has_manual) else ("AI 获客引擎（一键融合）" if has_manual else "AI 获客引擎")
+    task_start("acq", label)
     _acq_job.update(running=True, result=None, message="", stage="准备中",
                     started=time.strftime("%Y-%m-%d %H:%M:%S"))
 
@@ -370,9 +375,40 @@ def _acquisition_worker(conditions, seed=None, use_manual=False):
 
     try:
         settings = db.get_settings()
+        combined_seed = list(seed) if seed else []
+        has_manual = bool((manual_kws or "").strip() or (manual_urls or "").strip())
+        if has_manual:
+            _acq_job["stage"] = "手动搜索（补充关键词/指定网址）"
+            task_progress("acq", stage="手动搜索（补充关键词/指定网址）")
+            try:
+                mctx = (
+                    f"我方主营：{conditions.get('products', '')}。理想客户："
+                    f"{'、'.join(conditions.get('buyer_types') or [])}。"
+                    f"必须命中品类：{'、'.join(conditions.get('specs') or [])}。"
+                    "只保留有真实采购意向的买方，剔除同行供应商与平台噪音。"
+                )
+                mres = buyer.run(
+                    keywords=manual_kws,
+                    markets="\n".join(conditions.get("regions") or []),
+                    max_results=max(1, int(manual_max or 8)),
+                    urls=manual_urls,
+                    use_ai=bool(manual_ai),
+                    settings=settings,
+                    progress=cb,
+                    context=mctx,
+                )
+                mc = mres.get("candidates") or []
+                combined_seed.extend(mc)
+                _acq_job["stage"] = f"手动搜索完成，合并 {len(mc)} 条线索"
+                task_progress("acq", stage=f"手动搜索完成，合并 {len(mc)} 条线索")
+            except Exception as me:
+                _acq_job["stage"] = "手动搜索失败，继续引擎搜索"
+                task_progress("acq", stage="手动搜索失败，继续引擎搜索", message=str(me)[:120])
         result = acquisition.run_engine(
-            conditions, settings=settings, max_rounds=3, progress=cb, seed_candidates=seed,
+            conditions, settings=settings, max_rounds=3, progress=cb,
+            seed_candidates=combined_seed or None,
             use_manual=use_manual,
+            discover_with_seeds=has_manual,
         )
         _acq_job.update(running=False, result=result, message="")
         total = result["stats"]["total"]
@@ -1602,11 +1638,18 @@ class Handler(BaseHTTPRequestHandler):
             if seed is not None and not isinstance(seed, list):
                 return send_json(self, {"ok": False, "msg": "seed 必须是线索数组"}, 400)
             use_manual = bool(data.get("use_manual"))
+            manual_kws = str(data.get("manual_kws") or "")
+            manual_urls = str(data.get("manual_urls") or "")
+            try:
+                manual_max = int(data.get("manual_max") or 8)
+            except (TypeError, ValueError):
+                manual_max = 8
+            manual_ai = bool(data.get("manual_ai"))
             if _acq_job.get("running"):
                 return send_json(self, {"ok": False, "msg": "获客引擎正在运行，请等待完成"}, 400)
             _acq_job.update(running=True, result=None, message="", stage="准备中",
                             started=time.strftime("%Y-%m-%d %H:%M:%S"))
-            threading.Thread(target=_acquisition_worker, args=(conditions, seed, use_manual), daemon=True).start()
+            threading.Thread(target=_acquisition_worker, args=(conditions, seed, use_manual, manual_kws, manual_urls, manual_max, manual_ai), daemon=True).start()
             return send_json(self, {"ok": True, "msg": "获客引擎已启动（进度看右上角任务栏）", "job": dict(_acq_job)})
         if api == "acquisition" and len(parts) > 2 and parts[2] == "import":
             data = read_json_body(self)
