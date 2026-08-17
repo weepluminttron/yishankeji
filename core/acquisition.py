@@ -471,20 +471,72 @@ def classify_region(text, fallback="其他"):
     return fallback
 
 
+# 规格匹配时排除的“意图词/动作词”，避免“CWDM 18通道 复用器”这种复合词被拆词误命中
+_INTENT_WORDS = (
+    "采购", "招标", "询价", "求购", "公告", "中标", "项目", "需求", "供应商", "采购经理",
+    "项目方", "扩容项目", "procurement", "tender", "rfq", "rfp", "purchase", "buyer",
+    "sourcing", "inquiry", "distributor", "dealer", "supplier", "contractor",
+)
+
+# 公司主体特征词：把“真实公司”与“公告/页面标题/平台页”区分开
+_COMPANY_HINTS = (
+    "公司", "集团", "有限", "股份", "科技", "通信", "网络", "电子", "光电", "光纤", "光缆",
+    "集成", "工程", "设备", "实业", "贸易", "供应链", "运营", "电力", "能源", "水务",
+    "telecom", "networks", "communications", "technologies", "technology", "optical",
+    "photonics", "fiber", "cable", "systems", "solutions", "internet", "electronics",
+    "engineering", "industries", "holdings", "berhad", "pte", "sdn", "plc", "gmbh",
+    "inc", "ltd", "llc", "corp", "co.", "s.a.", "株式会社",
+)
+
+_ANNOUNCEMENT_MARKS = (
+    "采购公告", "招标公告", "询价公告", "中标公告", "采购项目", "招标项目", "采购需求",
+    "采购计划", "招标采购", "询比价", "结果公告", "更正公告", "补充公告", "采购信息",
+    "招标信息", "征集公告", "公示",
+)
+
+
+def _is_intent_word(x):
+    xl = x.lower()
+    return any(w == xl or w in xl for w in _INTENT_WORDS)
+
+
+def _looks_like_company(name):
+    """只保留“公司主体”：排除采购/招标公告标题、行业门户/商城页、纯页面标题。"""
+    n = (name or "").strip()
+    if not n or n in ("未命名", "undefined", "none", "null"):
+        return False
+    if len(n) > 60:
+        return False
+    if any(m in n for m in _ANNOUNCEMENT_MARKS):
+        return False
+    low = n.lower()
+    if any(h in low for h in _COMPANY_HINTS):
+        return True
+    # 英文品牌名（如 Tejas Networks、e& UAE、Ooredoo Qatar）
+    # 至少两个词，且不能是“采购/招标/需求”等意图词标题
+    if re.fullmatch(r"[A-Za-z0-9&.\-() ]{2,60}", n):
+        toks = [t.strip("&.-") for t in re.split(r"[\s()]+", n) if t.strip("&.-")]
+        if len(toks) >= 2 and not any(_is_intent_word(t) for t in toks):
+            return True
+    return False
+
+
 def _match_specs(text, specs):
-    """规格匹配：整串命中优先；复合规格再按“品类词”拆分，任一品类词命中即算命中。"""
+    """规格匹配：整串命中优先；复合规格只按“品类主词”匹配，排除采购/招标等意图词，防止公告误命中。"""
     t = (text or "").lower()
     hit = []
     for s in specs:
         s = str(s or "").strip()
         if not s:
             continue
-        if s.lower() in t:
+        s_low = s.lower()
+        if s_low in t:
             hit.append(s)
             continue
-        # “电信运营商 光模块”这类复合规格，按词拆分匹配（长度≥2 的品类词）
+        # 复合规格（如“CWDM 18通道 复用器”）：只取含字母/中文的品类主词做匹配
         toks = [x for x in re.split(r"[\s,，、/|]+", s) if len(x) >= 2]
-        if any(x.lower() in t for x in toks):
+        primary = [x for x in toks if re.search(r"[a-zA-Z\u4e00-\u9fff]", x) and not _is_intent_word(x)]
+        if primary and any(x.lower() in t for x in primary):
             hit.append(s)
     return hit
 
@@ -521,7 +573,9 @@ def build_targets(candidates, conditions, seq_start=1):
         note = str(c.get("note") or "")
         tags = str(c.get("tags") or "")
         website = str(c.get("website") or "")
-        text = " ".join([name, tags, note, c.get("type", ""), c.get("region", ""), c.get("source", "")])
+        # 关键词回显（query/tags）不能当作页面真实内容，匹配与归类时不使用，
+        # 避免“搜索词命中”被误当成“客户真的命中规格”
+        text = " ".join([name, note, c.get("type", ""), c.get("region", ""), c.get("source", "")])
 
         # 1) 排除名单（公司名/域名/片段）
         if any(e and (e in name.lower() or e in website.lower()) for e in exclude):
@@ -532,6 +586,11 @@ def build_targets(candidates, conditions, seq_start=1):
         _err_mark = ("错误页面", "404", "access verification", "安全验证", "人机验证")
         if any(m in (name + " " + note).lower() for m in _err_mark):
             dropped.append((name or "未命名", "错误页/验证页，非有效线索"))
+            continue
+
+        # 1.2) 只保留“公司主体”：排除采购/招标公告标题、行业门户/商城页、纯页面标题
+        if not _looks_like_company(name):
+            dropped.append((name or "未命名", "非公司主体（公告/页面标题/平台页）"))
             continue
 
         # 2) 评分/分级（以 note+name+tags 为文本，统一口径）

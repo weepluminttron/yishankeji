@@ -67,7 +67,9 @@ NOISE_WORDS = ["黄页", "百科", "招聘", "求职", "文库", "下载", "登�
                "企业库", "名录", "大全", "厂商名录", "公司库", "联系方式大全",
                # 页面级噪音：错误页/反爬验证页/招标门户/免费发布平台
                "错误页面", "404", "access verification", "安全验证", "人机验证",
-               "招标网", "采购网", "千里马", "优云优客", "免费发布"]
+               "招标网", "采购网", "千里马", "优云优客", "免费发布",
+               "mouser", "贸泽", "szlcsc", "立创", "c-fol", "讯石", "维库", "得捷", "digikey",
+               "元器件商城", "电子元件商城", "元件查询", "现货商城"]
 
 # 商业搜索源熔断：配额用完/鉴权失败后暂停该源，避免每个查询都白等几十秒
 _PROVIDER_BLOCKED_UNTIL = {}
@@ -926,7 +928,7 @@ def _is_noise(title, snippet, url):
         return True
     if _is_vpn_link(url):
         return True
-    t = (title or "") + (snippet or "")
+    t = ((title or "") + (snippet or "") + " " + (url or "")).lower()
     return any(w in t for w in NOISE_WORDS)
 
 
@@ -1067,7 +1069,10 @@ def _to_candidate(contact, title, snippet, keyword, market, page_text, channels=
     cand["fit"] = fc["fit"]
     cand["comp"] = fc["comp"]
     cand["tier"] = fc["tier"]
-    cand["tags"] = ",".join(t for t in [keyword, fc["tier"] + "级"] if t)
+    # tags 只保留页面真实信号（等级），不再回显搜索关键词，
+    # 避免“搜索词命中”被误当成“客户真的命中规格”
+    cand["tags"] = fc["tier"] + "级"
+    cand["query"] = keyword
     return cand
 
 
