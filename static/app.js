@@ -1776,6 +1776,7 @@ async function pollAcquisition() {
     const job = d.job || {};
     if (job.running) {
       $("#acq-result").innerHTML = `<div class="empty"><div class="ico">🧠</div>${esc(job.stage || "正在运行")}…（进度看右上角任务栏）</div>`;
+      acqPolling = false;
       setTimeout(pollAcquisition, 2000);
       return;
     }
