@@ -1004,6 +1004,7 @@ _ENV_SETTING_KEYS = {
     "SMTP_SSL": "smtp_ssl",
     "SMTP_USER": "smtp_user",
     "SMTP_PASSWORD": "smtp_password",
+    "SMTP_FROM": "from_addr",
 }
 
 
@@ -1747,7 +1748,7 @@ class Handler(BaseHTTPRequestHandler):
             if missing:
                 return send_json(self, {"ok": False, "msg": "请先填写：" + "、".join(missing)}, 400)
             ok, err = mailer.send_one(
-                settings, settings.get("smtp_user"),
+                settings, settings.get("from_addr") or settings.get("smtp_user"),
                 "获客工具测试邮件",
                 "这是一封测试邮件，说明 SMTP 配置可用。",
             )

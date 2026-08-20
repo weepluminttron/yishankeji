@@ -31,6 +31,7 @@ def send_one(settings, to_addr, subject, body):
         return False, "未配置 SMTP 服务器地址（请在“设置”里填写）"
     user = (settings.get("smtp_user") or "").strip()
     password = (settings.get("smtp_password") or "").strip()
+    from_addr = (settings.get("from_addr") or "").strip() or user
     try:
         port = int(settings.get("smtp_port") or 465)
     except ValueError:
@@ -39,7 +40,7 @@ def send_one(settings, to_addr, subject, body):
     sender_name = (settings.get("sender_name") or settings.get("company_name") or "").strip()
     msg = MIMEText(body, "plain", "utf-8")
     msg["Subject"] = Header(subject, "utf-8")
-    msg["From"] = formataddr((str(Header(sender_name, "utf-8")), user)) if sender_name else user
+    msg["From"] = formataddr((str(Header(sender_name, "utf-8")), from_addr)) if sender_name else from_addr
     msg["To"] = to_addr
     try:
         # local_hostname 固定为 localhost：避免 Windows 中文主机名导致 EHLO 编码失败
