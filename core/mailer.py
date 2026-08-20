@@ -223,43 +223,43 @@ def detect_lang(lead):
 _LANG_TPL = {
     "zh": {
         "subject": "关于贵司{{产品}}的询价",
-        "body": "{{联系人}}您好：\n\n我是{{我方公司}}的{{自己}}，目前正在筛选{{产品}}供应商，看到贵司产品线匹配，想了解以下信息：\n\n1. 常供型号及含税报价（不同起订量）\n2. 库存与交货周期\n3. 样品政策\n4. 资质证书（ISO/CE/RoHS）\n\n如方便，请发一份电子画册或报价单，收到后我会尽快确认。\n\n期待回复，谢谢！\n{{我方公司}} {{自己}}",
+        "body": "{{联系人}}您好：\n\n我是{{我方公司}}的{{自己}}，目前正在筛选{{产品}}供应商，看到贵司产品线匹配，想了解以下信息：\n\n1. 常供型号及含税报价（不同起订量）\n2. 库存与交货周期\n3. 样品政策\n4. 资质证书（ISO/CE/RoHS）\n\n如方便，请发一份电子画册或报价单，收到后我会尽快确认。\n\n期待回复，谢谢！\n\nBest regards\n\nEason\nPhone:18688962816\n{{我方公司}} {{自己}}",
     },
     "en": {
         "subject": "Inquiry about your {{产品}}",
-        "body": "Dear Sir/Madam,\n\nThis is {{自己}} from {{我方公司}}. We are currently selecting suppliers for {{产品}} and noticed your product line matches our requirements. Could you please provide:\n\n1. Available models and tax-inclusive prices (by order quantity)\n2. Stock availability and lead time\n3. Sample policy\n4. Certificates (ISO/CE/RoHS)\n\nPlease feel free to send us your catalog or quotation. We will confirm shortly after receiving it.\n\nLooking forward to your reply.\nBest regards,\n{{自己}}\n{{我方公司}}",
+        "body": "Dear Sir/Madam,\n\nThis is {{自己}} from {{我方公司}}. We are currently selecting suppliers for {{产品}} and noticed your product line matches our requirements. Could you please provide:\n\n1. Available models and tax-inclusive prices (by order quantity)\n2. Stock availability and lead time\n3. Sample policy\n4. Certificates (ISO/CE/RoHS)\n\nPlease feel free to send us your catalog or quotation. We will confirm shortly after receiving it.\n\nLooking forward to your reply.\nBest regards\n\nEason\nPhone: +86 186 8896 2816\nYishan Technology Co., Ltd. - Purchasing Department",
     },
     "es": {
         "subject": "Consulta sobre sus {{产品}}",
-        "body": "Estimado/a señor/a:\n\nLe escribo desde {{我方公司}} ({{自己}}). Estamos seleccionando proveedores de {{产品}} y su línea de productos coincide con nuestras necesidades. ¿Podrían indicarnos:\n\n1. Modelos disponibles y precios con impuestos (según cantidad de pedido)\n2. Disponibilidad de stock y plazo de entrega\n3. Política de muestras\n4. Certificados (ISO/CE/RoHS)\n\nSi es posible, envíennos su catálogo o cotización; lo confirmaremos rápidamente.\n\nQuedamos a la espera de su respuesta.\nSaludos cordiales,\n{{自己}}\n{{我方公司}}",
+        "body": "Estimado/a señor/a:\n\nLe escribo desde {{我方公司}} ({{自己}}). Estamos seleccionando proveedores de {{产品}} y su línea de productos coincide con nuestras necesidades. ¿Podrían indicarnos:\n\n1. Modelos disponibles y precios con impuestos (según cantidad de pedido)\n2. Disponibilidad de stock y plazo de entrega\n3. Política de muestras\n4. Certificados (ISO/CE/RoHS)\n\nSi es posible, envíennos su catálogo o cotización; lo confirmaremos rápidamente.\n\nQuedamos a la espera de su respuesta.\nSaludos cordiales\n\nEason\nTel: +86 186 8896 2816\nYishan Technology Co., Ltd. - Departamento de Compras",
     },
     "fr": {
         "subject": "Demande de devis pour vos {{产品}}",
-        "body": "Madame, Monsieur,\n\nJe suis {{自己}} de {{我方公司}}. Nous recherchons actuellement des fournisseurs de {{产品}} et votre gamme correspond à nos besoins. Pourriez-vous nous communiquer :\n\n1. Les modèles disponibles et vos prix TTC (selon la quantité)\n2. La disponibilité en stock et les délais de livraison\n3. Votre politique d'échantillons\n4. Vos certificats (ISO/CE/RoHS)\n\nN'hésitez pas à nous envoyer votre catalogue ou un devis ; nous confirmerons rapidement.\n\nDans l'attente de votre réponse.\nCordialement,\n{{自己}}\n{{我方公司}}",
+        "body": "Madame, Monsieur,\n\nJe suis {{自己}} de {{我方公司}}. Nous recherchons actuellement des fournisseurs de {{产品}} et votre gamme correspond à nos besoins. Pourriez-vous nous communiquer :\n\n1. Les modèles disponibles et vos prix TTC (selon la quantité)\n2. La disponibilité en stock et les délais de livraison\n3. Votre politique d'échantillons\n4. Vos certificats (ISO/CE/RoHS)\n\nN'hésitez pas à nous envoyer votre catalogue ou un devis ; nous confirmerons rapidement.\n\nDans l'attente de votre réponse.\nCordialement\n\nEason\nTél : +86 186 8896 2816\nYishan Technology Co., Ltd. - Service des Achats",
     },
     "de": {
         "subject": "Anfrage zu Ihren {{产品}}",
-        "body": "Sehr geehrte Damen und Herren,\n\nich bin {{自己}} von {{我方公司}}. Wir suchen derzeit Lieferanten für {{产品}} und Ihr Sortiment passt zu unseren Anforderungen. Könnten Sie uns bitte mitteilen:\n\n1. Verfügbare Modelle und Preise inkl. Steuern (nach Bestellmenge)\n2. Lagerverfügbarkeit und Lieferzeit\n3. Musterpolitik\n4. Zertifikate (ISO/CE/RoHS)\n\nGerne senden Sie uns Ihren Katalog oder ein Angebot; wir bestätigen schnellstmöglich.\n\nWir freuen uns auf Ihre Rückmeldung.\nMit freundlichen Grüßen,\n{{自己}}\n{{我方公司}}",
+        "body": "Sehr geehrte Damen und Herren,\n\nich bin {{自己}} von {{我方公司}}. Wir suchen derzeit Lieferanten für {{产品}} und Ihr Sortiment passt zu unseren Anforderungen. Könnten Sie uns bitte mitteilen:\n\n1. Verfügbare Modelle und Preise inkl. Steuern (nach Bestellmenge)\n2. Lagerverfügbarkeit und Lieferzeit\n3. Musterpolitik\n4. Zertifikate (ISO/CE/RoHS)\n\nGerne senden Sie uns Ihren Katalog oder ein Angebot; wir bestätigen schnellstmöglich.\n\nWir freuen uns auf Ihre Rückmeldung.\nMit freundlichen Grüßen\n\nEason\nTel: +86 186 8896 2816\nYishan Technology Co., Ltd. - Einkaufsabteilung",
     },
     "ru": {
         "subject": "Запрос о вашей продукции {{产品}}",
-        "body": "Уважаемые господа,\n\nЯ {{自己}} из компании {{我方公司}}. Мы подбираем поставщиков продукции {{产品}}, и ваш ассортимент соответствует нашим требованиям. Просим сообщить:\n\n1. Доступные модели и цены с налогами (в зависимости от объёма заказа)\n2. Наличие на складе и сроки поставки\n3. Условия предоставления образцов\n4. Сертификаты (ISO/CE/RoHS)\n\nПри возможности пришлите каталог или коммерческое предложение — мы быстро подтвердим получение.\n\nЖдём вашего ответа.\nС уважением,\n{{自己}}\n{{我方公司}}",
+        "body": "Уважаемые господа,\n\nЯ {{自己}} из компании {{我方公司}}. Мы подбираем поставщиков продукции {{产品}}, и ваш ассортимент соответствует нашим требованиям. Просим сообщить:\n\n1. Доступные модели и цены с налогами (в зависимости от объёма заказа)\n2. Наличие на складе и сроки поставки\n3. Условия предоставления образцов\n4. Сертификаты (ISO/CE/RoHS)\n\nПри возможности пришлите каталог или коммерческое предложение — мы быстро подтвердим получение.\n\nЖдём вашего ответа.\nС уважением\n\nEason\nТел: +86 186 8896 2816\nYishan Technology Co., Ltd. - Отдел закупок",
     },
     "ja": {
         "subject": "{{产品}}に関するお問い合わせ",
-        "body": "拝啓\n\n{{我方公司}}の{{自己}}と申します。このたび{{产品}}の仕入れ先を検討しており、御社の製品ラインナップが当方のニーズに合致しております。以下の情報をご提供いただけますでしょうか。\n\n1. 取り扱いモデルと税込価格（注文数量別）\n2. 在庫状況と納期\n3. サンプル提供の条件\n4. 各種認証（ISO/CE/RoHS）\n\nカタログや見積書をお送りいただければ幸いです。確認次第、速やかにご返答いたします。\n\nご返信お待ちしております。\n敬具\n{{自己}}\n{{我方公司}}",
+        "body": "拝啓\n\n{{我方公司}}の{{自己}}と申します。このたび{{产品}}の仕入れ先を検討しており、御社の製品ラインナップが当方のニーズに合致しております。以下の情報をご提供いただけますでしょうか。\n\n1. 取り扱いモデルと税込価格（注文数量別）\n2. 在庫状況と納期\n3. サンプル提供の条件\n4. 各種認証（ISO/CE/RoHS）\n\nカタログや見積書をお送りいただければ幸いです。確認次第、速やかにご返答いたします。\n\nご返信お待ちしております。\n敬具\n\nEason\n電話: +86 186 8896 2816\n易山科技有限公司 購買部",
     },
     "ko": {
         "subject": "{{产品}} 견적 문의",
-        "body": "안녕하세요.\n\n저는 {{我方公司}}의 {{自己}}입니다. 현재 {{产品}} 공급업체를 선정 중이며, 귀사의 제품 라인이 저희 요구에 부합하여 연락드립니다. 다음 정보를 알려주시기 바랍니다.\n\n1. 취급 모델 및 세금 포함 가격(주문 수량별)\n2. 재고 현황 및 납기\n3. 샘플 정책\n4. 인증서(ISO/CE/RoHS)\n\n가능하시면 카탈로그 또는 견적서를 보내주시기 바랍니다. 확인 후 빠르게 회신드리겠습니다.\n\n회신 기다리겠습니다.\n감사합니다.\n{{自己}}\n{{我方公司}}",
+        "body": "안녕하세요.\n\n저는 {{我方公司}}의 {{自己}}입니다. 현재 {{产品}} 공급업체를 선정 중이며, 귀사의 제품 라인이 저희 요구에 부합하여 연락드립니다. 다음 정보를 알려주시기 바랍니다.\n\n1. 취급 모델 및 세금 포함 가격(주문 수량별)\n2. 재고 현황 및 납기\n3. 샘플 정책\n4. 인증서(ISO/CE/RoHS)\n\n가능하시면 카탈로그 또는 견적서를 보내주시기 바랍니다. 확인 후 빠르게 회신드리겠습니다.\n\n회신 기다리겠습니다.\n감사합니다.\n\nEason\n전화: +86 186 8896 2816\nYishan Technology Co., Ltd. - 구매부",
     },
     "ar": {
         "subject": "استفسار عن منتجاتكم {{产品}}",
-        "body": "تحية طيبة وبعد،\n\nأنا {{自己}} من شركة {{我方公司}}. نبحث حالياً عن موردين لمنتجات {{产品}}، وقد لاحظنا أن منتجاتكم تتوافق مع احتياجاتنا. نرجو تزويدنا بالمعلومات التالية:\n\n1. الموديلات المتوفرة والأسعار شاملة الضريبة (حسب كمية الطلب)\n2. توفر المخزون ومدة التسليم\n3. سياسة العينات\n4. الشهادات (ISO/CE/RoHS)\n\nيرجى إرسال الكتالوج أو عرض الأسعار إن أمكن، وسنؤكد الاستلام سريعاً.\n\nبانتظار ردكم.\nمع تحياتي،\n{{自己}}\n{{我方公司}}",
+        "body": "تحية طيبة وبعد،\n\nأنا {{自己}} من شركة {{我方公司}}. نبحث حالياً عن موردين لمنتجات {{产品}}، وقد لاحظنا أن منتجاتكم تتوافق مع احتياجاتنا. نرجو تزويدنا بالمعلومات التالية:\n\n1. الموديلات المتوفرة والأسعار شاملة الضريبة (حسب كمية الطلب)\n2. توفر المخزون ومدة التسليم\n3. سياسة العينات\n4. الشهادات (ISO/CE/RoHS)\n\nيرجى إرسال الكتالوج أو عرض الأسعار إن أمكن، وسنؤكد الاستلام سريعاً.\n\nبانتظار ردكم.\nمع تحياتي\n\nEason\nهاتف: +86 186 8896 2816\nYishan Technology Co., Ltd. - قسم المشتريات",
     },
     "pt": {
         "subject": "Consulta sobre seus {{产品}}",
-        "body": "Prezados,\n\nSou {{自己}} da {{我方公司}}. Estamos selecionando fornecedores de {{产品}} e a sua linha de produtos atende às nossas necessidades. Poderiam informar:\n\n1. Modelos disponíveis e preços com impostos (conforme a quantidade)\n2. Disponibilidade em estoque e prazo de entrega\n3. Política de amostras\n4. Certificados (ISO/CE/RoHS)\n\nSe possível, enviem o catálogo ou cotação; confirmaremos rapidamente.\n\nAguardamos seu retorno.\nAtenciosamente,\n{{自己}}\n{{我方公司}}",
+        "body": "Prezados,\n\nSou {{自己}} da {{我方公司}}. Estamos selecionando fornecedores de {{产品}} e a sua linha de produtos atende às nossas necessidades. Poderiam informar:\n\n1. Modelos disponíveis e preços com impostos (conforme a quantidade)\n2. Disponibilidade em estoque e prazo de entrega\n3. Política de amostras\n4. Certificados (ISO/CE/RoHS)\n\nSe possível, enviem o catálogo ou cotação; confirmaremos rapidamente.\n\nAguardamos seu retorno.\nAtenciosamente\n\nEason\nTel: +86 186 8896 2816\nYishan Technology Co., Ltd. - Departamento de Compras",
     },
 }
 
