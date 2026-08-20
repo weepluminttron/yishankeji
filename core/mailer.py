@@ -32,6 +32,7 @@ def send_one(settings, to_addr, subject, body):
     user = (settings.get("smtp_user") or "").strip()
     password = (settings.get("smtp_password") or "").strip()
     from_addr = (settings.get("from_addr") or "").strip() or user
+    cc_addr = (settings.get("cc_addr") or "").strip()
     try:
         port = int(settings.get("smtp_port") or 465)
     except ValueError:
@@ -42,6 +43,8 @@ def send_one(settings, to_addr, subject, body):
     msg["Subject"] = Header(subject, "utf-8")
     msg["From"] = formataddr((str(Header(sender_name, "utf-8")), from_addr)) if sender_name else from_addr
     msg["To"] = to_addr
+    if cc_addr:
+        msg["Cc"] = cc_addr
     try:
         # local_hostname 固定为 localhost：避免 Windows 中文主机名导致 EHLO 编码失败
         if ssl_mode:
@@ -50,7 +53,8 @@ def send_one(settings, to_addr, subject, body):
             server = smtplib.SMTP(host, port, timeout=20, local_hostname="localhost")
             server.starttls()
         server.login(user, password)
-        server.sendmail(user, [to_addr], msg.as_string())
+        recipients = [to_addr] + ([cc_addr] if cc_addr else [])
+        server.sendmail(user, recipients, msg.as_string())
         server.quit()
         return True, ""
     except smtplib.SMTPAuthenticationError:

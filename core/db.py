@@ -656,6 +656,7 @@ def get_settings():
         "product_name": "光纤光缆及配套产品",
         "sender_name": "",
         "from_addr": "",
+        "cc_addr": "",
         "smtp_host": "",
         "smtp_port": "465",
         "smtp_ssl": "1",
@@ -724,7 +725,7 @@ def get_settings():
 def save_settings(values):
     allowed = [
         "company_name", "industry", "product_name", "sender_name", "from_addr", "smtp_host", "smtp_port", "smtp_ssl",
-        "smtp_user", "smtp_password", "openai_api_key", "openai_model", "openai_api_base", "sms_notice",
+        "smtp_user", "smtp_password", "cc_addr", "openai_api_key", "openai_model", "openai_api_base", "sms_notice",
         "notify_webhook",
         "auto_login_trusted",
         "search_provider", "search_api_key", "serpapi_api_key", "bocha_api_key", "search_engine_id",

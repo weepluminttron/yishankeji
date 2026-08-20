@@ -2766,6 +2766,7 @@ async function renderSettings() {
         <div class="field"><label>行业（AI 评分与方案按此行业调整）</label><input class="input full" id="s-industry" placeholder="如：光纤通信 / 机械 / 跨境电商" value="${esc(s.industry || "光纤通信")}"></div>
         <div class="field"><label>发件人姓名（显示名）</label><input class="input full" id="s-sender" placeholder="如：张三（销售经理）" value="${esc(s.sender_name)}"></div>
         <div class="field"><label>发件人地址（显示为发件人）</label><input class="input full" id="s-from" placeholder="your@company.com" value="${esc(s.from_addr)}"></div>
+        <div class="field"><label>抄送邮箱（每封自动抄送一份给自己）</label><input class="input full" id="s-cc" placeholder="留空表示不抄送" value="${esc(s.cc_addr)}"></div>
         <div class="field"><label>访问密码（部署到公网后必填）</label><input class="input full" type="password" id="s-accesspw" placeholder="留空表示不修改" autocomplete="new-password"></div>
       </div>
       <div class="hint">工具部署到云服务器后会暴露在公网，请务必设置访问密码，防止客户数据被他人看到。</div>
@@ -2975,6 +2976,7 @@ async function renderSettings() {
         industry: $("#s-industry").value.trim(),
         sender_name: $("#s-sender").value.trim(),
         from_addr: $("#s-from").value.trim(),
+        cc_addr: $("#s-cc").value.trim(),
         smtp_host: $("#s-host").value.trim(),
         smtp_port: port,
         smtp_ssl: ssl,
@@ -3103,7 +3105,7 @@ async function renderSettings() {
       const [port, ssl] = $("#s-port").value.split(":");
       await api("/api/settings", { method: "POST", body: { settings: {
         company_name: $("#s-company").value.trim(), product_name: $("#s-product").value.trim(),
-        sender_name: $("#s-sender").value.trim(), from_addr: $("#s-from").value.trim(), smtp_host: $("#s-host").value.trim(),
+        sender_name: $("#s-sender").value.trim(), from_addr: $("#s-from").value.trim(), cc_addr: $("#s-cc").value.trim(), smtp_host: $("#s-host").value.trim(),
         smtp_port: port, smtp_ssl: ssl, smtp_user: $("#s-user").value.trim(),
         smtp_password: $("#s-pass").value, openai_api_key: $("#s-key").value.trim(),
         openai_model: $("#s-model").value.trim() || "gpt-4o-mini", sms_notice: $("#s-sms").value.trim(),

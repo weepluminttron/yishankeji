@@ -1005,6 +1005,7 @@ _ENV_SETTING_KEYS = {
     "SMTP_USER": "smtp_user",
     "SMTP_PASSWORD": "smtp_password",
     "SMTP_FROM": "from_addr",
+    "SMTP_CC": "cc_addr",
 }
 
 
