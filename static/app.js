@@ -761,6 +761,20 @@ function leadFormHtml(lead = {}) {
       <div class="field"><label>电话</label><input class="input full" id="f-phone" value="${esc(l.phone || "")}"></div>
       <div class="field"><label>邮箱</label><input class="input full" id="f-email" value="${esc(l.email || "")}"></div>
       <div class="field"><label>地区</label><input class="input full" id="f-region" placeholder="如：广东深圳" value="${esc(l.region || "")}"></div>
+      <div class="field"><label>国家/地区</label><input class="input full" id="f-country" placeholder="如：中国 / 德国 / USA" value="${esc(l.country || "")}"></div>
+      <div class="field"><label>邮件语言</label><select class="select full" id="f-lang">
+        <option value="">自动识别</option>
+        <option value="zh" ${l.lang === "zh" ? "selected" : ""}>中文</option>
+        <option value="en" ${l.lang === "en" ? "selected" : ""}>English</option>
+        <option value="es" ${l.lang === "es" ? "selected" : ""}>Español</option>
+        <option value="fr" ${l.lang === "fr" ? "selected" : ""}>Français</option>
+        <option value="de" ${l.lang === "de" ? "selected" : ""}>Deutsch</option>
+        <option value="ru" ${l.lang === "ru" ? "selected" : ""}>Русский</option>
+        <option value="ja" ${l.lang === "ja" ? "selected" : ""}>日本語</option>
+        <option value="ko" ${l.lang === "ko" ? "selected" : ""}>한국어</option>
+        <option value="ar" ${l.lang === "ar" ? "selected" : ""}>العربية</option>
+        <option value="pt" ${l.lang === "pt" ? "selected" : ""}>Português</option>
+      </select></div>
       <div class="field"><label>客户类型</label><select class="select full" id="f-type">
         ${state.meta.types.map((t) => `<option ${(l.type || "其他") === t ? "selected" : ""}>${esc(t)}</option>`).join("")}
       </select></div>
@@ -801,6 +815,8 @@ async function saveLead(id) {
     phone: $("#f-phone").value.trim(),
     email: $("#f-email").value.trim(),
     region: $("#f-region").value.trim(),
+    country: $("#f-country").value.trim(),
+    lang: $("#f-lang").value,
     type: $("#f-type").value,
     status: $("#f-status").value,
     source: $("#f-source").value,
@@ -2242,6 +2258,12 @@ const EMAIL_TPLS = [
     desc: "批量采购/渠道铺货的长期合作洽谈",
     subject: "关于长期合作与批量供应的洽谈",
     body: "{{联系人}}您好：\n\n我是{{我方公司}}的{{自己}}，我司有稳定的渠道和订单量，长期采购{{产品}}，希望与贵司建立长期供应合作。\n\n想了解贵司能否提供：\n1. 阶梯价格与季度/年度返点政策；\n2. 月结或账期支持；\n3. 常备库存与优先发货保障；\n4. OEM/定制及贴牌支持。\n\n如果方向合适，我们可以安排电话或线上会议详细沟通。\n\n期待合作！\n{{我方公司}} {{自己}}",
+  },
+  {
+    name: "🌐 多语言自动询价（按客户地区）",
+    desc: "自动识别客户国家，用当地语言发送（中/英/西/法/德/俄/日/韩/阿/葡）",
+    subject: "[AUTO_LANG]关于贵司{{产品}}的询价",
+    body: "系统将根据客户的国家/地区自动切换语言发送。",
   },];const SMS_TPLS = [
   { name: "光缆推广短信", body: "【{{我方公司}}】{{联系人}}您好，我司长期供应光纤光缆及配套，价格优惠、现货充足，可提供样品。方便时回电或加微信详聊。电话：13800000000" },
   { name: "施工服务短信", body: "【{{我方公司}}】{{联系人}}您好，我司提供光纤熔接、机房改造施工服务，团队专业、价格透明，欢迎洽谈合作。电话：13800000000" },

@@ -541,8 +541,11 @@ def _mail_worker(lead_ids, subject_tpl, body_tpl):
             results["done"] += 1
             _mail_job["result"] = dict(results)
             continue
-        subject = mailer.personalize(subject_tpl, lead, settings)
-        body = mailer.personalize(body_tpl, lead, settings)
+        subj_tpl, body_tpl_used = subject_tpl, body_tpl
+        if str(subject_tpl).startswith("[AUTO_LANG]"):
+            subj_tpl, body_tpl_used = mailer.localize(subject_tpl, body_tpl, mailer.detect_lang(lead))
+        subject = mailer.personalize(subj_tpl, lead, settings)
+        body = mailer.personalize(body_tpl_used, lead, settings)
         ok, err = mailer.send_one(settings, lead["email"], subject, body)
         if ok:
             results["sent"] += 1

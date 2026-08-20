@@ -140,6 +140,9 @@ def init_db():
         for col in ("intent_stage", "intent_json", "first_touch_at", "last_touch_at", "converted_at"):
             if col not in cols:
                 conn.execute(f"ALTER TABLE leads ADD COLUMN {col} TEXT DEFAULT ''")
+        for col in ("country", "lang"):
+            if col not in cols:
+                conn.execute(f"ALTER TABLE leads ADD COLUMN {col} TEXT DEFAULT ''")
         conn.commit()
         # 索引：提升按意向阶段 / 成交时间的聚合查询速度
         conn.execute("CREATE INDEX IF NOT EXISTS idx_leads_intent ON leads(intent_stage)")
@@ -206,6 +209,8 @@ def create_lead(data):
         "phone": str(data.get("phone", "")).strip(),
         "email": str(data.get("email", "")).strip(),
         "region": str(data.get("region", "")).strip(),
+        "country": str(data.get("country", "")).strip(),
+        "lang": str(data.get("lang", "")).strip(),
         "type": str(data.get("type", "其他")).strip() or "其他",
         "status": str(data.get("status", "新线索")).strip() or "新线索",
         "source": str(data.get("source", "手动录入")).strip() or "手动录入",
@@ -225,12 +230,12 @@ def create_lead(data):
     conn = get_conn()
     try:
         cur = conn.execute(
-            """INSERT INTO leads (name, contact, phone, email, region, type, status,
+            """INSERT INTO leads (name, contact, phone, email, region, country, lang, type, status,
                source, tags, address, note, reminder_date, created_at, updated_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 fields["name"], fields["contact"], fields["phone"], fields["email"],
-                fields["region"], fields["type"], fields["status"], fields["source"],
+                fields["region"], fields["country"], fields["lang"], fields["type"], fields["status"], fields["source"],
                 fields["tags"], fields["address"], fields["note"],
                 fields["reminder_date"], ts, ts,
             ),
@@ -250,7 +255,7 @@ def update_lead(lead_id, data):
     if not lead:
         return None, "线索不存在"
     allowed = [
-        "name", "contact", "phone", "email", "region", "type", "status",
+        "name", "contact", "phone", "email", "region", "country", "lang", "type", "status",
         "source", "tags", "address", "note", "reminder_date",
     ]
     fields = {}
