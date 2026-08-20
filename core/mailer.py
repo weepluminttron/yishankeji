@@ -7,14 +7,14 @@ from email.mime.text import MIMEText
 from email.utils import formataddr
 
 
-def personalize(template, lead, settings):
+def personalize(template, lead, settings, lang="zh"):
     vals = {
         "公司": lead.get("name", ""),
         "公司名": lead.get("name", ""),
         "联系人": lead.get("contact", "") or "客户",
         "称呼": lead.get("contact", "").split("先生")[0].split("女士")[0] or "客户",
         "地区": lead.get("region", ""),
-        "产品": settings.get("product_name", "光纤产品"),
+        "产品": (settings.get("product_name_en") or settings.get("product_name", "光纤产品")) if lang != "zh" else settings.get("product_name", "光纤产品"),
         "自己": settings.get("sender_name", "") or settings.get("company_name", ""),
         "我方公司": settings.get("company_name", ""),
     }

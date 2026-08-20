@@ -2785,6 +2785,7 @@ async function renderSettings() {
       <div class="form-grid">
         <div class="field"><label>公司名称</label><input class="input full" id="s-company" value="${esc(s.company_name)}"></div>
         <div class="field"><label>主营产品</label><input class="input full" id="s-product" value="${esc(s.product_name)}"></div>
+        <div class="field"><label>主营产品（英文，多语言邮件用）</label><input class="input full" id="s-product-en" placeholder="Fiber Optic Cables &amp; Accessories" value="${esc(s.product_name_en)}"></div>
         <div class="field"><label>行业（AI 评分与方案按此行业调整）</label><input class="input full" id="s-industry" placeholder="如：光纤通信 / 机械 / 跨境电商" value="${esc(s.industry || "光纤通信")}"></div>
         <div class="field"><label>发件人姓名（显示名）</label><input class="input full" id="s-sender" placeholder="如：张三（销售经理）" value="${esc(s.sender_name)}"></div>
         <div class="field"><label>发件人地址（显示为发件人）</label><input class="input full" id="s-from" placeholder="your@company.com" value="${esc(s.from_addr)}"></div>
@@ -2995,6 +2996,7 @@ async function renderSettings() {
       await api("/api/settings", { method: "POST", body: { settings: {
         company_name: $("#s-company").value.trim(),
         product_name: $("#s-product").value.trim(),
+        product_name_en: $("#s-product-en").value.trim(),
         industry: $("#s-industry").value.trim(),
         sender_name: $("#s-sender").value.trim(),
         from_addr: $("#s-from").value.trim(),
@@ -3126,7 +3128,7 @@ async function renderSettings() {
     try {
       const [port, ssl] = $("#s-port").value.split(":");
       await api("/api/settings", { method: "POST", body: { settings: {
-        company_name: $("#s-company").value.trim(), product_name: $("#s-product").value.trim(),
+        company_name: $("#s-company").value.trim(), product_name: $("#s-product").value.trim(), product_name_en: $("#s-product-en").value.trim(),
         sender_name: $("#s-sender").value.trim(), from_addr: $("#s-from").value.trim(), cc_addr: $("#s-cc").value.trim(), smtp_host: $("#s-host").value.trim(),
         smtp_port: port, smtp_ssl: ssl, smtp_user: $("#s-user").value.trim(),
         smtp_password: $("#s-pass").value, openai_api_key: $("#s-key").value.trim(),

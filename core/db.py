@@ -659,6 +659,7 @@ def get_settings():
         "company_name": "一善科技",
         "industry": "光纤通信",
         "product_name": "光纤光缆及配套产品",
+        "product_name_en": "",
         "sender_name": "",
         "from_addr": "",
         "cc_addr": "",
@@ -730,7 +731,8 @@ def get_settings():
 def save_settings(values):
     allowed = [
         "company_name", "industry", "product_name", "sender_name", "from_addr", "smtp_host", "smtp_port", "smtp_ssl",
-        "smtp_user", "smtp_password", "cc_addr", "openai_api_key", "openai_model", "openai_api_base", "sms_notice",
+        "smtp_user", "smtp_password", "cc_addr", "openai_api_key",
+"product_name_en", "openai_model", "openai_api_base", "sms_notice",
         "notify_webhook",
         "auto_login_trusted",
         "search_provider", "search_api_key", "serpapi_api_key", "bocha_api_key", "search_engine_id",

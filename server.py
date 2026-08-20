@@ -541,11 +541,12 @@ def _mail_worker(lead_ids, subject_tpl, body_tpl):
             results["done"] += 1
             _mail_job["result"] = dict(results)
             continue
-        subj_tpl, body_tpl_used = subject_tpl, body_tpl
+        subj_tpl, body_tpl_used, mail_lang = subject_tpl, body_tpl, "zh"
         if str(subject_tpl).startswith("[AUTO_LANG]"):
-            subj_tpl, body_tpl_used = mailer.localize(subject_tpl, body_tpl, mailer.detect_lang(lead))
-        subject = mailer.personalize(subj_tpl, lead, settings)
-        body = mailer.personalize(body_tpl_used, lead, settings)
+            mail_lang = mailer.detect_lang(lead)
+            subj_tpl, body_tpl_used = mailer.localize(subject_tpl, body_tpl, mail_lang)
+        subject = mailer.personalize(subj_tpl, lead, settings, mail_lang)
+        body = mailer.personalize(body_tpl_used, lead, settings, mail_lang)
         ok, err = mailer.send_one(settings, lead["email"], subject, body)
         if ok:
             results["sent"] += 1
@@ -1009,6 +1010,7 @@ _ENV_SETTING_KEYS = {
     "SMTP_PASSWORD": "smtp_password",
     "SMTP_FROM": "from_addr",
     "SMTP_CC": "cc_addr",
+    "PRODUCT_NAME_EN": "product_name_en",
 }
 
 
