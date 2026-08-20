@@ -42,10 +42,11 @@ def send_one(settings, to_addr, subject, body):
     msg["From"] = formataddr((str(Header(sender_name, "utf-8")), user)) if sender_name else user
     msg["To"] = to_addr
     try:
+        # local_hostname 固定为 localhost：避免 Windows 中文主机名导致 EHLO 编码失败
         if ssl_mode:
-            server = smtplib.SMTP_SSL(host, port, timeout=20)
+            server = smtplib.SMTP_SSL(host, port, timeout=20, local_hostname="localhost")
         else:
-            server = smtplib.SMTP(host, port, timeout=20)
+            server = smtplib.SMTP(host, port, timeout=20, local_hostname="localhost")
             server.starttls()
         server.login(user, password)
         server.sendmail(user, [to_addr], msg.as_string())
